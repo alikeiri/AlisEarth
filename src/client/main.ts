@@ -337,6 +337,11 @@ class GameClient {
     rDown: false, rDownX: 0, rDownY: 0, rDragging: false,
   };
   private grab: { x: number; z: number } | null = null;
+  // touch input state (mobile, no mouse)
+  private touch = {
+    mode: '' as '' | 'pan' | 'box' | 'pinch', sx: 0, sy: 0, downT: 0, moved: false,
+    pinchD: 0, pinchA: 0, boxToggle: false, longTimer: 0 as any,
+  };
   private rMode: 'pan' | 'form' | 'aatk' = 'pan';
   private formPath: { x: number; z: number }[] | null = null;
   private areaDrag: { cx: number; cz: number; r: number } | null = null;
@@ -396,6 +401,11 @@ class GameClient {
     on(window, 'resize', () => { this.renderer.resize(); this.sizeOverlay(); });
     on(canvas, 'contextmenu', (e: Event) => e.preventDefault());
     on(canvas, 'mousedown', (e: MouseEvent) => this.onDown(e));
+    // touch input (mobile)
+    on(canvas, 'touchstart', (e: TouchEvent) => this.onTouchStart(e), { passive: false });
+    on(canvas, 'touchmove', (e: TouchEvent) => this.onTouchMove(e), { passive: false });
+    on(canvas, 'touchend', (e: TouchEvent) => this.onTouchEnd(e), { passive: false });
+    on(canvas, 'touchcancel', (e: TouchEvent) => this.onTouchEnd(e), { passive: false });
     on(window, 'mousemove', (e: MouseEvent) => {
       this.mouse.x = e.clientX; this.mouse.y = e.clientY;
       this.mouse.in = true;
@@ -538,10 +548,55 @@ class GameClient {
     chatInp.addEventListener('keydown', chatKeys);
     this.cleanups.push(() => chatInp.removeEventListener('keydown', chatKeys));
 
+    this.setupTouchBar(on);
     this.sizeOverlay();
     this.lastT = performance.now();
     (window as any).__fe = this; // debug/testing handle
     this.loop(this.lastT);
+  }
+
+  // on-screen action buttons for touch devices (keyboard-free controls)
+  private setupTouchBar(on: any) {
+    const bar = document.getElementById('touchBar');
+    if (!bar) return;
+    // show on touch devices or narrow screens; re-check when the window changes
+    const refresh = () => {
+      const show = matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window || window.innerWidth <= 820;
+      bar.classList.toggle('hidden', !show);
+    };
+    refresh();
+    on(window, 'resize', refresh);
+    const tap = (act: string, btn: HTMLElement) => {
+      const ids = this.myUnitIds();
+      if (act === 'box') { this.touch.boxToggle = !this.touch.boxToggle; btn.classList.toggle('on', this.touch.boxToggle); }
+      else if (act === 'stop') this.issueToUnits({ k: 'stop' });
+      else if (act === 'hold') { if (ids.length) { const anyAgg = ids.some(id => !this.byId.get(id)?.st); this.game.issue({ k: 'stance', p: this.game.me, ids, stance: anyAgg ? 1 : 0 }); } }
+      else if (act === 'patrol') { if (ids.length || this.selectedProdBuilding()) { this.patrolMode = !this.patrolMode; this.patrolDraw = null; } }
+      else if (act === 'ranges') { this.showRanges = !this.showRanges; btn.classList.toggle('on', this.showRanges); }
+      else if (act === 'destruct') {
+        if (ids.length) { this.game.issue({ k: 'selfdestruct', p: this.game.me, ids }); audio.play('sdbeep'); }
+        else { const b = [...this.selection].map(id => this.byId.get(id)).find(v => v && v.b && v.o === this.game.me && v.t !== 'conyard'); if (b) { this.game.issue({ k: 'dismantle', p: this.game.me, bid: b.i }); audio.play('cancel'); } }
+      }
+      audio.play('click');
+    };
+    bar.querySelectorAll('.tbtn').forEach(btn => {
+      const act = (btn as HTMLElement).getAttribute('data-act')!;
+      const h = (e: Event) => { e.preventDefault(); tap(act, btn as HTMLElement); };
+      on(btn, 'touchstart', h, { passive: false });
+      on(btn, 'click', h);
+    });
+    // minimap: tap/drag to jump the camera (touch)
+    const mm = document.getElementById('minimap');
+    if (mm) {
+      const jump = (cx: number, cy: number) => {
+        const r = mm.getBoundingClientRect();
+        // both axes flipped to match the camera's ground orientation
+        this.renderer.jumpCam((1 - (cx - r.left) / r.width) * W, (1 - (cy - r.top) / r.height) * H);
+      };
+      const mh = (e: TouchEvent) => { e.preventDefault(); const t = e.touches[0]; if (t) jump(t.clientX, t.clientY); };
+      on(mm, 'touchstart', mh, { passive: false });
+      on(mm, 'touchmove', mh, { passive: false });
+    }
   }
 
   // ---- multiplayer chat ----
@@ -641,6 +696,79 @@ class GameClient {
     if (tgt) { this.game.issue({ k: 'train', p: this.game.me, bid: tgt.i, type }); audio.play('click'); }
   }
 
+  // finish a patrol-route draw (shared by mouse + touch)
+  private finishPatrol(sx: number, sy: number) {
+    const me = this.game.me;
+    this.mouse.dragging = false;
+    let pts = this.patrolDraw || [];
+    this.patrolDraw = null;
+    this.patrolMode = false;
+    this.renderer.setFormationPath(null);
+    const g = this.renderer.groundPoint(sx / window.innerWidth, sy / window.innerHeight);
+    if (pts.length < 2) pts = g ? [g] : [];
+    else {
+      const step = Math.max(1, Math.ceil(pts.length / 24));
+      pts = pts.filter((_, i) => i % step === 0);
+      if (g) pts.push(g);
+    }
+    const ids = this.myUnitIds();
+    const rounded = pts.map(p => ({ x: Math.round(p.x * 10) / 10, z: Math.round(p.z * 10) / 10 }));
+    if (pts.length && ids.length) {
+      this.game.issue({ k: 'patrol', p: me, ids, pts: rounded });
+      audio.play('confirm'); audio.ack(this.dominantType(ids), 'move');
+    } else if (pts.length) {
+      const pb = this.selectedProdBuilding();
+      if (pb) { this.game.issue({ k: 'bpatrol', p: me, bid: pb.i, pts: rounded }); audio.play('confirm'); }
+    }
+  }
+
+  // select all own units inside a screen rectangle (shared by mouse + touch)
+  private boxSelect(x0: number, y0: number, x1: number, y1: number, additive: boolean) {
+    const me = this.game.me;
+    const lo = { x: Math.min(x0, x1), y: Math.min(y0, y1) };
+    const hi = { x: Math.max(x0, x1), y: Math.max(y0, y1) };
+    if (!additive) this.selection.clear();
+    const boxed: any[] = [];
+    for (const v of this.lastViews) {
+      if (v.b || v.o !== me) continue;
+      const p = this.renderer.project(v.x, v.z, 0.5);
+      if (p.ok && p.x >= lo.x && p.x <= hi.x && p.y >= lo.y && p.y <= hi.y) boxed.push(v);
+    }
+    const combat = boxed.filter(v => v.t !== 'harv');
+    for (const v of (combat.length ? combat : boxed)) this.selection.add(v.i);
+  }
+
+  // touch: tap selects own units, or issues a command when something's selected
+  private tapAt(sx: number, sy: number) {
+    const me = this.game.me;
+    if (this.ui.placing && this.lastGhost) {
+      if (this.lastGhost.ok) {
+        this.game.issue({ k: 'place', p: me, type: this.ui.placing, cx: this.lastGhost.cx, cz: this.lastGhost.cz });
+        audio.play('place');
+        this.ui.setPlacing(null);
+      }
+      return;
+    }
+    const now = performance.now();
+    const dbl = now - this.lastClick.t < 350 && Math.hypot(sx - this.lastClick.x, sy - this.lastClick.y) < 24;
+    this.lastClick = { t: now, x: sx, y: sy };
+    const ownHit = this.pickView(sx, sy, v => v.o === me);
+    if (dbl && ownHit && !ownHit.b) { // double-tap own unit → all same type on screen
+      this.selection.clear();
+      for (const v of this.lastViews) if (!v.b && v.o === me && v.t === ownHit.t && this.renderer.project(v.x, v.z, 0.5).ok) this.selection.add(v.i);
+      return;
+    }
+    // with a selection, tapping ground/enemy issues an order; tapping own unit selects it
+    if (ownHit && (!this.myUnitIds().length || ownHit.b)) {
+      this.selection.clear(); this.selection.add(ownHit.i); audio.play('click'); return;
+    }
+    if (this.selection.size && (this.myUnitIds().length || this.selectedProdBuilding())) {
+      this.contextCommand(sx, sy, false); return;
+    }
+    if (ownHit) { this.selection.clear(); this.selection.add(ownHit.i); audio.play('click'); return; }
+    this.selection.clear();
+  }
+
   private pickView(sx: number, sy: number, filter: (v: any) => boolean): any {
     let best: any = null, bd = 1e9;
     for (const v of this.lastViews) {
@@ -652,6 +780,77 @@ class GameClient {
       if (d < r && d < bd) { bd = d; best = v; }
     }
     return best;
+  }
+
+  // ---- touch input (mobile) ----
+  // one finger: tap = select/command, drag = pan, long-press+drag = box select.
+  // two fingers: pinch = zoom, twist = rotate. A toolbar toggle makes one-finger
+  // drag box-select instead of pan.
+  private onTouchStart(e: TouchEvent) {
+    e.preventDefault();
+    if (e.touches.length === 1) {
+      const t = e.touches[0];
+      this.touch.sx = t.clientX; this.touch.sy = t.clientY;
+      this.touch.downT = performance.now(); this.touch.moved = false;
+      this.mouse.x = t.clientX; this.mouse.y = t.clientY;
+      if (this.touch.boxToggle || this.patrolMode) {
+        this.touch.mode = this.patrolMode ? 'pan' : 'box';
+        if (this.patrolMode) { const g = this.renderer.groundPoint(t.clientX / window.innerWidth, t.clientY / window.innerHeight); this.patrolDraw = g ? [g] : []; }
+      } else {
+        this.touch.mode = 'pan';
+        this.grab = this.renderer.groundPoint(t.clientX / window.innerWidth, t.clientY / window.innerHeight);
+        // hold-still for 300ms promotes a pan into a box-select
+        clearTimeout(this.touch.longTimer);
+        this.touch.longTimer = setTimeout(() => { if (!this.touch.moved) { this.touch.mode = 'box'; this.grab = null; } }, 300);
+      }
+    } else if (e.touches.length === 2) {
+      clearTimeout(this.touch.longTimer);
+      this.touch.mode = 'pinch';
+      const [a, b] = [e.touches[0], e.touches[1]];
+      this.touch.pinchD = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+      this.touch.pinchA = Math.atan2(b.clientY - a.clientY, b.clientX - a.clientX);
+    }
+  }
+  private onTouchMove(e: TouchEvent) {
+    e.preventDefault();
+    if (this.touch.mode === 'pinch' && e.touches.length === 2) {
+      const [a, b] = [e.touches[0], e.touches[1]];
+      const d = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+      const ang = Math.atan2(b.clientY - a.clientY, b.clientX - a.clientX);
+      if (this.touch.pinchD > 0) this.renderer.zoomBy(this.touch.pinchD / d);
+      this.renderer.rotate((ang - this.touch.pinchA) * 1.0);
+      this.touch.pinchD = d; this.touch.pinchA = ang;
+      return;
+    }
+    if (e.touches.length !== 1) return;
+    const t = e.touches[0];
+    this.mouse.x = t.clientX; this.mouse.y = t.clientY;
+    if (Math.hypot(t.clientX - this.touch.sx, t.clientY - this.touch.sy) > 8) this.touch.moved = true;
+    if (this.touch.mode === 'pan' && this.grab) {
+      const g = this.renderer.groundPoint(t.clientX / window.innerWidth, t.clientY / window.innerHeight);
+      if (g) this.renderer.jumpCam(this.renderer.camX + (this.grab.x - g.x), this.renderer.camZ + (this.grab.z - g.z));
+    } else if (this.touch.mode === 'box') {
+      // drive the existing selection-box overlay via the mouse drag fields
+      this.mouse.dragging = true; this.mouse.downX = this.touch.sx; this.mouse.downY = this.touch.sy;
+    } else if (this.patrolMode && this.patrolDraw) {
+      const g = this.renderer.groundPoint(t.clientX / window.innerWidth, t.clientY / window.innerHeight);
+      if (g) { const last = this.patrolDraw[this.patrolDraw.length - 1]; if (!last || Math.hypot(g.x - last.x, g.z - last.z) >= 0.75) this.patrolDraw.push(g); }
+      this.renderer.setFormationPath(this.patrolDraw, 0xffd24a);
+    }
+  }
+  private onTouchEnd(e: TouchEvent) {
+    e.preventDefault();
+    clearTimeout(this.touch.longTimer);
+    if (e.touches.length > 0) return; // still fingers down (end of a pinch)
+    const mode = this.touch.mode; this.touch.mode = '';
+    this.grab = null;
+    if (this.patrolMode) { this.finishPatrol(this.touch.sx, this.touch.sy); return; }
+    if (mode === 'box' && this.touch.moved) {
+      this.mouse.dragging = false;
+      this.boxSelect(this.touch.sx, this.touch.sy, this.mouse.x, this.mouse.y, false);
+      return;
+    }
+    if (!this.touch.moved && performance.now() - this.touch.downT < 500) this.tapAt(this.touch.sx, this.touch.sy);
   }
 
   private onDown(e: MouseEvent) {
@@ -729,50 +928,11 @@ class GameClient {
     this.mouse.lDown = false;
     const me = this.game.me;
 
-    if (this.patrolMode) {
-      this.mouse.dragging = false;
-      let pts = this.patrolDraw || [];
-      this.patrolDraw = null;
-      this.patrolMode = false;
-      this.renderer.setFormationPath(null);
-      const g = this.renderer.groundPoint(e.clientX / window.innerWidth, e.clientY / window.innerHeight);
-      if (pts.length < 2) pts = g ? [g] : [];
-      else {
-        const step = Math.max(1, Math.ceil(pts.length / 24));
-        pts = pts.filter((_, i) => i % step === 0);
-        if (g) pts.push(g);
-      }
-      const ids = this.myUnitIds();
-      const rounded = pts.map(p => ({ x: Math.round(p.x * 10) / 10, z: Math.round(p.z * 10) / 10 }));
-      if (pts.length && ids.length) {
-        this.game.issue({ k: 'patrol', p: me, ids, pts: rounded });
-        audio.play('confirm');
-        audio.ack(this.dominantType(ids), 'move');
-      } else if (pts.length) {
-        // no units selected: assign the route to the selected production building
-        const pb = this.selectedProdBuilding();
-        if (pb) {
-          this.game.issue({ k: 'bpatrol', p: me, bid: pb.i, pts: rounded });
-          audio.play('confirm');
-        }
-      }
-      return;
-    }
+    if (this.patrolMode) { this.finishPatrol(e.clientX, e.clientY); return; }
 
     if (this.mouse.dragging) {
       this.mouse.dragging = false;
-      const x0 = Math.min(this.mouse.downX, e.clientX), x1 = Math.max(this.mouse.downX, e.clientX);
-      const y0 = Math.min(this.mouse.downY, e.clientY), y1 = Math.max(this.mouse.downY, e.clientY);
-      if (!e.shiftKey) this.selection.clear();
-      const boxed: any[] = [];
-      for (const v of this.lastViews) {
-        if (v.b || v.o !== me) continue;
-        const p = this.renderer.project(v.x, v.z, 0.5);
-        if (p.ok && p.x >= x0 && p.x <= x1 && p.y >= y0 && p.y <= y1) boxed.push(v);
-      }
-      // mixed box-select drops harvesters; harvesters select only among themselves
-      const combat = boxed.filter(v => v.t !== 'harv');
-      for (const v of (combat.length ? combat : boxed)) this.selection.add(v.i);
+      this.boxSelect(this.mouse.downX, this.mouse.downY, e.clientX, e.clientY, e.shiftKey);
       return;
     }
 
