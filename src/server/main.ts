@@ -25,9 +25,52 @@ const MIME: Record<string, string> = {
   '.wasm': 'application/wasm', '.map': 'application/json',
 };
 
+// Claude strategist proxy: the API key stays on the server (ADVISOR_KEY env
+// var); clients POST a battlefield summary and get back {stance, taunt}. The
+// system prompt and token budget are fixed HERE so the endpoint can't be
+// abused as a general LLM proxy. Per-IP cooldown keeps costs bounded.
+const ADVISOR_KEY = process.env.ADVISOR_KEY || '';
+const ADVISOR_SYS = 'You command an army in a C&C-style RTS. You receive a JSON battlefield report '
+  + '(your side, the enemy, game minute). Pick ONE stance for the next minute: '
+  + '"rush" (mass attack now), "defend" (fortify), "expand" (economy), "air" (build air power), '
+  + '"tech" (research superweapons). Counter what the enemy is doing. '
+  + 'Reply ONLY with JSON: {"stance":"...","taunt":"one short in-character radio line to your enemy"}';
+const advisorLast = new Map<string, number>();
+async function handleAdvisor(req: any, res: any) {
+  if (!ADVISOR_KEY) { res.writeHead(404); res.end(); return; }
+  const ip = String(req.socket.remoteAddress || '?');
+  const now = Date.now();
+  if (now - (advisorLast.get(ip) || 0) < 20000) { res.writeHead(429); res.end(); return; }
+  advisorLast.set(ip, now);
+  if (advisorLast.size > 500) advisorLast.clear(); // crude GC
+  let raw = '';
+  req.on('data', (c: Buffer) => { raw += c; if (raw.length > 4096) req.destroy(); });
+  req.on('end', async () => {
+    try {
+      const summary = String(JSON.parse(raw).summary || '').slice(0, 2000);
+      const r = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-api-key': ADVISOR_KEY, 'anthropic-version': '2023-06-01' },
+        body: JSON.stringify({
+          model: 'claude-haiku-4-5-20251001', max_tokens: 200,
+          system: ADVISOR_SYS, messages: [{ role: 'user', content: summary }],
+        }),
+      });
+      if (!r.ok) { res.writeHead(502); res.end(); return; }
+      const j: any = await r.json();
+      const text = j.content?.[0]?.text || '';
+      const m = text.match(/\{[\s\S]*\}/);
+      const d = m ? JSON.parse(m[0]) : {};
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ stance: d.stance || null, taunt: d.taunt || null }));
+    } catch { res.writeHead(500); res.end(); }
+  });
+}
+
 const http = createServer(async (req, res) => {
   try {
     let p = (req.url || '/').split('?')[0];
+    if (req.method === 'POST' && p === '/advisor') { handleAdvisor(req, res); return; }
     if (p === '/') p = '/index.html';
     const file = normalize(join(DIST, p));
     if (!file.startsWith(DIST)) { res.writeHead(403); res.end(); return; }

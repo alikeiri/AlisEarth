@@ -72,9 +72,11 @@ conn.on('ready', async () => {
 
     console.log('starting container...');
     await exec('docker rm -f fractured-earth 2>/dev/null || true');
+    // optional Claude strategist key: lives only in the container env, never in files
+    const advisorEnv = process.env.ADVISOR_KEY ? `-e ADVISOR_KEY='${process.env.ADVISOR_KEY}' ` : '';
     const run = await exec(
       `docker run -d --name fractured-earth --restart unless-stopped ` +
-      `-p ${PORT}:8080 -v ${REMOTE}:/app -w /app -m 300m node:20-alpine ` +
+      `-p ${PORT}:8080 -v ${REMOTE}:/app -w /app -m 300m ${advisorEnv}node:20-alpine ` +
       `sh -c "[ -d node_modules ] || npm install --omit=dev --no-audit --no-fund; exec node server.mjs"`
     );
     console.log('docker run:', run.out, '(exit', run.code + ')');

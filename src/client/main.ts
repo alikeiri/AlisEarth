@@ -1001,6 +1001,10 @@ function buildFactionCards() {
 class ClaudeAdvisor {
   private t1: any = null;
   private t2: any = null;
+  private fails = 0;
+  private announced = false;
+  // key may be '' — then the game server's /advisor proxy is used (the server
+  // holds its own key; testers need no key of their own)
   constructor(private game: LocalGame, private key: string, private onTaunt: (s: string) => void) {}
   start() {
     this.t1 = setTimeout(() => this.consult(), 25000);      // first read ~25s in
@@ -1029,37 +1033,56 @@ class ClaudeAdvisor {
   private async consult() {
     if (this.game.sim.done) { this.stop(); return; }
     try {
-      const res = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          'x-api-key': this.key,
-          'anthropic-version': '2023-06-01',
-          'anthropic-dangerous-direct-browser-access': 'true',
-        },
-        body: JSON.stringify({
-          model: 'claude-haiku-4-5-20251001',
-          max_tokens: 200,
-          system: 'You command an army in a C&C-style RTS. You receive a JSON battlefield report '
-            + '(your side, the enemy, game minute). Pick ONE stance for the next minute: '
-            + '"rush" (mass attack now), "defend" (fortify), "expand" (economy), "air" (build air power), '
-            + '"tech" (research superweapons). Counter what the enemy is doing. '
-            + 'Reply ONLY with JSON: {"stance":"...","taunt":"one short in-character radio line to your enemy"}',
-          messages: [{ role: 'user', content: this.summary() }],
-        }),
-      });
-      if (!res.ok) return; // bad key / rate limit — scripted AI carries on
-      const j = await res.json();
-      const text = j.content?.[0]?.text || '';
-      const m = text.match(/\{[\s\S]*\}/);
-      if (!m) return;
-      const d = JSON.parse(m[0]);
-      const stance = String(d.stance || '').toLowerCase();
-      if (['rush', 'defend', 'expand', 'air', 'tech'].includes(stance)) {
-        this.game.sim.aiDirective = { stance };
-        if (d.taunt) this.onTaunt(String(d.taunt).slice(0, 140));
+      let stance = '', taunt = '';
+      if (this.key) {
+        // personal key: call the Anthropic API directly from the browser
+        const res = await fetch('https://api.anthropic.com/v1/messages', {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            'x-api-key': this.key,
+            'anthropic-version': '2023-06-01',
+            'anthropic-dangerous-direct-browser-access': 'true',
+          },
+          body: JSON.stringify({
+            model: 'claude-haiku-4-5-20251001',
+            max_tokens: 200,
+            system: 'You command an army in a C&C-style RTS. You receive a JSON battlefield report '
+              + '(your side, the enemy, game minute). Pick ONE stance for the next minute: '
+              + '"rush" (mass attack now), "defend" (fortify), "expand" (economy), "air" (build air power), '
+              + '"tech" (research superweapons). Counter what the enemy is doing. '
+              + 'Reply ONLY with JSON: {"stance":"...","taunt":"one short in-character radio line to your enemy"}',
+            messages: [{ role: 'user', content: this.summary() }],
+          }),
+        });
+        if (!res.ok) { this.fail(); return; }
+        const j = await res.json();
+        const text = j.content?.[0]?.text || '';
+        const m = text.match(/\{[\s\S]*\}/);
+        if (!m) return;
+        const d = JSON.parse(m[0]);
+        stance = String(d.stance || '').toLowerCase(); taunt = String(d.taunt || '');
+      } else {
+        // no personal key: the game server's proxy holds one (deployed box)
+        const res = await fetch('/advisor', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ summary: this.summary() }),
+        });
+        if (!res.ok) { if (res.status !== 429) this.fail(); return; }
+        const d = await res.json();
+        stance = String(d.stance || '').toLowerCase(); taunt = String(d.taunt || '');
       }
-    } catch { /* offline — scripted AI carries on */ }
+      this.fails = 0;
+      if (['rush', 'defend', 'expand', 'air', 'tech'].includes(stance)) {
+        if (!this.announced) { this.announced = true; this.onTaunt('Claude has assumed command of this army.'); }
+        this.game.sim.aiDirective = { stance };
+        if (taunt) this.onTaunt(taunt.slice(0, 140));
+      }
+    } catch { this.fail(); }
+  }
+  private fail() {
+    if (++this.fails >= 2) this.stop(); // no key anywhere / offline — stay scripted
   }
 }
 let advisor: ClaudeAdvisor | null = null;
@@ -1081,14 +1104,12 @@ function startGame(game: GameLike) {
     $('endSub').textContent = sub;
     show('endScreen');
   });
-  // Claude strategist: only for local skirmish, only with a key
+  // Claude strategist: local skirmish only. Personal key if entered, else the
+  // game server's /advisor proxy; announces itself on the first successful read.
   if (game instanceof LocalGame) {
     const key = (localStorage.getItem('ae_claude_key') || '').trim();
-    if (key) {
-      advisor = new ClaudeAdvisor(game, key, taunt => client?.aiSays(taunt));
-      advisor.start();
-      setTimeout(() => client?.aiSays('Claude has assumed command of this army.'), 3000);
-    }
+    advisor = new ClaudeAdvisor(game, key, taunt => client?.aiSays(taunt));
+    advisor.start();
   }
 }
 
