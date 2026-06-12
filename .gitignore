@@ -1,0 +1,9 @@
+node_modules/
+dist/
+server.mjs
+.sim-bundle.mjs
+.claude/
+batch-progress.txt
+batch-results.json
+*.log
+.DS_Store
