@@ -95,6 +95,16 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
   }
   const nB = (t: string) => (myB[t] || []).length;
   const nU = (t: string) => (myU[t] || []).length;
+
+  // hopeless position: no conyard (can't build), no production buildings and
+  // no fighting units left — wave the white flag instead of dragging it out
+  const production = nB('barracks') + nB('factory') + nB('dronefac') + nB('airforce') + nB('shipyard');
+  let combat = 0;
+  for (const t in myU) if ((UNITS[t]?.dmg ?? 0) > 0 || UNITS[t]?.emits) combat += myU[t].length;
+  if (!nB('conyard') && production === 0 && combat === 0) {
+    cmds.push({ k: 'surrender', p });
+    return cmds;
+  }
   const cost = (t: string) => Math.round(BUILDINGS[t].cost * pl.fac.costMul * pl.bonusCost);
   const surplus = pl.powerMade - pl.powerUsed;
 
@@ -148,7 +158,7 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
   // infantry is the cheap screen, vehicles the core (tester: "AI only builds
   // infantry"). Once a factory stands, infantry is capped at ~45% of the army
   // and the factory gets first claim on credits.
-  const armyCount = nU('rifle') + nU('rocket') + nU('tank') + nU('heavy') + nU('mlrs')
+  const armyCount = nU('rifle') + nU('rocket') + nU('tank') + nU('heavy') + nU('ifv') + nU('mlrs')
     + nU('recon') + nU('strike') + nU('msldrone') + nU('fighter') + nU('heli') + nU('helidrone');
   const infCount = nU('rifle') + nU('rocket') + nU('chemtrooper') + nU('biotrooper');
   const hasFac = (myB['factory'] || []).some(b => b.progress >= b.total);
@@ -170,8 +180,9 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
     else if (armyCount < cap && pl.credits > 1000) {
       const r = sim.rng.next();
       const t = nU('mlrs') < L.siege ? 'mlrs'
-        : r < (antiInf ? 0.5 : 0.30) ? 'mlrs' // artillery shreds infantry masses
-        : (pl.credits > 2000 && r < 0.45) ? 'heavy'
+        : r < (antiInf ? 0.4 : 0.25) ? 'mlrs' // artillery shreds infantry masses
+        : r < (antiInf ? 0.7 : 0.42) ? 'ifv'  // autocannons mop up the rest
+        : (pl.credits > 2000 && r < 0.6) ? 'heavy'
         : 'tank';
       cmds.push({ k: 'train', p, bid: fac.id, type: t });
     }

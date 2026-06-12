@@ -240,6 +240,13 @@ export class Sim {
       this.events.push({ e: 'cash', x: pl.spawn.x, z: pl.spawn.z });
       return;
     }
+    if (c.k === 'surrender') {
+      // white flag: scuttle everything this player owns; the normal
+      // elimination flow (deaths → checkEnd) does the rest
+      this.events.push({ e: 'surrender', p: c.p });
+      for (const e of this.ents.values()) if (e.owner === c.p) e.hp = 0;
+      return;
+    }
     if (c.k === 'upg') {
       const b = this.ents.get(c.bid);
       if (!b || !b.b || b.owner !== c.p || b.type === 'conyard') return;
@@ -537,12 +544,13 @@ export class Sim {
     return best;
   }
 
-  private findEnemy(e: Entity, range: number): Entity | null {
+  private findEnemy(e: Entity, range: number, skipAir = false): Entity | null {
     let best: Entity | null = null, bd = 1e9;
     for (const u of this.nearbyUnits(e.x, e.z, range + 1)) {
       if (u.owner === e.owner || u.hp <= 0 || !this.players[u.owner].alive) continue;
       const d = this.distToEnt(e.x, e.z, u);
       if (UNITS[u.type]?.cloak && d > 4) continue; // stealth: only seen up close
+      if (skipAir && UNITS[u.type]?.fly) continue; // gun turrets can't elevate
       if (d <= range && d < bd) { bd = d; best = u; }
     }
     if (best) return best;
@@ -578,7 +586,7 @@ export class Sim {
     const ud = UNITS[att.type];
     // weapon class: 0 mg, 1 rocket, 2 cannon, 3 drone zap, 4 missile salvo
     const tgtInf = !tgt.b && UNITS[tgt.type]?.kind === 'inf';
-    const w = att.type === 'rifle' ? 0
+    const w = att.type === 'rifle' || att.type === 'ifv' ? 0
       : att.type === 'rocket' || att.type === 'sam' ? 1
       : att.type === 'mlrs' || att.type === 'msldrone' ? 4
       : att.type === 'heli' || att.type === 'helidrone' ? (tgtInf ? 0 : 1) // guns vs inf, rockets vs veh/bld
@@ -662,7 +670,7 @@ export class Sim {
     }
     if (def.attack) {
       b.cd -= TICK;
-      const tgt = this.findEnemy(b, def.attack.range + 0.8 * (b.lvl - 1));
+      const tgt = this.findEnemy(b, def.attack.range + 0.8 * (b.lvl - 1), b.type === 'turret');
       if (tgt) this.fire(b, tgt, def.attack.dmg * (1 + 0.25 * (b.lvl - 1)), def.attack.rof / pl.pf);
     }
   }
@@ -859,6 +867,19 @@ export class Sim {
         this.stepPath(u, speed * 1.3, 1); // terminal dive — faster than cruise
         return;
       }
+      // bombers fly OVER the target, release the whole stick once (area
+      // damage), then turn for home — no hovering in front of buildings
+      if (u.type === 'bomber' || u.type === 'dbomber') {
+        if (u.ammo <= 0) { u.orders.unshift({ k: 'rtb' }); return; }
+        if (d <= 1.4) {
+          this.bombDrop(u, tgt);
+          u.orders.unshift({ k: 'rtb' }); // rearm, then resume this attack order
+          return;
+        }
+        u.path = [{ x: tgt.x, z: tgt.z }]; u.pi = 0;
+        this.stepPath(u, speed, 1);
+        return;
+      }
       if (d <= def.range) {
         u.path = null;
         if (def.payload && u.ammo <= 0) { u.orders.unshift({ k: 'rtb' }); return; }
@@ -884,6 +905,22 @@ export class Sim {
     } else if (ord.k === 'harvest') {
       this.tickHarvest(u, ord, def);
     }
+  }
+
+  // carpet release: the full remaining payload detonates around the target
+  // with linear falloff — splash hits every enemy in the blast radius
+  private bombDrop(u: Entity, tgt: Entity) {
+    const def = UNITS[u.type];
+    const total = def.dmg * Math.max(1, u.ammo);
+    const R = 2.6;
+    for (const e of [...this.ents.values()]) {
+      if (e.owner === u.owner || e.hp <= 0 || !this.players[e.owner].alive) continue;
+      const dist = e.b ? this.distToEnt(tgt.x, tgt.z, e) : Math.hypot(e.x - tgt.x, e.z - tgt.z);
+      if (dist > R) continue;
+      this.dealDamage(u, e, total * (1 - 0.5 * (dist / R)));
+    }
+    u.ammo = 0;
+    this.events.push({ e: 'boom', x: tgt.x, z: tgt.z, big: true });
   }
 
   private tickHarvest(u: Entity, ord: Order, def: any) {

@@ -795,6 +795,10 @@ class GameClient {
     this.renderer.addEvents(evs);
     for (const ev of evs) {
       if (ev.e === 'boom' && ev.big) this.ui.ping(ev.x, ev.z);
+      if (ev.e === 'surrender') {
+        const who = this.game.players?.()[ev.p]?.n || 'Enemy';
+        this.appendChat({ name: who, to: 'all', msg: 'We surrender! The region is yours.' });
+      }
       audio.event(ev, this.renderer.camX, this.renderer.camZ, this.game.me);
     }
     // chat messages + expiry
@@ -894,6 +898,18 @@ function buildOptionRow(rowId: string, opts: { label: string; v: number }[], get
 
 function show(id: string) {
   for (const s of ['menu', 'lobby', 'endScreen']) $(s).classList.toggle('hidden', s !== id);
+  if (id === 'menu') rollCallsign(); // fresh funny name for the next game
+}
+
+// pre-fill the name box with a new random callsign whenever the menu appears —
+// but never clobber a name the player typed themselves
+function rollCallsign() {
+  const inp = $('nameInput') as HTMLInputElement;
+  const cur = (inp.value || '').trim();
+  if (cur && !FUNNY_NAMES.includes(cur)) return;
+  let pick = FUNNY_NAMES[Math.floor(Math.random() * FUNNY_NAMES.length)];
+  if (pick === cur) pick = FUNNY_NAMES[(FUNNY_NAMES.indexOf(pick) + 1) % FUNNY_NAMES.length];
+  inp.value = pick;
 }
 function hideAll() {
   for (const s of ['menu', 'lobby', 'endScreen']) $(s).classList.add('hidden');
@@ -1044,4 +1060,5 @@ if (!glOk) {
     'This game needs WebGL2.<br>Please use a current version of Chrome, Edge, Firefox, or Safari.</div>';
 } else {
   initMenus();
+  rollCallsign();
 }

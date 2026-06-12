@@ -16,6 +16,7 @@ const MODEL_DEFS: Record<string, { file: string; size: number; axis: 'l' | 'h'; 
   rocket:    { file: 'rocket',    size: 1.18, axis: 'h', ry: 0, tint: 0x4d5a6b },
   tank:      { file: 'tank',      size: 1.50, axis: 'l', ry: 0 },
   heavy:     { file: 'heavy',     size: 1.85, axis: 'l', ry: 0 },
+  ifv:       { file: 'tank',      size: 1.25, axis: 'l', ry: 0, tint: 0x9aa86a }, // light olive scout chassis
   mlrs:      { file: 'mlrs',      size: 1.60, axis: 'l', ry: 0 },
   // trucks: cab/bed geometry defeats the front heuristic — flip both (user-verified)
   harv:      { file: 'harv',      size: 1.70, axis: 'l', ry: Math.PI },

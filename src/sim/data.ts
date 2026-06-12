@@ -37,7 +37,9 @@ export const UNITS: Record<string, UnitDef> = {
   recon:  { name: 'Recon Drone',  cost: 400,  hp: 70,  speed: 3.4, range: 4.0, dmg: 6,  rof: 0.6, builtAt: 'dronefac', buildTime: 7,  kind: 'air', fly: true },
   strike: { name: 'Strike Drone', cost: 1100, hp: 150, speed: 2.8, range: 5.0, dmg: 32, rof: 1.8, builtAt: 'dronefac', buildTime: 13, kind: 'air', fly: true },
   msldrone: { name: 'Missile Drone', cost: 1500, hp: 120, speed: 2.4, range: 7.0, dmg: 45, rof: 3.0, builtAt: 'dronefac', buildTime: 15, kind: 'air', fly: true },
-  mlrs:   { name: 'MLRS',         cost: 1600, hp: 220, speed: 1.6, range: 12.0, dmg: 74, rof: 3.6, builtAt: 'factory',  buildTime: 16, kind: 'veh' },
+  mlrs:   { name: 'MLRS',         cost: 1600, hp: 220, speed: 1.6, range: 13.0, dmg: 74, rof: 3.6, builtAt: 'factory',  buildTime: 16, kind: 'veh' },
+  // the anti-infantry vehicle: autocannon IFV — shreds infantry, loses to tanks
+  ifv:    { name: 'IFV',          cost: 700,  hp: 300, speed: 3.4, range: 5.0, dmg: 24, rof: 0.8, builtAt: 'factory',  buildTime: 9,  kind: 'veh' },
   engineer: { name: 'Engineer',   cost: 600,  hp: 200, speed: 2.2, range: 0,   dmg: 0,  rof: 1,   builtAt: 'factory',  buildTime: 10, kind: 'veh', repair: true, road: true },
   hive:    { name: 'Drone Hive',  cost: 1500, hp: 900, speed: 1.1, range: 0,   dmg: 0,  rof: 1,   builtAt: 'barracks', buildTime: 16, kind: 'inf', fortify: true, emits: 'minidrone' },
   minidrone: { name: 'Mini Drone', cost: 0,   hp: 40,  speed: 4.2, range: 4.0, dmg: 200, rof: 1, builtAt: '',         buildTime: 0,  kind: 'air', fly: true, alt: 1.6, ephemeral: 26, internal: true, kamikaze: true },
@@ -171,6 +173,8 @@ export function dmgMul(attType: string, tgtIsBuilding: boolean, tgtKind: string)
     if (attType === 'rocket') return 1.8;
     if (attType === 'destroyer') return 1.5;
     if (attType === 'rifle') return 1.2;
+    if (attType === 'ifv') return 0.8;           // autocannon can pepper aircraft
+    if (attType === 'turret') return 0;          // gun turret can't elevate (defensive AA = SAM)
     if (attType === 'tank' || attType === 'heavy') return 0.4;
     if (attType === 'bomber') return 0.1;
     if (attType === 'mlrs' || attType === 'sub') return 0.15;
@@ -206,6 +210,8 @@ export function dmgMul(attType: string, tgtIsBuilding: boolean, tgtKind: string)
   if (attType === 'strike') return tgtIsBuilding ? 1.2 : (tgtKind === 'veh' ? 1.8 : 0.55);
   if (attType === 'rocket') return tgtIsBuilding ? 1.8 : (tgtKind === 'veh' ? 2.2 : 0.45);
   if (attType === 'rifle')  return tgtIsBuilding ? 0.35 : (tgtKind === 'veh' ? 0.35 : 1.35);
+  if (attType === 'ifv')    return tgtIsBuilding ? 0.5 : (tgtKind === 'inf' ? 2.2 : 0.5);
   if (attType === 'tank' || attType === 'heavy') return tgtIsBuilding ? 1.3 : (tgtKind === 'inf' ? 0.5 : 1.35);
-  return 1.0; // turret / gunboat / destroyer guns
+  if (attType === 'turret') return tgtIsBuilding ? 0.8 : (tgtKind === 'veh' ? 0.6 : 1.1); // armor shrugs off turret fire
+  return 1.0; // gunboat / destroyer guns
 }
