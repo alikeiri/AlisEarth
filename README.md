@@ -63,6 +63,14 @@ in skirmish, `ai-profile.json` server-side). The AI escalates after losses,
 shortens its peace window against habitual rushers, stocks SAMs/interceptors
 against air players and rockets/artillery against armor or infantry spam.
 A hopelessly beaten AI surrenders instead of dragging the game out.
+Stranded on an island, it pivots to drones, aircraft and ships.
+
+**Claude as enemy commander (optional):** paste an Anthropic API key into
+the menu and Claude (Haiku) reads a battlefield report every ~50 s and sets
+the enemy AI's strategic stance (rush / defend / expand / air / tech) —
+with in-character radio taunts in the chat log. The key stays in your
+browser's localStorage and calls go directly to the Anthropic API; without
+a key the scripted AI plays unchanged.
 
 **Controls:** left-click select · drag box-select · right-click move /
 attack / harvest · **right-press an enemy + drag = area attack circle**

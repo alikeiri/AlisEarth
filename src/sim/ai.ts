@@ -107,6 +107,20 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
     mem.landOk = !en || !!findPath(sim.map, pl.spawn.x, pl.spawn.z, en.x, en.z, 16000, false);
   }
   const island = mem.landOk === false;
+  if (island) refs = Math.min(refs, 2); // a small island can't feed 3+ refineries
+
+  // optional LLM strategist (Claude API, set by the host): a high-level stance
+  // that bends the scripted knobs — the script stays the tactical layer
+  const dirStance: string | null = sim.aiDirective?.stance || null;
+  let dirAir = false, dirTech = false;
+  if (dirStance === 'rush') {
+    waveEvery = Math.max(18, Math.round(waveEvery * 0.6));
+    mem.peaceUntil = Math.min(mem.peaceUntil, sim.tickN + 15 * TICKS_PER_SEC);
+    mem.nextWave = Math.min(mem.nextWave, sim.tickN + 25 * TICKS_PER_SEC);
+  } else if (dirStance === 'defend') { turrets += 2; sams = Math.max(2, sams); }
+  else if (dirStance === 'expand') { refs = Math.min(6, refs + 1); }
+  else if (dirStance === 'air') dirAir = true;
+  else if (dirStance === 'tech') dirTech = true;
 
   // hopeless position: no conyard (can't build), no production buildings and
   // no fighting units left — wave the white flag instead of dragging it out
@@ -134,9 +148,10 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
   else if (nB('turret') < Math.min(2, turrets) && nB('barracks')) want = 'turret';
   else if (nB('refinery') < refs && pl.credits > 1200) want = 'refinery';
   // vehicle throughput beats deep turret lines — factories before turret #3+
-  else if (nB('factory') < L.factories && pl.credits > 1900) want = 'factory';
+  // (islanders keep ONE factory and ONE barracks: ground forces can't leave)
+  else if (nB('factory') < (island ? 1 : L.factories) && pl.credits > 1900) want = 'factory';
   else if (nB('turret') < turrets) want = 'turret';
-  else if (nB('barracks') < L.barracks && pl.credits > 1200) want = 'barracks';
+  else if (nB('barracks') < (island ? 1 : L.barracks) && pl.credits > 1200) want = 'barracks';
   // stranded on an island: drone works, air force and shipyard come early
   else if (island && !nB('dronefac') && nB('factory') && pl.credits > 1600) want = 'dronefac';
   else if (island && !nB('airforce') && nB('factory') && pl.credits > 2000) want = 'airforce';
@@ -144,9 +159,9 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
   else if (island && !nB('shipyard') && pl.credits > 2000) want = 'shipyard';
   else if (!nB('dronefac') && nB('factory') && pl.credits > 2400) want = 'dronefac';
   else if (nB('sam') < sams && nB('factory') && pl.credits > (antiAir ? 1400 : 2200)) want = 'sam';
-  else if ((L.air || island) && !nB('airforce') && nB('factory') && pl.credits > 3000) want = 'airforce';
-  else if ((L.air || island) && nB('airforce') && nB('airfield') < 2 && pl.credits > 1600) want = 'airfield';
-  else if (pl.aiLvl >= 2 && !nB('lab') && nB('factory') && pl.credits > 3000) want = 'lab';
+  else if ((L.air || island || dirAir) && !nB('airforce') && nB('factory') && pl.credits > (dirAir ? 2400 : 3000)) want = 'airforce';
+  else if ((L.air || island || dirAir) && nB('airforce') && nB('airfield') < 2 && pl.credits > 1600) want = 'airfield';
+  else if ((pl.aiLvl >= 2 || dirTech) && !nB('lab') && nB('factory') && pl.credits > (dirTech ? 2400 : 3000)) want = 'lab';
   else if (nB('turret') < turrets + 1 && pl.credits > 2600) want = 'turret';
   else if (surplus < 60 && pl.credits > 2400) want = 'power';
 
@@ -221,7 +236,7 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
     cmds.push({ k: 'train', p, bid: dro.id, type: t });
   }
   const af = (myB['airforce'] || []).find(b => b.progress >= b.total && b.queue.length < 2);
-  if (af && armyCount < cap && pl.credits > (island ? 1800 : 2200)) {
+  if (af && armyCount < cap && pl.credits > (island || dirAir ? 1800 : 2200)) {
     const r = sim.rng.next();
     // vs an air-heavy player, prioritize interceptors; islanders love bombers
     const t = island && r < 0.35 ? 'bomber'
@@ -240,7 +255,7 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
 
   // research a tech when a lab is idle and we're flush
   const lab = (myB['lab'] || []).find(b => b.progress >= b.total && !b.research);
-  if (lab && pl.credits > 3500) {
+  if (lab && pl.credits > (dirTech ? 2500 : 3500)) {
     const t = !pl.tech['chem'] ? 'chem' : !pl.tech['bio'] ? 'bio' : !pl.tech['stealth'] ? 'stealth' : null;
     if (t) cmds.push({ k: 'research', p, bid: lab.id, tech: t });
   }

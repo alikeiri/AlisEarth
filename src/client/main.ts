@@ -418,6 +418,13 @@ class GameClient {
     (document.getElementById('chatInput') as HTMLInputElement).blur();
   }
 
+  // radio line from the enemy AI commander (Claude strategist taunts)
+  aiSays(msg: string) {
+    const who = this.game.players?.()[1]?.n || 'Enemy AI';
+    this.appendChat({ name: who, to: 'all', msg });
+    audio.play('click');
+  }
+
   private appendChat(m: any) {
     const log = document.getElementById('chatLog')!;
     const div = document.createElement('div');
@@ -987,8 +994,79 @@ function buildFactionCards() {
   }
 }
 
+// ---------------- Claude strategist (optional) ----------------
+// With an Anthropic API key, Claude periodically reads a battlefield report
+// and issues a high-level stance to the enemy AI (rush/defend/expand/air/tech).
+// The scripted AI remains the tactical layer; without a key nothing changes.
+class ClaudeAdvisor {
+  private t1: any = null;
+  private t2: any = null;
+  constructor(private game: LocalGame, private key: string, private onTaunt: (s: string) => void) {}
+  start() {
+    this.t1 = setTimeout(() => this.consult(), 25000);      // first read ~25s in
+    this.t2 = setInterval(() => this.consult(), 50000);     // then every 50s
+  }
+  stop() { clearTimeout(this.t1); clearInterval(this.t2); }
+  private summary(): string {
+    const sim = this.game.sim;
+    const side = (p: number) => {
+      const b: Record<string, number> = {}, u: Record<string, number> = {};
+      for (const e of sim.ents.values()) {
+        if (e.owner !== p) continue;
+        const m = e.b ? b : u;
+        m[e.type] = (m[e.type] || 0) + 1;
+      }
+      return { buildings: b, units: u, credits: Math.round(sim.players[p].credits) };
+    };
+    return JSON.stringify({
+      minute: Math.round(sim.tickN / 600),
+      you: side(1),                 // the AI Claude commands
+      enemy: side(0),               // the human
+      island: sim.aiMem[1]?.landOk === false,
+      currentStance: sim.aiDirective?.stance || 'none',
+    });
+  }
+  private async consult() {
+    if (this.game.sim.done) { this.stop(); return; }
+    try {
+      const res = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-api-key': this.key,
+          'anthropic-version': '2023-06-01',
+          'anthropic-dangerous-direct-browser-access': 'true',
+        },
+        body: JSON.stringify({
+          model: 'claude-haiku-4-5-20251001',
+          max_tokens: 200,
+          system: 'You command an army in a C&C-style RTS. You receive a JSON battlefield report '
+            + '(your side, the enemy, game minute). Pick ONE stance for the next minute: '
+            + '"rush" (mass attack now), "defend" (fortify), "expand" (economy), "air" (build air power), '
+            + '"tech" (research superweapons). Counter what the enemy is doing. '
+            + 'Reply ONLY with JSON: {"stance":"...","taunt":"one short in-character radio line to your enemy"}',
+          messages: [{ role: 'user', content: this.summary() }],
+        }),
+      });
+      if (!res.ok) return; // bad key / rate limit — scripted AI carries on
+      const j = await res.json();
+      const text = j.content?.[0]?.text || '';
+      const m = text.match(/\{[\s\S]*\}/);
+      if (!m) return;
+      const d = JSON.parse(m[0]);
+      const stance = String(d.stance || '').toLowerCase();
+      if (['rush', 'defend', 'expand', 'air', 'tech'].includes(stance)) {
+        this.game.sim.aiDirective = { stance };
+        if (d.taunt) this.onTaunt(String(d.taunt).slice(0, 140));
+      }
+    } catch { /* offline — scripted AI carries on */ }
+  }
+}
+let advisor: ClaudeAdvisor | null = null;
+
 function startGame(game: GameLike) {
   if (client) { client.destroy(); client = null; }
+  if (advisor) { advisor.stop(); advisor = null; }
   hideAll();
   audio.init();
   client = new GameClient(game, (won, winnerName) => {
@@ -1003,6 +1081,15 @@ function startGame(game: GameLike) {
     $('endSub').textContent = sub;
     show('endScreen');
   });
+  // Claude strategist: only for local skirmish, only with a key
+  if (game instanceof LocalGame) {
+    const key = (localStorage.getItem('ae_claude_key') || '').trim();
+    if (key) {
+      advisor = new ClaudeAdvisor(game, key, taunt => client?.aiSays(taunt));
+      advisor.start();
+      setTimeout(() => client?.aiSays('Claude has assumed command of this army.'), 3000);
+    }
+  }
 }
 
 // a fresh ridiculous callsign every game when no name is entered
@@ -1083,6 +1170,8 @@ function initMenus() {
     [{ label: 'Small', v: 72 }, { label: 'Medium', v: 96 }, { label: 'Large', v: 128 }],
     () => selSize, v => { selSize = v; });
   $('btnSkirmish').addEventListener('click', () => {
+    const key = (($('claudeKey') as HTMLInputElement).value || '').trim();
+    try { localStorage.setItem('ae_claude_key', key); } catch { /* no storage */ }
     startGame(new LocalGame(playerName(), selFaction, selDiff, selSize));
   });
   $('btnCreate').addEventListener('click', async () => {
@@ -1121,4 +1210,5 @@ if (!glOk) {
 } else {
   initMenus();
   rollCallsign();
+  try { ($('claudeKey') as HTMLInputElement).value = localStorage.getItem('ae_claude_key') || ''; } catch { /* no storage */ }
 }

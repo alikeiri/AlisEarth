@@ -9,6 +9,8 @@ import { RNG } from './rng';
 export interface Order {
   k: string; x?: number; z?: number; tgt?: number; ox?: number; oz?: number;
   pts?: { x: number; z: number }[]; i?: number; dir?: number; loop?: boolean; // patrol route
+  ban?: number[]; // harvest: ore cells proven unreachable (don't re-pick them)
+  pD?: number; pT?: number; // harvest approach progress watchdog
 } // kinds: move attack harvest patrol rtb flee repair road
 
 export interface Entity {
@@ -24,6 +26,7 @@ export interface Entity {
   lastHitBy: number; lastHitT: number; reactCd: number; // return-fire / flee reactions
   fortified: boolean; emitCd: number; ephLife: number; // drone hive + ephemeral units
   aimX?: number; aimZ?: number; // last firing target — renderer turns the unit toward it
+  oreCd: number; // harvester cooldown after every reachable field proved empty/blocked
   research: { tech: string; t: number; t0: number } | null; // research lab
   // buildings
   cx: number; cz: number; size: number;
@@ -68,6 +71,7 @@ export class Sim {
   done = false;
   winner = -2;
   aiProfile: any = null; // host-provided study of past human-vs-AI games (adaptive AI)
+  aiDirective: any = null; // optional LLM strategist (Claude API) high-level orders
   private aiDmg = { inf: 0, veh: 0, air: 0, sea: 0 }; // human damage to the AI, by weapon class
   private firstHumanHit = -1;
   private reported = false;
@@ -120,7 +124,7 @@ export class Sim {
       id: this.nextId++, owner: p, type, b,
       x: 0, z: 0, px: 0, pz: 0, hp: 1, maxHp: 1,
       orders: [], path: null, pi: 0, cd: 0, mt: 0, cargo: 0, cargoVal: 0, repath: 0,
-      wx: 0, wz: 0, stuckT: 0, mvi: -9, pathFail: 0, ammo: -1,
+      wx: 0, wz: 0, stuckT: 0, mvi: -9, pathFail: 0, ammo: -1, oreCd: 0,
       stance: 0, lastHitBy: 0, lastHitT: -999, reactCd: 0,
       fortified: false, emitCd: 0, ephLife: 0, research: null,
       cx: 0, cz: 0, size: 1, progress: 0, total: 1, queue: [], rallyX: -1, rallyZ: -1, lvl: 1, patPts: null, rpt: false, primary: false,
@@ -782,8 +786,12 @@ export class Sim {
       u.reactCd = 25; // don't re-flee every tick
     }
 
-    // idle harvesters resume mining on their own (classic C&C behavior)
-    if (def.cargo && !u.orders.length && this.tickN % 20 === u.id % 20) this.autoHarvest(u);
+    // idle harvesters resume mining on their own (classic C&C behavior) —
+    // unless they recently proved every reachable field is a dead end
+    if (def.cargo && !u.orders.length && this.tickN % 20 === u.id % 20) {
+      if (u.oreCd > 0) u.oreCd -= 20;
+      else this.autoHarvest(u);
+    }
     // idle engineers look for something to fix
     if (def.repair && !u.orders.length && this.tickN % 5 === u.id % 5) {
       const t = this.findDamagedFriendly(u, 9);
@@ -982,7 +990,21 @@ export class Sim {
     const tx = ord.ox! + 0.5, tz = ord.oz! + 0.5;
     const d = Math.sqrt((u.x - tx) ** 2 + (u.z - tz) ** 2);
     if (d > 1.2) {
-      this.moveToward(u, tx, tz, def);
+      const done = this.moveToward(u, tx, tz, def);
+      // two unreachable signals: pathfinder gave up while we're far away, or
+      // we've made no approach progress for 3s (pathfinder snapped the target
+      // to a shore cell and we're pacing there). Ban the field and retarget
+      // instead of replanning forever and wiggling in place.
+      if (d < (ord.pD ?? 1e9) - 0.5) { ord.pD = d; ord.pT = 0; }
+      else ord.pT = (ord.pT ?? 0) + TICK;
+      if ((done && d > 2.5) || (ord.pT ?? 0) > 3) {
+        ord.pD = 1e9; ord.pT = 0;
+        ord.ban = ord.ban || [];
+        ord.ban.push(ord.oz! * W + ord.ox!);
+        const n = ord.ban.length <= 6 ? this.findOreNear(ord) : null;
+        if (n) { ord.ox = n.x; ord.oz = n.z; u.path = null; }
+        else { u.orders.shift(); u.path = null; u.oreCd = 200; } // nothing reachable — rest 20s
+      }
     } else {
       u.mt += TICK;
       if (u.mt >= 0.5) {
@@ -999,11 +1021,11 @@ export class Sim {
     }
   }
 
-  private scanOre(ox: number, oz: number, R: number): { x: number; z: number } | null {
+  private scanOre(ox: number, oz: number, R: number, ban?: Set<number>): { x: number; z: number } | null {
     let best: { x: number; z: number } | null = null, bd = 1e9;
     for (let z = Math.max(0, oz - R); z < Math.min(H, oz + R); z++) {
       for (let x = Math.max(0, ox - R); x < Math.min(W, ox + R); x++) {
-        if (this.map.ore[z * W + x] > 0) {
+        if (this.map.ore[z * W + x] > 0 && !(ban && ban.has(z * W + x))) {
           const d = (x - ox) ** 2 + (z - oz) ** 2;
           if (d < bd) { bd = d; best = { x, z }; }
         }
@@ -1015,7 +1037,8 @@ export class Sim {
   private findOreNear(ord: Order): { x: number; z: number } | null {
     // try locally first, then anywhere on the map — harvesters should never
     // sit idle just because the nearest field is far away
-    return this.scanOre(ord.ox!, ord.oz!, 22) || this.scanOre(ord.ox!, ord.oz!, Math.max(W, H));
+    const ban = ord.ban && ord.ban.length ? new Set(ord.ban) : undefined;
+    return this.scanOre(ord.ox!, ord.oz!, 22, ban) || this.scanOre(ord.ox!, ord.oz!, Math.max(W, H), ban);
   }
 
   autoHarvest(u: Entity) {
