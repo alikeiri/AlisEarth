@@ -746,10 +746,20 @@ export class Renderer {
   private extTex: Record<string, THREE.Texture> = {};
   private fogTex: THREE.DataTexture | null = null;
   private fogMesh: THREE.Mesh | null = null;
+  gpuName = 'unknown';
 
   constructor(canvas: HTMLCanvasElement, map: GameMap) {
     this.map = map;
-    this.three = new THREE.WebGLRenderer({ canvas, antialias: true });
+    // request the discrete GPU: on dual-GPU laptops the browser defaults to
+    // the integrated chip unless WebGL explicitly asks for high performance
+    this.three = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
+    // report the active GPU (so you can confirm the discrete card is in use)
+    try {
+      const gl = this.three.getContext();
+      const dbg = gl.getExtension('WEBGL_debug_renderer_info');
+      this.gpuName = dbg ? String(gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL)) : String(gl.getParameter(gl.RENDERER));
+      console.log('[Ali\'s Earth] GPU in use:', this.gpuName);
+    } catch { this.gpuName = 'unknown'; }
     this.three.setPixelRatio(Math.min(1.75, window.devicePixelRatio));
     this.three.shadowMap.enabled = true;
     this.three.shadowMap.type = THREE.PCFSoftShadowMap;
