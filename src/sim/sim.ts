@@ -778,6 +778,16 @@ export class Sim {
         } else if (!u.orders.length && this.tickN % 5 === u.id % 5) {
           const tgt = this.findEnemy(u, def.range + 2.5); // chase enemies in sight
           if (tgt) u.orders.unshift({ k: 'attack', tgt: tgt.id });
+        } else if (cur && cur.k === 'attack' && this.tickN % 5 === u.id % 5) {
+          // fighting advance: en route to a DISTANT target, clear whatever is
+          // already in weapons range (turrets, escorts) instead of driving
+          // through the kill zone; the deeper order resumes afterwards
+          const dest = this.ents.get(cur.tgt!);
+          const dDest = dest ? this.distToEnt(u.x, u.z, dest) : 1e9;
+          if (dDest > def.range + 3) {
+            const near = this.findEnemy(u, def.range + 1.0);
+            if (near && near.id !== cur.tgt) { u.orders.unshift({ k: 'attack', tgt: near.id }); u.path = null; }
+          }
         }
       }
     } else if (recentlyHit && u.reactCd <= 0 && this.ents.has(u.lastHitBy)) {

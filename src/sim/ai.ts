@@ -375,8 +375,11 @@ function enemyHarvester(sim: Sim, p: number): Entity | null {
   return best;
 }
 
-// enemy building with the fewest defenses nearby — hit the soft flank
+// pick the NEAREST soft enemy building — peel the base from its facing edge.
+// (Scoring only by "fewest defenses" sent whole armies driving through the
+// player's entire base toward the naked rear power plant.)
 function bestStrikeTarget(sim: Sim, p: number): Entity | null {
+  const s = sim.players[p].spawn;
   const enemyB: Entity[] = [], defenders: Entity[] = [];
   for (const e of sim.ents.values()) {
     if (!e.b || e.owner === p || !sim.players[e.owner].alive) continue;
@@ -388,8 +391,9 @@ function bestStrikeTarget(sim: Sim, p: number): Entity | null {
   for (const e of enemyB) {
     let near = 0;
     for (const d of defenders) if ((d.x - e.x) ** 2 + (d.z - e.z) ** 2 < 12 * 12) near++;
-    const priority = e.type === 'refinery' || e.type === 'power' || e.type === 'conyard' ? -1.5 : 0;
-    const score = near + priority;
+    const dHome = Math.hypot(e.x - s.x, e.z - s.z);
+    const priority = e.type === 'refinery' || e.type === 'power' || e.type === 'conyard' ? -1.2 : 0;
+    const score = near * 1.2 + dHome * 0.1 + priority;
     if (score < bestScore) { bestScore = score; best = e; }
   }
   return best;
