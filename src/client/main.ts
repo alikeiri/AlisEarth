@@ -557,6 +557,17 @@ class GameClient {
 
   // on-screen action buttons for touch devices (keyboard-free controls)
   private setupTouchBar(on: any) {
+    // collapsible build sidebar (handy on phones; available everywhere)
+    const sb = document.getElementById('sidebar'), tog = document.getElementById('sidebarToggle');
+    if (sb && tog) {
+      const toggle = () => {
+        const col = sb.classList.toggle('collapsed');
+        tog.classList.toggle('collapsed', col);
+        tog.textContent = col ? '⮜' : '⮜'; // ⮜ open / ⮝? use arrows
+        tog.textContent = col ? '☰' : '⮜'; // ☰ when collapsed, ⮜ when open
+      };
+      on(tog, 'click', toggle);
+    }
     const bar = document.getElementById('touchBar');
     if (!bar) return;
     // show on touch devices or narrow screens; re-check when the window changes
@@ -738,15 +749,25 @@ class GameClient {
     for (const v of (combat.length ? combat : boxed)) this.selection.add(v.i);
   }
 
+  // compute the building-ghost cell + validity at a screen point
+  private ghostAt(sx: number, sy: number): { cx: number; cz: number; ok: boolean } | null {
+    if (!this.ui.placing) return null;
+    const g = this.renderer.groundPoint(sx / window.innerWidth, sy / window.innerHeight);
+    if (!g) return null;
+    const s = BUILDINGS[this.ui.placing].size;
+    const cx = Math.max(0, Math.min(W - s, Math.round(g.x - s / 2)));
+    const cz = Math.max(0, Math.min(H - s, Math.round(g.z - s / 2)));
+    return { cx, cz, ok: canPlaceClient(this.game.map, this.lastViews, this.game.me, this.ui.placing, cx, cz) };
+  }
+
   // touch: tap selects own units, or issues a command when something's selected
   private tapAt(sx: number, sy: number) {
     const me = this.game.me;
-    if (this.ui.placing && this.lastGhost) {
-      if (this.lastGhost.ok) {
-        this.game.issue({ k: 'place', p: me, type: this.ui.placing, cx: this.lastGhost.cx, cz: this.lastGhost.cz });
-        audio.play('place');
-        this.ui.setPlacing(null);
-      }
+    if (this.ui.placing) {
+      // compute the spot fresh at the tap (lastGhost can be stale on touch)
+      const gh = this.ghostAt(sx, sy);
+      if (gh && gh.ok) { this.game.issue({ k: 'place', p: me, type: this.ui.placing, cx: gh.cx, cz: gh.cz }); audio.play('place'); this.ui.setPlacing(null); }
+      else audio.play('cancel');
       return;
     }
     const now = performance.now();
@@ -793,6 +814,11 @@ class GameClient {
       this.touch.sx = t.clientX; this.touch.sy = t.clientY;
       this.touch.downT = performance.now(); this.touch.moved = false;
       this.mouse.x = t.clientX; this.mouse.y = t.clientY;
+      if (this.ui.placing) {
+        // placing a building: the finger moves the ghost preview, lift to place
+        this.touch.mode = '';
+        return;
+      }
       if (this.touch.boxToggle || this.patrolMode) {
         this.touch.mode = this.patrolMode ? 'pan' : 'box';
         if (this.patrolMode) { const g = this.renderer.groundPoint(t.clientX / window.innerWidth, t.clientY / window.innerHeight); this.patrolDraw = g ? [g] : []; }
@@ -826,6 +852,7 @@ class GameClient {
     const t = e.touches[0];
     this.mouse.x = t.clientX; this.mouse.y = t.clientY;
     if (Math.hypot(t.clientX - this.touch.sx, t.clientY - this.touch.sy) > 8) this.touch.moved = true;
+    if (this.ui.placing) return; // ghost follows this.mouse in the loop; lift to place
     if (this.touch.mode === 'pan' && this.grab) {
       const g = this.renderer.groundPoint(t.clientX / window.innerWidth, t.clientY / window.innerHeight);
       if (g) this.renderer.jumpCam(this.renderer.camX + (this.grab.x - g.x), this.renderer.camZ + (this.grab.z - g.z));
@@ -844,6 +871,7 @@ class GameClient {
     if (e.touches.length > 0) return; // still fingers down (end of a pinch)
     const mode = this.touch.mode; this.touch.mode = '';
     this.grab = null;
+    if (this.ui.placing) { this.tapAt(this.mouse.x, this.mouse.y); return; } // lift = place at the ghost
     if (this.patrolMode) { this.finishPatrol(this.touch.sx, this.touch.sy); return; }
     if (mode === 'box' && this.touch.moved) {
       this.mouse.dragging = false;
@@ -1265,15 +1293,8 @@ class GameClient {
 
     // building ghost
     if (this.ui.placing) {
-      const g = this.renderer.groundPoint(this.mouse.x / window.innerWidth, this.mouse.y / window.innerHeight);
-      if (g) {
-        const s = BUILDINGS[this.ui.placing].size;
-        const cx = Math.max(0, Math.min(W - s, Math.round(g.x - s / 2)));
-        const cz = Math.max(0, Math.min(H - s, Math.round(g.z - s / 2)));
-        const ok = canPlaceClient(this.game.map, views, this.game.me, this.ui.placing, cx, cz);
-        this.lastGhost = { cx, cz, ok };
-        this.renderer.setGhost(true, this.ui.placing, cx, cz, ok);
-      }
+      const gh = this.ghostAt(this.mouse.x, this.mouse.y);
+      if (gh) { this.lastGhost = gh; this.renderer.setGhost(true, this.ui.placing, gh.cx, gh.cz, gh.ok); }
     } else {
       this.lastGhost = null;
       this.renderer.setGhost(false);

@@ -39,7 +39,12 @@
 
   #sidebar { position: absolute; top: 40px; right: 0; bottom: 210px; width: 238px;
     background: var(--hud-bg); border-left: 1px solid var(--hud-border);
-    padding: 8px; overflow-y: auto; z-index: 5; }
+    padding: 8px; overflow-y: auto; z-index: 5; transition: transform 0.2s ease; }
+  #sidebar.collapsed { transform: translateX(100%); }
+  #sidebarToggle { position: absolute; top: 44px; right: 238px; width: 30px; height: 44px; z-index: 6;
+    background: var(--hud-bg); color: #cfe0ee; border: 1px solid var(--hud-border); border-right: none;
+    border-radius: 6px 0 0 6px; font-size: 15px; cursor: pointer; transition: right 0.2s ease; touch-action: manipulation; }
+  #sidebarToggle.collapsed { right: 0; }
   #sidebar h3 { font-size: 10px; text-transform: uppercase; letter-spacing: 1.5px;
     color: #78909c; margin: 8px 0 5px 2px; }
   #upgBtn { background: #20301d; border: 1px solid #4a7d3c; border-radius: 4px; padding: 8px 6px;
@@ -95,6 +100,7 @@
     #touchBar:not(.hidden) { display: flex !important; }
     #hint { display: none; }
     #sidebar { width: 168px; bottom: 150px; }
+    #sidebarToggle { right: 168px; }
     #minimapWrap { width: 150px !important; height: 150px !important; }
     .bbtn { padding: 8px 4px; font-size: 11px; }
   }
@@ -175,6 +181,7 @@
       <div id="muteBtn" title="Toggle sound">🔊</div>
       <div id="exitBtn" title="Exit to menu">✕</div>
     </div>
+    <button id="sidebarToggle" title="Show/hide build menu">⮜</button>
     <div id="sidebar">
       <h3>Structures</h3>
       <div class="bgrid" id="gridB"></div>
