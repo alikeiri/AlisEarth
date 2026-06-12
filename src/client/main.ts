@@ -899,7 +899,7 @@ class GameClient {
     }
     // live attack-circle while dragging an area target
     if (this.mouse.rDragging && this.rMode === 'aatk' && this.areaDrag && this.areaDrag.r > 0.5)
-      circles.push({ x: this.areaDrag.cx, z: this.areaDrag.cz, r: this.areaDrag.r, atk: true });
+      circles.push({ x: this.areaDrag.cx, z: this.areaDrag.cz, r: this.areaDrag.r, atk: true, fill: true } as any);
     // age out command effects
     for (const f of this.cmdFx) f.t -= dt;
     this.cmdFx = this.cmdFx.filter(f => f.t > 0);

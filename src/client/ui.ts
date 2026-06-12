@@ -509,8 +509,13 @@ export class UI {
           if (!started) { ctx.moveTo(p.x, p.y); started = true; } else ctx.lineTo(p.x, p.y);
         }
         if (anyOk) {
+          if ((c as any).fill) { // area-attack circle: filled for visibility
+            ctx.closePath();
+            ctx.fillStyle = 'rgba(255,90,70,0.18)';
+            ctx.fill();
+          }
           ctx.strokeStyle = 'rgba(255,90,70,0.5)';
-          ctx.lineWidth = 1.4;
+          ctx.lineWidth = (c as any).fill ? 2 : 1.4;
           ctx.setLineDash([5, 4]);
           ctx.stroke();
           ctx.setLineDash([]);
