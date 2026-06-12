@@ -27,6 +27,8 @@ export interface Entity {
   fortified: boolean; emitCd: number; ephLife: number; // drone hive + ephemeral units
   aimX?: number; aimZ?: number; // last firing target — renderer turns the unit toward it
   oreCd: number; // harvester cooldown after every reachable field proved empty/blocked
+  sd: number; // self-destruct: seconds left (0 = inactive); detonates at 0
+  cmdT: number; // tick of the last explicit player/AI order (protects it from auto-reactions)
   research: { tech: string; t: number; t0: number } | null; // research lab
   // buildings
   cx: number; cz: number; size: number;
@@ -133,7 +135,7 @@ export class Sim {
       id: this.nextId++, owner: p, type, b,
       x: 0, z: 0, px: 0, pz: 0, hp: 1, maxHp: 1,
       orders: [], path: null, pi: 0, cd: 0, mt: 0, cargo: 0, cargoVal: 0, repath: 0,
-      wx: 0, wz: 0, stuckT: 0, mvi: -9, pathFail: 0, ammo: -1, oreCd: 0,
+      wx: 0, wz: 0, stuckT: 0, mvi: -9, pathFail: 0, ammo: -1, oreCd: 0, sd: 0, cmdT: -999,
       stance: 0, lastHitBy: 0, lastHitT: -999, reactCd: 0,
       fortified: false, emitCd: 0, ephLife: 0, research: null,
       cx: 0, cz: 0, size: 1, progress: 0, total: 1, queue: [], rallyX: -1, rallyZ: -1, lvl: 1, patPts: null, rpt: false, primary: false,
@@ -186,16 +188,21 @@ export class Sim {
   canPlace(p: number, type: string, cx: number, cz: number): boolean {
     const def = BUILDINGS[type];
     if (!def) return false;
+    const onWater = type === 'shipyard'; // ports sit ON the water
     for (let z = cz; z < cz + def.size; z++)
-      for (let x = cx; x < cx + def.size; x++)
-        if (!this.map.inB(x, z) || this.map.tBlocked[z * W + x] || this.map.occ[z * W + x]) return false;
-    // shipyards must sit on a coast: water cells adjacent to the footprint
+      for (let x = cx; x < cx + def.size; x++) {
+        const i = z * W + x;
+        if (!this.map.inB(x, z) || this.map.occ[i]) return false;
+        // water blocks normal buildings, but a shipyard is built on it
+        if (this.map.tBlocked[i] && !(onWater && this.map.water[i])) return false;
+      }
+    // shipyards must straddle the coast: water in/around the footprint
     if (type === 'shipyard') {
       let wn = 0;
       for (let z = cz - 1; z <= cz + def.size; z++)
         for (let x = cx - 1; x <= cx + def.size; x++)
           if (this.map.inB(x, z) && this.map.water[z * W + x]) wn++;
-      if (wn < 3) return false;
+      if (wn < 2) return false;
     }
     // must be near an existing friendly building OR a friendly road tile
     const mx = cx + def.size / 2, mz = cz + def.size / 2;
@@ -289,6 +296,25 @@ export class Sim {
         u.orders = list.map(t => ({ k: 'attack' as const, tgt: t.id }));
         u.path = null;
       }
+      return;
+    }
+    if (c.k === 'selfdestruct') {
+      // Ctrl-D toggle: if any selected unit is already counting down, cancel
+      // them all; otherwise arm a 5s sequence on each
+      const ids = (c.ids || []).map((id: number) => this.ents.get(id)).filter((u: Entity) => u && !u.b && u.owner === c.p);
+      const anyArmed = ids.some((u: Entity) => u.sd > 0);
+      for (const u of ids) u.sd = anyArmed ? 0 : 5;
+      return;
+    }
+    if (c.k === 'dismantle') {
+      // sell a building for a partial refund (construction yard excluded)
+      const b = this.ents.get(c.bid);
+      if (!b || !b.b || b.owner !== c.p || b.type === 'conyard') return;
+      const refund = Math.round(BUILDINGS[b.type].cost * pl.fac.costMul * pl.bonusCost * 0.5 * (b.progress / b.total));
+      pl.credits += refund;
+      this.events.push({ e: 'cash', x: b.x, z: b.z });
+      this.events.push({ e: 'boom', x: b.x, z: b.z, big: false });
+      b.hp = 0; // death sweep frees the cells
       return;
     }
     if (c.k === 'surrender') {
@@ -408,7 +434,7 @@ export class Sim {
     if (!units.length) return;
 
     if (c.k === 'stop') {
-      for (const u of units) { u.orders = []; u.path = null; }
+      for (const u of units) { u.orders = []; u.path = null; u.cmdT = this.tickN; }
       return;
     }
     if (c.k === 'patrol' && Array.isArray(c.pts) && c.pts.length) {
@@ -435,6 +461,7 @@ export class Sim {
         else { const o = FORM[Math.min(idx, FORM.length - 1)]; ord = { k: 'move', x: t2.x + o.x, z: t2.z + o.z }; }
       }
       if (!ord) return;
+      u.cmdT = this.tickN; // explicit order — shield it from auto-reactions
       if (c.q) u.orders.push(ord);
       else { u.orders = [ord]; u.path = null; }
     });
@@ -656,10 +683,12 @@ export class Sim {
     const ud = UNITS[att.type];
     // weapon class: 0 mg, 1 rocket, 2 cannon, 3 drone zap, 4 missile salvo
     const tgtInf = !tgt.b && UNITS[tgt.type]?.kind === 'inf';
-    const w = att.type === 'rifle' || att.type === 'ifv' || att.type === 'flak' ? 0
+    const w = att.type === 'rifle' || att.type === 'ifv' ? 0
+      : att.type === 'flak' ? 5                                              // pom-pom flak
       : att.type === 'rocket' || att.type === 'sam' || att.type === 'aatank' ? 1
       : att.type === 'mlrs' || att.type === 'msldrone' ? 4
-      : att.type === 'heli' || att.type === 'helidrone' ? (tgtInf ? 0 : 1) // guns vs inf, rockets vs veh/bld
+      : att.type === 'heli' || att.type === 'helidrone' ? (tgtInf ? 0 : 1)   // guns vs inf, rockets vs veh/bld
+      : att.type === 'heavy' || att.type === 'destroyer' ? 6                 // heavy/naval gun
       : ud?.kind === 'air' ? 3 : 2;
     const ev: any = { e: 'shot', x: att.x, z: att.z, tx: tgt.x, tz: tgt.z, w };
     if (ud?.fly) ev.f = 1;
@@ -764,6 +793,25 @@ export class Sim {
     const def = UNITS[u.type];
     u.cd -= TICK;
 
+    // self-destruct countdown → fireball (incinerates nearby enemies, like a
+    // last stand) then the unit dies
+    if (u.sd > 0) {
+      const prev = Math.ceil(u.sd);
+      u.sd -= TICK;
+      if (Math.ceil(u.sd) !== prev && u.sd > 0) this.events.push({ e: 'sdtick', x: u.x, z: u.z, owner: u.owner });
+      if (u.sd <= 0) {
+        const R = 2.6;
+        for (const o of this.nearbyUnits(u.x, u.z, R + 1)) {
+          if (o.owner === u.owner || o.hp <= 0 || o.id === u.id) continue;
+          const d = Math.hypot(o.x - u.x, o.z - u.z);
+          if (d <= R) this.dealDamage(u, o, u.maxHp * 0.6 * (1 - 0.5 * (d / R)));
+        }
+        u.hp = 0;
+        this.events.push({ e: 'boom', x: u.x, z: u.z, big: true });
+        return;
+      }
+    }
+
     // ephemeral units (mini drones) self-destruct after their lifetime
     if (def.ephemeral) {
       u.ephLife += TICK;
@@ -820,8 +868,12 @@ export class Sim {
           if (tgt) this.fire(u, tgt, def.dmg, def.rof);
         }
       } else {
-        // AGGRESSIVE: return fire when hit, and auto-engage enemies in sight
-        if (recentlyHit && !busy && this.ents.has(u.lastHitBy)) {
+        // AGGRESSIVE: return fire when hit, and auto-engage enemies in sight.
+        // BUT a fresh player/AI order wins for ~2.5s so the player can always
+        // pull a unit OUT of a firefight (fixed: units became unresponsive,
+        // the return-fire kept burying every move command).
+        const manual = this.tickN - u.cmdT < 25;
+        if (recentlyHit && !busy && !manual && this.ents.has(u.lastHitBy)) {
           u.orders.unshift({ k: 'attack', tgt: u.lastHitBy }); u.path = null;
         } else if (!u.orders.length && this.tickN % 5 === u.id % 5) {
           const tgt = this.findEnemy(u, def.range + 2.5); // chase enemies in sight
@@ -1360,6 +1412,7 @@ export class Sim {
           v.fr = 1; // mid-reload = in a firefight (drives aim pose)
           if (e.aimX !== undefined) { v.ax = Math.round(e.aimX * 10) / 10; v.az = Math.round(e.aimZ! * 10) / 10; }
         }
+        if (e.sd > 0) v.sd = Math.ceil(e.sd); // self-destruct countdown
       }
       ents.push(v);
     }

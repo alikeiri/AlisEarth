@@ -606,6 +606,17 @@ function buildingGroupPro(type: string, teamColor: number): THREE.Group {
     add(new THREE.TorusGeometry(0.3, 0.05, 8, 16), steel, 0, 1.35, 0).rotation.x = Math.PI / 2.5;
     add(new THREE.CylinderGeometry(0.06, 0.06, 0.4, 6), steel, 0.6, 0.5, 0.6);
     add(roundedSlabGeo(1.5, 0.2, 0.06, 0.06), team, 0, 0.45, -0.75);
+  } else if (type === 'wall') {
+    add(roundedSlabGeo(0.92, 0.92, 0.85, 0.06), concrete, 0, 0.42, 0);
+    add(roundedSlabGeo(0.7, 0.7, 0.18, 0.05), darkM, 0, 0.9, 0);
+    add(roundedSlabGeo(0.96, 0.14, 0.05, 0.04), team, 0, 0.2, 0);
+  } else if (type === 'barrier') {
+    // crossed concrete tank trap (hedgehog-ish)
+    for (const a of [Math.PI / 4, -Math.PI / 4]) {
+      const beam = add(new THREE.BoxGeometry(0.12, 0.12, 1.15), concrete, 0, 0.3, 0);
+      beam.rotation.y = a;
+    }
+    add(new THREE.BoxGeometry(0.12, 0.12, 1.15), darkM, 0, 0.42, 0);
   } else if (type === 'radar') {
     add(roundedSlabGeo(1.8, 1.8, 0.35), concrete);
     add(new THREE.CylinderGeometry(0.18, 0.26, 0.7, 10), darkM, 0, 0.7, 0); // mast

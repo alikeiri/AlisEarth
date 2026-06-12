@@ -18,6 +18,11 @@ function vnoise(seed: number, x: number, y: number): number {
   return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v;
 }
 
+function smoothstep(e0: number, e1: number, x: number): number {
+  const t = Math.max(0, Math.min(1, (x - e0) / (e1 - e0)));
+  return t * t * (3 - 2 * t);
+}
+
 export function fbm(seed: number, x: number, y: number, oct = 4): number {
   let f = 0, amp = 0.5, fr = 1;
   for (let i = 0; i < oct; i++) { f += amp * vnoise(seed + i * 101, x * fr, y * fr); amp *= 0.5; fr *= 2; }
@@ -188,17 +193,20 @@ export function genMap(seed: number, nPlayers: number): GameMap {
       const dEdge = Math.min(x, W - x, z, H - z) / (W * 0.5);
       const e = Math.min(1, dEdge / 0.14); // thin sea border at map edges
       // domain-warped mask sample = detailed coastline from a coarse shape;
-      // seed bits mirror the continent for extra per-game variety
-      let wu = (x / W - 0.5) * 1.12 + 0.5 + (fbm(seed + 91, x * 0.045, z * 0.045) - 0.5) * 0.14;
-      let wv = (z / H - 0.5) * 1.12 + 0.5 + (fbm(seed + 92, x * 0.045, z * 0.045) - 0.5) * 0.14;
+      // seed bits mirror the continent for extra per-game variety. 1.06 fills
+      // more of the map with land (bigger playable area; tester: felt small).
+      let wu = (x / W - 0.5) * 1.06 + 0.5 + (fbm(seed + 91, x * 0.045, z * 0.045) - 0.5) * 0.14;
+      let wv = (z / H - 0.5) * 1.06 + 0.5 + (fbm(seed + 92, x * 0.045, z * 0.045) - 0.5) * 0.14;
       if (seed & 32) wu = 1 - wu;
       if (seed & 64) wv = 1 - wv;
       const mask = maskAt(cont.rows, wu, wv);
-      let h = (mask * 2.3 - 0.78) * 5.6 * e;
-      h += (fbm(seed, x * 0.05, z * 0.05) - 0.5) * 2.4 * mask; // interior variation
+      // gentler coastal slope: the land plateau rises softly from the shore so
+      // there's flat buildable ground by the water (tester: coasts too steep)
+      let h = (smoothstep(0.28, 0.62, mask) * 3.2 - 0.55) * 4.4 * e;
+      h += (fbm(seed, x * 0.05, z * 0.05) - 0.5) * 2.0 * mask; // interior variation
       const ridge = fbm(seed + 777, x * 0.06, z * 0.06);
-      h += Math.max(0, ridge - 0.66) * 16 * mask;
-      h += fbm(seed + 313, x * 0.18, z * 0.18) * 0.5; // small texture
+      h += Math.max(0, ridge - 0.7) * 14 * mask; // mountains only well inland
+      h += fbm(seed + 313, x * 0.18, z * 0.18) * 0.45; // small texture
       m.hN[z * (W + 1) + x] = Math.max(-1.2, h);
     }
   }
@@ -214,7 +222,7 @@ export function genMap(seed: number, nPlayers: number): GameMap {
         const ci = cz * W + cx;
         m.tBlocked[ci] = 0; m.water[ci] = 0;
         if (avg < SEA + 0.05) { m.tBlocked[ci] = 1; m.water[ci] = 1; }
-        else if (slope > 1.7) m.tBlocked[ci] = 1;
+        else if (slope > 2.0) m.tBlocked[ci] = 1; // only genuinely steep cliffs block
       }
     }
   };

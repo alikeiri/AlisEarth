@@ -118,6 +118,7 @@ const http = createServer(async (req, res) => {
       res.end(idx);
       return;
     }
+    if (req.method === 'POST' && p === '/replays') { handleReplayUpload(req, res); return; }
     if (req.method === 'GET' && /^\/replays\/[a-z0-9]+$/.test(p)) {
       try {
         const body = readFileSync(join(REPLAY_DIR, p.slice('/replays/'.length) + '.json'));
@@ -237,6 +238,29 @@ function saveReplay(room: Room) {
     }
     writeFileSync(REPLAY_INDEX, JSON.stringify(idx.slice(0, 40)));
   } catch { /* disk trouble — skip */ }
+}
+
+// accept a client-recorded replay (skirmish games run in the browser, so they
+// upload their seed + command stream here to be watchable like server matches)
+function handleReplayUpload(req: any, res: any) {
+  let raw = '';
+  req.on('data', (c: Buffer) => { raw += c; if (raw.length > 4_000_000) req.destroy(); });
+  req.on('end', () => {
+    try {
+      const d = JSON.parse(raw);
+      if (typeof d.seed !== 'number' || !Array.isArray(d.cmds) || !d.meta) { res.writeHead(400); res.end(); return; }
+      const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+      const meta = { id, date: Date.now(), source: 'skirmish', ...d.meta };
+      writeFileSync(join(REPLAY_DIR, id + '.json'), JSON.stringify({ meta, seed: d.seed, size: d.size || 96, cmds: d.cmds }));
+      let idx: any[] = [];
+      try { idx = JSON.parse(readFileSync(REPLAY_INDEX, 'utf8')); } catch { /* first */ }
+      idx.unshift(meta);
+      for (const old of idx.slice(40)) { try { unlinkSync(join(REPLAY_DIR, old.id + '.json')); } catch { /* gone */ } }
+      writeFileSync(REPLAY_INDEX, JSON.stringify(idx.slice(0, 40)));
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ id }));
+    } catch { res.writeHead(500); res.end(); }
+  });
 }
 
 function broadcast(room: Room, obj: any) {

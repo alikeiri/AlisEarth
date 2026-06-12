@@ -37,10 +37,14 @@ class LocalGame implements GameLike {
   private acc = 0;
   private evQ: any[] = [];
   private reportSaved = false;
+  // replay recording: seed + the full command stream (incl. AI) replays exactly
+  private recSeed = 0; private recSize = 96; private recPlayers: any[] = [];
+  private recCmds: { k: number; c: any[] }[] = [];
+  private recSaved = false;
 
   // simLvl2 !== null switches to simulation mode: two AIs fight, you spectate.
-  // enemies (1-3) sets how many AI opponents a skirmish has.
-  constructor(name: string, faction: string, aiLvl = 1, size = 96, simLvl2: number | null = null, enemies = 1) {
+  // enemyLevels lists one difficulty per AI opponent (1-3) in a skirmish.
+  constructor(name: string, faction: string, aiLvl = 1, size = 96, simLvl2: number | null = null, enemyLevels: number[] = [1]) {
     setMapSize(size);
     const seed = (Date.now() ^ (Math.random() * 0x7fffffff)) >>> 0;
     const LVL_NAMES = ['Easy', 'Normal', 'Hard', 'Brutal'];
@@ -58,11 +62,13 @@ class LocalGame implements GameLike {
         { name: `AI ${FACTIONS[f2].name} (${LVL_NAMES[simLvl2]})`, faction: f2, isAI: true, aiLvl: simLvl2 },
       ]);
     } else {
-      const n = Math.max(1, Math.min(3, enemies));
+      const lvls = enemyLevels.slice(0, 3);
+      const facs = pickFacs([faction], lvls.length);
       const specs: any[] = [{ name, faction }];
-      for (const af of pickFacs([faction], n))
-        specs.push({ name: `AI ${FACTIONS[af].name} (${LVL_NAMES[aiLvl] || 'Normal'})`, faction: af, isAI: true, aiLvl });
+      lvls.forEach((lv, i) =>
+        specs.push({ name: `AI ${FACTIONS[facs[i]].name} (${LVL_NAMES[lv] || 'Normal'})`, faction: facs[i], isAI: true, aiLvl: lv }));
       this.sim = new Sim(seed, specs);
+      this.recSeed = seed; this.recSize = size; this.recPlayers = specs.map(s => ({ ...s }));
     }
     // the AI studies past games and adapts: server intelligence is primary,
     // the browser's own profile fills in when the server is unreachable
@@ -71,6 +77,19 @@ class LocalGame implements GameLike {
   get map() { return this.sim.map; }
   get tickN() { return this.sim.tickN; }
   issue(cmd: any) { this.pending.push(cmd); }
+  // send the finished skirmish to the server's replay store so it's watchable
+  private uploadReplay() {
+    if (!this.recPlayers.length) return;
+    const meta = {
+      players: this.recPlayers.map(p => ({ name: p.name, faction: p.faction, isAI: !!p.isAI })),
+      winner: this.sim.winner, winnerName: this.sim.winner >= 0 ? this.recPlayers[this.sim.winner]?.name : null,
+      lenSec: Math.round(this.sim.tickN / 10), done: true,
+    };
+    fetch('/replays', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ meta, seed: this.recSeed, size: this.recSize, cmds: this.recCmds }),
+    }).catch(() => { /* offline / static host — replay just isn't stored */ });
+  }
   update(dtMs: number) {
     this.acc += dtMs * this.speed;
     let guard = 0;
@@ -79,6 +98,7 @@ class LocalGame implements GameLike {
       this.acc -= 100; guard++;
       const cmds = this.pending; this.pending = [];
       this.sim.players.forEach((pl, i) => { if (pl.isAI) cmds.push(...aiTick(this.sim, i)); });
+      if (!this.isSim && cmds.length && this.recCmds.length < 20000) this.recCmds.push({ k: this.sim.tickN, c: cmds.map(x => ({ ...x })) });
       this.sim.tick(cmds);
       for (const ev of this.sim.events) {
         if (ev.e === 'aiReport' && !this.reportSaved) {
@@ -87,6 +107,7 @@ class LocalGame implements GameLike {
           requestLesson(ev.r); // fire-and-forget post-mortem
         }
       }
+      if (this.sim.done && !this.recSaved && !this.isSim) { this.recSaved = true; this.uploadReplay(); }
       this.evQ.push(...this.sim.events);
     }
     if (guard >= gMax) this.acc = 0; // tab was backgrounded — drop the backlog
@@ -123,6 +144,7 @@ class LocalGame implements GameLike {
           v.fr = 1; // firing — drives infantry aim pose
           if (e.aimX !== undefined) { v.ax = e.aimX; v.az = e.aimZ; } // turn toward the target
         }
+        if (e.sd > 0) v.sd = Math.ceil(e.sd); // self-destruct countdown
       }
       out.push(v);
     }
@@ -470,8 +492,19 @@ class GameClient {
           audio.play('click');
         }
       }
+      // Ctrl-D: arm/cancel a 5s self-destruct on units; dismantle a building
+      if (e.code === 'KeyD' && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        const ids = this.myUnitIds();
+        if (ids.length) { this.game.issue({ k: 'selfdestruct', p: this.game.me, ids }); audio.play('sdbeep'); }
+        else {
+          const sel = [...this.selection].map(id => this.byId.get(id)).filter(Boolean);
+          const b = sel.find(v => v && v.b && v.o === this.game.me && v.t !== 'conyard');
+          if (b) { this.game.issue({ k: 'dismantle', p: this.game.me, bid: b.i }); audio.play('cancel'); }
+        }
+      }
       // C: toggle range/detection circles on selected units & buildings
-      if (e.code === 'KeyC') this.showRanges = !this.showRanges;
+      else if (e.code === 'KeyC') this.showRanges = !this.showRanges;
       // F: fortify / unfortify selected Drone Hives
       if (e.code === 'KeyF') {
         const hives = this.myUnitIds().filter(id => this.byId.get(id)?.t === 'hive');
@@ -1058,6 +1091,7 @@ class GameClient {
         const who = this.game.players?.()[ev.p]?.n || 'Enemy';
         this.appendChat({ name: who, to: 'all', msg: 'We surrender! The region is yours.' });
       }
+      if (ev.e === 'sdtick' && ev.owner === this.game.me) audio.play('sdbeep');
       audio.event(ev, this.renderer.camX, this.renderer.camZ, this.game.me);
     }
     // chat messages + expiry
@@ -1156,6 +1190,7 @@ let selDiff2 = 2;
 let selSize = 96;
 let fogEnabled = true; // start-screen checkbox; spectator/replay always show all
 let selEnemies = 1; // 1-3 AI opponents in skirmish
+let selDiff3 = 2;   // third enemy's difficulty
 let client: GameClient | null = null;
 let net: Net | null = null;
 
@@ -1588,12 +1623,26 @@ function initMenus() {
   buildOptionRow('diffRow',
     [{ label: 'Easy', v: 0 }, { label: 'Normal', v: 1 }, { label: 'Hard', v: 2 }, { label: 'Brutal', v: 3 }],
     () => selDiff, v => { selDiff = v; });
+  const LVLS = [{ label: 'Easy', v: 0 }, { label: 'Normal', v: 1 }, { label: 'Hard', v: 2 }, { label: 'Brutal', v: 3 }];
   buildOptionRow('enemyRow',
     [{ label: '1', v: 1 }, { label: '2', v: 2 }, { label: '3', v: 3 }],
-    () => selEnemies, v => { selEnemies = v; });
-  buildOptionRow('diffRow2',
-    [{ label: 'Easy', v: 0 }, { label: 'Normal', v: 1 }, { label: 'Hard', v: 2 }, { label: 'Brutal', v: 3 }],
-    () => selDiff2, v => { selDiff2 = v; });
+    () => selEnemies, v => {
+      selEnemies = v;
+      $('diffRow2Wrap').classList.toggle('hidden', v < 2);
+      $('diffRow3Wrap').classList.toggle('hidden', v < 3);
+    });
+  $('diffRow2Wrap').classList.toggle('hidden', selEnemies < 2);
+  buildOptionRow('diffRow2', LVLS, () => selDiff2, v => { selDiff2 = v; });
+  buildOptionRow('diffRow3', LVLS, () => selDiff3, v => { selDiff3 = v; });
+  // audio settings: music style + volume sliders
+  const musSel = $('musStyle') as HTMLSelectElement;
+  musSel.value = audio.musicStyle;
+  musSel.addEventListener('change', () => { audio.init(); audio.setMusicStyle(musSel.value); });
+  const mv = $('musVol') as HTMLInputElement, sv = $('sfxVol') as HTMLInputElement;
+  mv.value = String(Math.round(audio.musicVol * 100));
+  sv.value = String(Math.round(audio.sfxVol * 100));
+  mv.addEventListener('input', () => { audio.init(); audio.setMusicVol(+mv.value / 100); });
+  sv.addEventListener('input', () => { audio.init(); audio.setSfxVol(+sv.value / 100); });
   buildOptionRow('sizeRow',
     [{ label: 'Small', v: 72 }, { label: 'Medium', v: 96 }, { label: 'Large', v: 128 }],
     () => selSize, v => { selSize = v; });
@@ -1601,7 +1650,8 @@ function initMenus() {
     const key = (($('claudeKey') as HTMLInputElement).value || '').trim();
     try { localStorage.setItem('ae_claude_key', key); } catch { /* no storage */ }
     fogEnabled = ($('fogChk') as HTMLInputElement)?.checked ?? true;
-    startGame(new LocalGame(playerName(), selFaction, selDiff, selSize, null, selEnemies));
+    const levels = [selDiff, selDiff2, selDiff3].slice(0, selEnemies);
+    startGame(new LocalGame(playerName(), selFaction, selDiff, selSize, null, levels));
   });
   $('btnSimulate').addEventListener('click', () => {
     // spectate AI (level 1 row) vs AI 2 (level 2 row); +/- adjusts speed to 32×

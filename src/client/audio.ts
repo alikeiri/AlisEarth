@@ -13,9 +13,17 @@ class AudioMan {
   private eighth = 0;
   private nextT = 0;
   muted = false;
+  musicVol = 0.4;   // 0..1, music bus
+  sfxVol = 1.0;     // 0..1, sound effects + unit voices
+  musicStyle = 'battle'; // 'battle' | 'ambient' | 'march' | 'off'
 
   constructor() {
-    try { this.muted = localStorage.getItem('fe_mute') === '1'; } catch {}
+    try {
+      this.muted = localStorage.getItem('fe_mute') === '1';
+      const mv = localStorage.getItem('fe_musvol'); if (mv !== null) this.musicVol = +mv;
+      const sv = localStorage.getItem('fe_sfxvol'); if (sv !== null) this.sfxVol = +sv;
+      const ms = localStorage.getItem('fe_musstyle'); if (ms) this.musicStyle = ms;
+    } catch { /* no storage */ }
   }
 
   // Must be called from a user gesture (autoplay policy). Idempotent.
@@ -31,10 +39,10 @@ class AudioMan {
     this.master.gain.value = this.muted ? 0 : 0.6;
     this.master.connect(this.ctx.destination);
     this.sfxG = this.ctx.createGain();
-    this.sfxG.gain.value = 1;
+    this.sfxG.gain.value = this.sfxVol;
     this.sfxG.connect(this.master);
     this.musG = this.ctx.createGain();
-    this.musG.gain.value = 0.4;
+    this.musG.gain.value = this.musicVol;
     this.musG.connect(this.master);
     // echo bus for the music arpeggio
     this.delay = this.ctx.createDelay(1);
@@ -47,13 +55,29 @@ class AudioMan {
     const d = n.getChannelData(0);
     for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
     this.noiseBuf = n;
-    this.startMusic();
+    if (this.musicStyle !== 'off') this.startMusic();
   }
 
   setMuted(m: boolean) {
     this.muted = m;
     try { localStorage.setItem('fe_mute', m ? '1' : '0'); } catch {}
     if (this.master && this.ctx) this.master.gain.setTargetAtTime(m ? 0 : 0.6, this.ctx.currentTime, 0.05);
+  }
+  setMusicVol(v: number) {
+    this.musicVol = Math.max(0, Math.min(1, v));
+    try { localStorage.setItem('fe_musvol', String(this.musicVol)); } catch {}
+    if (this.musG && this.ctx) this.musG.gain.setTargetAtTime(this.musicVol, this.ctx.currentTime, 0.05);
+  }
+  setSfxVol(v: number) {
+    this.sfxVol = Math.max(0, Math.min(1, v));
+    try { localStorage.setItem('fe_sfxvol', String(this.sfxVol)); } catch {}
+    if (this.sfxG && this.ctx) this.sfxG.gain.setTargetAtTime(this.sfxVol, this.ctx.currentTime, 0.05);
+  }
+  setMusicStyle(s: string) {
+    this.musicStyle = s;
+    try { localStorage.setItem('fe_musstyle', s); } catch {}
+    this.stopMusic();
+    if (s !== 'off') this.startMusic();
   }
 
   // ---------- synth primitives ----------
@@ -94,30 +118,49 @@ class AudioMan {
   play(name: string, vol = 1) {
     if (!this.ctx || this.muted || vol <= 0.02) return;
     const now = performance.now();
-    const gap: Record<string, number> = { mg: 50, cn: 80, rkt: 90, zap: 60, salvo: 200, boomS: 70, boomB: 140, cash: 120, crush: 90 };
+    const gap: Record<string, number> = { mg: 45, cn: 80, rkt: 90, zap: 60, salvo: 200, flakgun: 55, hcannon: 110, boomS: 70, boomB: 140, cash: 120, crush: 90 };
     if (gap[name] && now - (this.last[name] || 0) < gap[name]) return;
     this.last[name] = now;
     const v = Math.min(1, vol);
     switch (name) {
       case 'mg':
-        this.burst(0.07, 'bandpass', 1700, 900, 0.22 * v, 0, 2);
+        // rifle/autocannon: a snappy supersonic crack + body thwack + casing tick
+        this.burst(0.014, 'highpass', 3200, 3200, 0.32 * v);            // crack
+        this.burst(0.05, 'bandpass', 1500, 720, 0.24 * v, 0.002, 1.6);  // body
+        this.tone('sine', 150, 60, 0.05, 0.18 * v, 0.001);              // low thump
         break;
       case 'cn':
-        // tank cannon: sharp crack + deep muzzle thump + body
-        this.burst(0.045, 'highpass', 1600, 1600, 0.3 * v);
-        this.tone('sine', 115, 34, 0.3, 0.62 * v);
-        this.burst(0.24, 'lowpass', 650, 140, 0.38 * v);
+        // tank cannon: sharp crack + deep muzzle thump + rolling body
+        this.burst(0.04, 'highpass', 1800, 1800, 0.34 * v);
+        this.tone('sine', 120, 32, 0.32, 0.66 * v);
+        this.burst(0.26, 'lowpass', 700, 130, 0.4 * v);
+        break;
+      case 'hcannon':
+        // heavy/naval gun: bigger, slower boom with a long tail
+        this.burst(0.05, 'highpass', 1400, 1400, 0.34 * v);
+        this.tone('sine', 95, 24, 0.55, 0.78 * v);
+        this.burst(0.5, 'lowpass', 520, 80, 0.5 * v);
+        this.tone('sine', 60, 30, 0.5, 0.3 * v, 0.04);
         break;
       case 'rkt':
-        this.burst(0.32, 'bandpass', 650, 190, 0.3 * v, 0, 1.5);
+        // rocket: ignition hiss + whoosh sweeping down + low rumble
+        this.burst(0.06, 'highpass', 4000, 2200, 0.2 * v);
+        this.burst(0.34, 'bandpass', 900, 170, 0.32 * v, 0.02, 1.2);
+        this.tone('sine', 130, 55, 0.3, 0.22 * v, 0.02);
+        break;
+      case 'flakgun':
+        // flak pom-pom: metallic double-thud with a ringing overtone
+        this.tone('square', 220, 90, 0.07, 0.22 * v);
+        this.burst(0.08, 'bandpass', 1100, 520, 0.24 * v, 0, 3);
+        this.tone('triangle', 1700, 1500, 0.05, 0.08 * v, 0.01);
         break;
       case 'zap':
         this.tone('square', 950, 480, 0.07, 0.1 * v);
         this.tone('sine', 1500, 700, 0.05, 0.06 * v, 0.012);
         break;
       case 'salvo':
-        for (let i = 0; i < 3; i++) this.burst(0.26, 'bandpass', 700, 210, 0.22 * v, i * 0.09, 1.5);
-        this.tone('sine', 80, 40, 0.3, 0.25 * v, 0.05);
+        for (let i = 0; i < 4; i++) this.burst(0.28, 'bandpass', 1000, 180, 0.2 * v, i * 0.08, 1.3);
+        this.tone('sine', 80, 38, 0.35, 0.28 * v, 0.05);
         break;
       case 'boomS':
         this.burst(0.4, 'lowpass', 900, 120, 0.45 * v);
@@ -171,6 +214,9 @@ class AudioMan {
         this.tone('sawtooth', 740, 560, 0.22, 0.12 * v);
         this.tone('sawtooth', 560, 740, 0.22, 0.10 * v, 0.24);
         break;
+      case 'sdbeep': // self-destruct countdown tick
+        this.tone('square', 1500, 1500, 0.06, 0.14 * v);
+        break;
       case 'win':
         [523, 659, 784, 1047].forEach((f, i) => this.tone('triangle', f, f, 0.35, 0.2, i * 0.16));
         break;
@@ -187,7 +233,9 @@ class AudioMan {
     const d = ev.x !== undefined ? Math.hypot(ev.x - camX, ev.z - camZ) : 0;
     if (d > 55) return;
     const vol = 1 / (1 + d * 0.06);
-    if (ev.e === 'shot') this.play(ev.w === 0 ? 'mg' : ev.w === 1 ? 'rkt' : ev.w === 3 ? 'zap' : ev.w === 4 ? 'salvo' : 'cn', vol);
+    if (ev.e === 'shot') this.play(
+      ev.w === 0 ? 'mg' : ev.w === 1 ? 'rkt' : ev.w === 3 ? 'zap' : ev.w === 4 ? 'salvo'
+        : ev.w === 5 ? 'flakgun' : ev.w === 6 ? 'hcannon' : 'cn', vol);
     else if (ev.e === 'boom') this.play(ev.big ? 'boomB' : 'boomS', Math.max(0.25, vol));
     else if (ev.e === 'crush') this.play('crush', vol);
     else if (ev.e === 'done') this.play('done', 0.8);
@@ -247,11 +295,12 @@ class AudioMan {
   private midi(n: number) { return 440 * Math.pow(2, (n - 69) / 12); }
 
   startMusic() {
-    if (!this.ctx || this.musicTimer) return;
-    const spe = 60 / 84 / 2; // seconds per eighth note at 84 BPM
+    if (!this.ctx || this.musicTimer || this.musicStyle === 'off') return;
+    const bpm = this.musicStyle === 'ambient' ? 60 : this.musicStyle === 'march' ? 104 : 84;
+    const spe = 60 / bpm / 2; // seconds per eighth note
     this.nextT = this.ctx.currentTime + 0.15;
     this.musicTimer = setInterval(() => {
-      if (!this.ctx || this.muted) return;
+      if (!this.ctx || this.muted || this.musicStyle === 'off') return;
       while (this.nextT < this.ctx.currentTime + 0.7) {
         this.scheduleEighth(this.nextT, this.eighth++, spe);
         this.nextT += spe;
@@ -283,6 +332,7 @@ class AudioMan {
     const bar = Math.floor(e / 8) % 4;
     const pos = e % 8;
     const ch = this.chords[bar];
+    const style = this.musicStyle;
     if (pos === 0) {
       // pad chord (two detuned voices per note) + bass
       for (const n of ch) {
@@ -290,22 +340,43 @@ class AudioMan {
         this.musTone('triangle', f, t, 1.1, spe * 8 * 0.95, 0.035, 900);
         this.musTone('triangle', f * 1.004, t, 1.3, spe * 8 * 0.95, 0.028, 700);
       }
-      this.musTone('sawtooth', this.midi(ch[0] - 24), t, 0.25, spe * 8 * 0.9, 0.05, 240);
+      this.musTone(style === 'march' ? 'square' : 'sawtooth', this.midi(ch[0] - 24), t, 0.2, spe * 8 * 0.9, 0.05, 240);
     }
-    // sparse percussion
-    if (pos % 4 === 0) this.musTone('sine', 95, t, 0.004, 0.12, 0.12, 400); // kick-ish
-    if (pos % 2 === 1 && Math.random() < 0.7 && this.noiseBuf && this.ctx) {     // hat
+    if (style === 'ambient') {
+      // ambient: no drums, just a slow echoing arpeggio and occasional shimmer
+      if (Math.random() < 0.35) {
+        const n = ch[(Math.random() * ch.length) | 0] + 12 * (Math.random() < 0.4 ? 1 : 2);
+        this.musTone('sine', this.midi(n), t, 0.05, spe * 4, 0.045, 1800, true);
+      }
+      return;
+    }
+    // percussion — march drives a steadier, harder beat
+    if (pos % 4 === 0) this.musTone('sine', style === 'march' ? 110 : 95, t, 0.004, 0.12, style === 'march' ? 0.18 : 0.12, 400); // kick
+    if (style === 'march' && pos % 4 === 2) this.musTone('sine', 90, t, 0.004, 0.12, 0.14, 350); // backbeat kick
+    const hatRate = style === 'march' ? 0.95 : 0.7;
+    if (pos % 2 === 1 && Math.random() < hatRate && this.noiseBuf && this.ctx) {     // hat
       const s = this.ctx.createBufferSource();
       s.buffer = this.noiseBuf; s.loop = true;
       const f = this.ctx.createBiquadFilter(); f.type = 'highpass'; f.frequency.value = 7500;
       const g = this.ctx.createGain();
-      g.gain.setValueAtTime(0.015, t);
+      g.gain.setValueAtTime(style === 'march' ? 0.022 : 0.015, t);
       g.gain.exponentialRampToValueAtTime(0.0001, t + 0.04);
       s.connect(f); f.connect(g); g.connect(this.musG);
       s.start(t); s.stop(t + 0.06);
     }
+    // snare on the march backbeat
+    if (style === 'march' && pos === 4 && this.noiseBuf && this.ctx) {
+      const s = this.ctx.createBufferSource();
+      s.buffer = this.noiseBuf; s.loop = true;
+      const f = this.ctx.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = 1900; f.Q.value = 0.8;
+      const g = this.ctx.createGain();
+      g.gain.setValueAtTime(0.05, t);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.12);
+      s.connect(f); f.connect(g); g.connect(this.musG);
+      s.start(t); s.stop(t + 0.14);
+    }
     // wandering arpeggio with echo
-    if (Math.random() < 0.5) {
+    if (Math.random() < (style === 'march' ? 0.6 : 0.5)) {
       const n = ch[(Math.random() * ch.length) | 0] + 12 * (Math.random() < 0.25 ? 2 : 1);
       this.musTone('triangle', this.midi(n), t, 0.01, spe * 0.9, 0.05, 2200, true);
     }
