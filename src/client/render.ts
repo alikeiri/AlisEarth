@@ -606,6 +606,15 @@ function buildingGroupPro(type: string, teamColor: number): THREE.Group {
     add(new THREE.TorusGeometry(0.3, 0.05, 8, 16), steel, 0, 1.35, 0).rotation.x = Math.PI / 2.5;
     add(new THREE.CylinderGeometry(0.06, 0.06, 0.4, 6), steel, 0.6, 0.5, 0.6);
     add(roundedSlabGeo(1.5, 0.2, 0.06, 0.06), team, 0, 0.45, -0.75);
+  } else if (type === 'radar') {
+    add(roundedSlabGeo(1.8, 1.8, 0.35), concrete);
+    add(new THREE.CylinderGeometry(0.18, 0.26, 0.7, 10), darkM, 0, 0.7, 0); // mast
+    // tilted parabolic dish
+    const dish = add(new THREE.SphereGeometry(0.55, 16, 10, 0, Math.PI * 2, 0, Math.PI / 2.4), mat(0xd2d7dc, 0.5, 0.4), 0, 1.05, 0);
+    dish.rotation.x = -Math.PI / 3.2; dish.scale.set(1, 0.55, 1);
+    add(new THREE.CylinderGeometry(0.02, 0.02, 0.3, 6), steel, 0, 1.15, 0.18); // feed horn
+    add(roundedSlabGeo(1.4, 0.18, 0.06, 0.06), team, 0, 0.4, -0.75);
+    g.userData.spinDish = dish; // rotated each frame by the renderer
   } else if (type === 'silo') {
     add(roundedSlabGeo(1.85, 1.85, 0.35), concrete);
     add(new THREE.CylinderGeometry(0.62, 0.7, 0.25, 16), darkM, 0, 0.45, 0); // blast ring
@@ -1547,6 +1556,9 @@ export class Renderer {
           while (da < -Math.PI) da += Math.PI * 2;
           piv.rotation.y += da * Math.min(1, dt * 7);
         }
+        // radar dish sweeps continuously
+        const dish = rec.g.userData.spinDish as THREE.Mesh | undefined;
+        if (dish) dish.rotation.z = this.time * 1.4;
         if (selection.has(v.i) && selN < MAX_INST) {
           this.dummy.position.set(v.x, y + 0.1, v.z);
           this.dummy.scale.setScalar((v.sz || 1) * 1.6);

@@ -171,6 +171,7 @@
       <div class="bgrid" id="gridU"></div>
     </div>
     <div id="minimapWrap"><canvas id="minimap" width="200" height="200"></canvas></div>
+    <div id="radarWarn" class="hidden" style="position:absolute;top:64px;left:50%;transform:translateX(-50%);background:rgba(180,30,20,0.88);border:1px solid #ff6650;border-radius:6px;color:#fff;font-weight:700;font-size:14px;letter-spacing:0.5px;padding:7px 16px;z-index:7;pointer-events:none;box-shadow:0 2px 14px rgba(0,0,0,0.5)"></div>
     <div id="hint">LMB select · drag box-select · RMB move/attack/harvest · Ctrl/Alt+1-9 assign group · 1-9 recall · WASD/edges pan · wheel zoom · Ctrl+wheel tilt · Q/E rotate · +/- speed · Esc cancel</div>
   <div id="cmdHints" class="hidden"></div>
   <div id="selPanel" class="hidden"></div>
@@ -191,6 +192,7 @@
       <input class="minput" id="claudeKey" maxlength="200" placeholder="ANTHROPIC API KEY (OPTIONAL) — CLAUDE COMMANDS THE ENEMY AI" style="font-size:10px" autocomplete="off" />
       <div id="aiIntel" class="hidden" style="text-align:left;background:rgba(20,28,38,0.85);border:1px solid #2c3e50;border-radius:6px;padding:10px 12px;font-size:11px;line-height:1.55;color:#9fb3c8;max-height:170px;overflow-y:auto"></div>
       <div class="optrow"><span class="optlabel">AI Level</span><div id="diffRow" style="display:flex;gap:8px;flex:1"></div></div>
+      <div class="optrow"><span class="optlabel">Enemies</span><div id="enemyRow" style="display:flex;gap:8px;flex:1"></div></div>
       <div class="optrow"><span class="optlabel">AI 2 Level</span><div id="diffRow2" style="display:flex;gap:8px;flex:1"></div></div>
       <div class="optrow"><span class="optlabel">Map Size</span><div id="sizeRow" style="display:flex;gap:8px;flex:1"></div></div>
       <label class="optrow" for="fogChk" style="cursor:pointer"><span class="optlabel">Fog of War</span>

@@ -155,6 +155,7 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
   // vehicle throughput beats deep turret lines — factories before turret #3+
   // (islanders keep ONE factory and ONE barracks: ground forces can't leave)
   else if (nB('factory') < (island ? 1 : L.factories) && pl.credits > 1900) want = 'factory';
+  else if (pl.aiLvl >= 1 && !nB('radar') && nB('factory') && pl.credits > 1400) want = 'radar';
   else if (nB('turret') < turrets) want = 'turret';
   else if (nB('barracks') < (island ? 1 : L.barracks) && pl.credits > 1200) want = 'barracks';
   // stranded on an island: drone works, air force and shipyard come early

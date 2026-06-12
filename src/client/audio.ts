@@ -167,6 +167,10 @@ class AudioMan {
         this.tone('square', 920, 920, 0.05, 0.09 * v);
         this.tone('square', 1240, 1240, 0.07, 0.08 * v, 0.07);
         break;
+      case 'alert': // radar threat klaxon: two-tone descending warble
+        this.tone('sawtooth', 740, 560, 0.22, 0.12 * v);
+        this.tone('sawtooth', 560, 740, 0.22, 0.10 * v, 0.24);
+        break;
       case 'win':
         [523, 659, 784, 1047].forEach((f, i) => this.tone('triangle', f, f, 0.35, 0.2, i * 0.16));
         break;

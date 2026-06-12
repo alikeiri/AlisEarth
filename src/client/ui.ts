@@ -6,7 +6,7 @@ import { GameMap, W, H, SEA } from '../sim/map';
 const B_ICONS: Record<string, string> = {
   power: '⚡', refinery: '⛏️', barracks: '\u{1F396}️', factory: '\u{1F3ED}', turret: '\u{1F5FC}',
   dronefac: '\u{1F4E1}', sam: '\u{1F3AF}', shipyard: '⚓', airforce: '\u{2708}️', airfield: '\u{1F6EB}', lab: '\u{1F9EA}',
-  silo: '\u{1F687}',
+  silo: '\u{1F687}', radar: '\u{1F4F6}',
 };
 const U_ICONS: Record<string, string> = {
   rifle: '\u{1FA96}', rocket: '\u{1F680}', tank: '\u{1F699}', heavy: '\u{1F69B}', ifv: '\u{1F6FB}', aatank: '\u{1F3AF}', flak: '\u{1F4A5}', harv: '\u{1F69C}', engineer: '\u{1F527}',
@@ -17,7 +17,7 @@ const U_ICONS: Record<string, string> = {
   gunboat: '\u{1F6A4}', destroyer: '\u{1F6F3}️', sub: '\u{1F93F}', navdrone: '\u{1F6F6}',
   fighter: '\u{1F6E9}️', bomber: '\u{1F4A3}', dbomber: '\u{1F916}', heli: '\u{1F681}', helidrone: '\u{1FA81}',
 };
-export const B_LIST = ['power', 'refinery', 'barracks', 'factory', 'turret', 'sam', 'dronefac', 'shipyard', 'airforce', 'airfield', 'lab', 'silo'];
+export const B_LIST = ['power', 'refinery', 'radar', 'barracks', 'factory', 'turret', 'sam', 'dronefac', 'shipyard', 'airforce', 'airfield', 'lab', 'silo'];
 
 // what each building gains per upgrade level (mirrors the sim's effects)
 const UPG_INFO: Record<string, string> = {
@@ -50,6 +50,7 @@ const TIP_NOTES: Record<string, string> = {
   bbmissile: 'Silo weapon vs structures — select the silo, right-click to launch',
   chemissile: 'Silo weapon vs infantry — select the silo, right-click to launch',
   silo: 'Builds missiles; select with an armed missile and right-click a target to launch',
+  radar: 'Detects incoming enemy units near your base (through fog) and sounds an alert. Needs power.',
 };
 export function counterTip(t: string): string {
   const d = UNITS[t] || BUILDINGS[t];

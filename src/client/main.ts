@@ -38,27 +38,31 @@ class LocalGame implements GameLike {
   private evQ: any[] = [];
   private reportSaved = false;
 
-  // simLvl2 !== null switches to simulation mode: two AIs fight, you spectate
-  constructor(name: string, faction: string, aiLvl = 1, size = 96, simLvl2: number | null = null) {
+  // simLvl2 !== null switches to simulation mode: two AIs fight, you spectate.
+  // enemies (1-3) sets how many AI opponents a skirmish has.
+  constructor(name: string, faction: string, aiLvl = 1, size = 96, simLvl2: number | null = null, enemies = 1) {
     setMapSize(size);
     const seed = (Date.now() ^ (Math.random() * 0x7fffffff)) >>> 0;
     const LVL_NAMES = ['Easy', 'Normal', 'Hard', 'Brutal'];
+    const pickFacs = (avoid: string[], n: number) => {
+      const pool = Object.keys(FACTIONS).filter(f => !avoid.includes(f));
+      const out: string[] = [];
+      for (let i = 0; i < n && pool.length; i++) out.push(pool.splice(Math.floor(Math.random() * pool.length), 1)[0]);
+      return out;
+    };
     if (simLvl2 !== null) {
       this.isSim = true;
-      const facs = Object.keys(FACTIONS);
-      const f1 = facs[Math.floor(Math.random() * facs.length)];
-      const f2 = facs.filter(f => f !== f1)[Math.floor(Math.random() * (facs.length - 1))];
+      const [f1, f2] = pickFacs([], 2);
       this.sim = new Sim(seed, [
         { name: `AI ${FACTIONS[f1].name} (${LVL_NAMES[aiLvl]})`, faction: f1, isAI: true, aiLvl },
         { name: `AI ${FACTIONS[f2].name} (${LVL_NAMES[simLvl2]})`, faction: f2, isAI: true, aiLvl: simLvl2 },
       ]);
     } else {
-      const aiFacs = Object.keys(FACTIONS).filter(f => f !== faction);
-      const aiFac = aiFacs[Math.floor(Math.random() * aiFacs.length)];
-      this.sim = new Sim(seed, [
-        { name, faction },
-        { name: `AI ${FACTIONS[aiFac].name} (${LVL_NAMES[aiLvl] || 'Normal'})`, faction: aiFac, isAI: true, aiLvl },
-      ]);
+      const n = Math.max(1, Math.min(3, enemies));
+      const specs: any[] = [{ name, faction }];
+      for (const af of pickFacs([faction], n))
+        specs.push({ name: `AI ${FACTIONS[af].name} (${LVL_NAMES[aiLvl] || 'Normal'})`, faction: af, isAI: true, aiLvl });
+      this.sim = new Sim(seed, specs);
     }
     // the AI studies past games and adapts: server intelligence is primary,
     // the browser's own profile fills in when the server is unreachable
@@ -334,6 +338,9 @@ class GameClient {
   // fog of war: 0 never seen, 1 explored, 2 currently visible — client-side
   // per-player view masking (spectator modes see everything)
   private fog: Uint8Array | null = null;
+  // radar: threat detection near the base, pierces fog within its range
+  private radarBlips: any[] = [];
+  private lastAlert = 0;
 
   constructor(public game: GameLike, private onEnd: (won: boolean, winnerName: string) => void) {
     const canvas = document.getElementById('three') as HTMLCanvasElement;
@@ -784,6 +791,53 @@ class GameClient {
     }
   }
 
+  // radar threat detection: with a powered Radar Dome, scan for enemy combat
+  // units near the base (through fog) and warn — banner + minimap ping + klaxon
+  private scanRadar(allViews: any[]) {
+    const me = this.game.me;
+    const players = this.game.players?.() || [];
+    const myBuildings = allViews.filter(v => v.b && v.o === me);
+    const hasRadar = myBuildings.some(v => v.t === 'radar' && (v.pr ?? 1) >= 1);
+    const powered = !players[me] || (players[me].pm ?? 1) >= (players[me].pu ?? 0); // radar needs power
+    const warn = document.getElementById('radarWarn');
+    if (!hasRadar || !powered || !myBuildings.length) {
+      this.radarBlips = [];
+      if (warn && !warn.classList.contains('hidden')) warn.classList.add('hidden');
+      return;
+    }
+    const RANGE = 24, RANGE2 = RANGE * RANGE;
+    const threats: any[] = [];
+    for (const v of allViews) {
+      if (v.o === me || v.b) continue;
+      if (!(UNITS[v.t]?.dmg > 0) && v.t !== 'fueltruck') continue; // only attackers
+      let near = false;
+      for (const b of myBuildings) if ((b.x - v.x) ** 2 + (b.z - v.z) ** 2 < RANGE2) { near = true; break; }
+      if (near) threats.push(v);
+    }
+    this.radarBlips = threats;
+    if (!threats.length) { if (warn && !warn.classList.contains('hidden')) warn.classList.add('hidden'); return; }
+    // base centroid → bearing to the threat cluster, for a compass hint
+    let bx = 0, bz = 0; for (const b of myBuildings) { bx += b.x; bz += b.z; }
+    bx /= myBuildings.length; bz /= myBuildings.length;
+    let tx = 0, tz = 0; for (const t of threats) { tx += t.x; tz += t.z; }
+    tx /= threats.length; tz /= threats.length;
+    // camera yaw 0: +Z is up-screen (N), +X is left-screen (W)
+    const dx = tx - bx, dz = tz - bz;
+    const ns = dz > 4 ? 'N' : dz < -4 ? 'S' : '';
+    const ew = dx > 4 ? 'W' : dx < -4 ? 'E' : '';
+    const dir = (ns + ew) || 'nearby';
+    if (warn) {
+      warn.textContent = `⚠ INCOMING — ${threats.length} enemy unit${threats.length > 1 ? 's' : ''} ${dir === 'nearby' ? 'nearby' : 'to the ' + dir}`;
+      warn.classList.remove('hidden');
+    }
+    const now = performance.now();
+    if (now - this.lastAlert > 6000) {
+      this.lastAlert = now;
+      audio.play('alert');
+      this.ui.ping(tx, tz);
+    }
+  }
+
   // sim speed ladder: skirmish caps at 8×, spectator modes go to 32×
   private changeSpeed(dir: number) {
     const g: any = this.game;
@@ -989,6 +1043,7 @@ class GameClient {
       });
       if (this.frame % 6 === 0) this.renderer.setFog(f);
     }
+    if (!(this.game as any).isSim && this.frame % 6 === 0) this.scanRadar(allViews);
     this.lastViews = views;
     this.byId.clear();
     for (const v of views) this.byId.set(v.i, v);
@@ -1036,7 +1091,9 @@ class GameClient {
     this.ui.update(this.game.me, players, views, this.game.tickN, this.selection);
     if (this.frame++ % 3 === 0) {
       const fogFn = (!(this.game as any).isSim && fogEnabled && this.fog) ? (cx: number, cz: number) => this.renderer.fogValue(cx, cz) : undefined;
-      this.ui.minimap(this.game.map, views, this.camQuad(), dt * 3, fogFn);
+      // radar-detected threats show on the minimap even through fog
+      const mmViews = this.radarBlips.length ? views.concat(this.radarBlips) : views;
+      this.ui.minimap(this.game.map, mmViews, this.camQuad(), dt * 3, fogFn);
     }
     const dragRect = this.mouse.dragging && !this.patrolMode // no selection box while drawing a patrol route
       ? { x0: this.mouse.downX, y0: this.mouse.downY, x1: this.mouse.x, y1: this.mouse.y }
@@ -1078,10 +1135,15 @@ class GameClient {
     this.ui.overlay(this.overlayCtx, this.renderer.project.bind(this.renderer), views, this.game.me, this.selection, dragRect, hover, circles, this.cmdFx);
 
     const st = this.game.status();
-    if (st.over && !this.over) {
+    // with multiple AIs the sim runs until ONE side remains; if the human is
+    // wiped out first, call defeat immediately instead of forcing them to
+    // spectate the survivors fight it out
+    const meDead = !(this.game as any).isSim && players[this.game.me] && players[this.game.me].a === false;
+    if ((st.over || meDead) && !this.over) {
       this.over = true;
-      const wn = st.winner >= 0 && players[st.winner] ? players[st.winner].n : 'Nobody';
-      this.onEnd(st.winner === this.game.me, wn);
+      const wn = st.over && st.winner >= 0 && players[st.winner] ? players[st.winner].n
+        : meDead ? (players.find((p: any, i: number) => i !== this.game.me && p.a)?.n || 'The enemy') : 'Nobody';
+      this.onEnd(!meDead && st.winner === this.game.me, wn);
     }
   };
 }
@@ -1093,6 +1155,7 @@ let selDiff = 1;
 let selDiff2 = 2;
 let selSize = 96;
 let fogEnabled = true; // start-screen checkbox; spectator/replay always show all
+let selEnemies = 1; // 1-3 AI opponents in skirmish
 let client: GameClient | null = null;
 let net: Net | null = null;
 
@@ -1525,6 +1588,9 @@ function initMenus() {
   buildOptionRow('diffRow',
     [{ label: 'Easy', v: 0 }, { label: 'Normal', v: 1 }, { label: 'Hard', v: 2 }, { label: 'Brutal', v: 3 }],
     () => selDiff, v => { selDiff = v; });
+  buildOptionRow('enemyRow',
+    [{ label: '1', v: 1 }, { label: '2', v: 2 }, { label: '3', v: 3 }],
+    () => selEnemies, v => { selEnemies = v; });
   buildOptionRow('diffRow2',
     [{ label: 'Easy', v: 0 }, { label: 'Normal', v: 1 }, { label: 'Hard', v: 2 }, { label: 'Brutal', v: 3 }],
     () => selDiff2, v => { selDiff2 = v; });
@@ -1535,7 +1601,7 @@ function initMenus() {
     const key = (($('claudeKey') as HTMLInputElement).value || '').trim();
     try { localStorage.setItem('ae_claude_key', key); } catch { /* no storage */ }
     fogEnabled = ($('fogChk') as HTMLInputElement)?.checked ?? true;
-    startGame(new LocalGame(playerName(), selFaction, selDiff, selSize));
+    startGame(new LocalGame(playerName(), selFaction, selDiff, selSize, null, selEnemies));
   });
   $('btnSimulate').addEventListener('click', () => {
     // spectate AI (level 1 row) vs AI 2 (level 2 row); +/- adjusts speed to 32×
