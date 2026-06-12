@@ -123,13 +123,15 @@ export class UI {
     if (!rp) { rp = document.createElement('div'); rp.id = 'researchPanel'; document.body.appendChild(rp); }
     this.researchPanel = rp;
     this.researchPanel.classList.add('hidden');
+    // mousedown, not click: the panel re-renders while researching, and a
+    // click never fires if the pressed element was replaced before mouseup
     const rpClick = (e: Event) => {
       const el = (e.target as HTMLElement).closest('.rpBtn') as HTMLElement | null;
       if (el && !el.classList.contains('done') && !el.classList.contains('dis') && this.selTargetBid >= 0)
         this.onResearch(this.selTargetBid, el.getAttribute('data-tech')!);
     };
-    rp.addEventListener('click', rpClick);
-    this.cleanups.push(() => rp!.removeEventListener('click', rpClick));
+    rp.addEventListener('mousedown', rpClick);
+    this.cleanups.push(() => rp!.removeEventListener('mousedown', rpClick));
     // selection overview: click a chip to filter the selection to that type
     const sp = document.getElementById('selPanel')!;
     const chipClick = (e: Event) => {
@@ -383,11 +385,12 @@ export class UI {
   }
 
   private researchPanel: HTMLElement | null = null;
+  private rpSig = '';
   private updateResearchPanel(views: any[], me: number, pl: any, fac: any, myTech: Record<string, boolean>) {
     let lab: any = null;
     if (this.selTargetBid >= 0) lab = views.find(v => v.i === this.selTargetBid && v.t === 'lab');
     const panel = this.researchPanel!;
-    if (!lab || lab.o !== me || lab.pr < 1) { panel.classList.add('hidden'); return; }
+    if (!lab || lab.o !== me || lab.pr < 1) { panel.classList.add('hidden'); this.rpSig = ''; return; }
     panel.classList.remove('hidden');
     const busy = !!lab.rs;
     let html = `<div class="rpTitle">Research Lab</div>`;
@@ -395,15 +398,19 @@ export class UI {
       const tname = TECHS[lab.rs]?.name || lab.rs;
       html += `<div class="rpBusy">Researching ${tname}… ${Math.round((lab.rsf || 0) * 100)}%</div>`;
     }
+    let sig = `${lab.i}|${lab.rs || ''}|${busy ? Math.round((lab.rsf || 0) * 50) : ''}`;
     for (const id of Object.keys(TECHS)) {
       const tch = TECHS[id];
       const done = myTech[id];
       const cost = Math.round(tch.cost * fac.costMul);
       const dis = done || busy || pl.c < cost;
+      sig += `|${id}:${done ? 'd' : dis ? 'x' : 'o'}`;
       html += `<div class="rpBtn${done ? ' done' : ''}${dis && !done ? ' dis' : ''}" data-tech="${id}">` +
         `${tch.name} ${done ? '✓' : '$' + cost}<span class="rpDesc">${tch.desc}</span></div>`;
     }
-    panel.innerHTML = html;
+    // only touch the DOM when something actually changed — rewriting innerHTML
+    // every frame replaced the buttons mid-press, eating every click
+    if (sig !== this.rpSig) { this.rpSig = sig; panel.innerHTML = html; }
   }
 
   private styleBtn(t: string, enabled: boolean, afford: boolean, cost: number, badge: number, prog: number) {
