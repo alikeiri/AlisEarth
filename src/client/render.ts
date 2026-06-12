@@ -17,6 +17,8 @@ const MODEL_DEFS: Record<string, { file: string; size: number; axis: 'l' | 'h'; 
   tank:      { file: 'tank',      size: 1.50, axis: 'l', ry: 0 },
   heavy:     { file: 'heavy',     size: 1.85, axis: 'l', ry: 0 },
   ifv:       { file: 'tank',      size: 1.25, axis: 'l', ry: 0, tint: 0x9aa86a }, // light olive scout chassis
+  aatank:    { file: 'mlrs',      size: 1.40, axis: 'l', ry: 0, tint: 0x7c93b5 }, // blue-gray missile carrier
+  flak:      { file: 'engineer',  size: 1.30, axis: 'l', ry: Math.PI, tint: 0x848e97 }, // gun truck (same flip as the pickup)
   mlrs:      { file: 'mlrs',      size: 1.60, axis: 'l', ry: 0 },
   // trucks: cab/bed geometry defeats the front heuristic — flip both (user-verified)
   harv:      { file: 'harv',      size: 1.70, axis: 'l', ry: Math.PI },

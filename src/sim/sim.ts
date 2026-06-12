@@ -240,6 +240,30 @@ export class Sim {
       this.events.push({ e: 'cash', x: pl.spawn.x, z: pl.spawn.z });
       return;
     }
+    if (c.k === 'aattack') {
+      // area attack: every enemy unit and building inside the circle becomes a
+      // target; each attacker works through them nearest-first until the zone
+      // is cleared or the attacker dies
+      const r = Math.max(1, Math.min(14, c.r || 0));
+      const targets: Entity[] = [];
+      for (const e of this.ents.values()) {
+        if (e.owner === c.p || e.hp <= 0 || !this.players[e.owner].alive) continue;
+        const d = e.b ? this.distToEnt(c.x, c.z, e) : Math.hypot(e.x - c.x, e.z - c.z);
+        if (d <= r) targets.push(e);
+      }
+      if (!targets.length) return;
+      for (const id of (c.ids || [])) {
+        const u = this.ents.get(id);
+        if (!u || u.b || u.owner !== c.p) continue;
+        if ((UNITS[u.type]?.dmg ?? 0) <= 0) continue;
+        const list = [...targets]
+          .sort((a, b) => ((a.x - u.x) ** 2 + (a.z - u.z) ** 2) - ((b.x - u.x) ** 2 + (b.z - u.z) ** 2))
+          .slice(0, 24);
+        u.orders = list.map(t => ({ k: 'attack' as const, tgt: t.id }));
+        u.path = null;
+      }
+      return;
+    }
     if (c.k === 'surrender') {
       // white flag: scuttle everything this player owns; the normal
       // elimination flow (deaths → checkEnd) does the rest
@@ -550,7 +574,8 @@ export class Sim {
       if (u.owner === e.owner || u.hp <= 0 || !this.players[u.owner].alive) continue;
       const d = this.distToEnt(e.x, e.z, u);
       if (UNITS[u.type]?.cloak && d > 4) continue; // stealth: only seen up close
-      if (skipAir && UNITS[u.type]?.fly) continue; // gun turrets can't elevate
+      // never auto-lock onto air targets the attacker cannot hurt (turret, MLRS)
+      if (UNITS[u.type]?.fly && (skipAir || dmgMul(e.type, false, 'air', u.type) <= 0)) continue;
       if (d <= range && d < bd) { bd = d; best = u; }
     }
     if (best) return best;
@@ -564,7 +589,7 @@ export class Sim {
   }
 
   private dealDamage(att: Entity, tgt: Entity, base: number) {
-    let mul = dmgMul(att.type, tgt.b, tgt.b ? 'b' : UNITS[tgt.type].kind);
+    let mul = dmgMul(att.type, tgt.b, tgt.b ? 'b' : UNITS[tgt.type].kind, tgt.b ? undefined : tgt.type);
     if (!tgt.b && tgt.fortified) mul *= 0.5; // dug-in drone hive is hard to kill
     tgt.hp -= base * mul;
     // study material for the adaptive AI: what weapon classes the human leans on
@@ -586,8 +611,8 @@ export class Sim {
     const ud = UNITS[att.type];
     // weapon class: 0 mg, 1 rocket, 2 cannon, 3 drone zap, 4 missile salvo
     const tgtInf = !tgt.b && UNITS[tgt.type]?.kind === 'inf';
-    const w = att.type === 'rifle' || att.type === 'ifv' ? 0
-      : att.type === 'rocket' || att.type === 'sam' ? 1
+    const w = att.type === 'rifle' || att.type === 'ifv' || att.type === 'flak' ? 0
+      : att.type === 'rocket' || att.type === 'sam' || att.type === 'aatank' ? 1
       : att.type === 'mlrs' || att.type === 'msldrone' ? 4
       : att.type === 'heli' || att.type === 'helidrone' ? (tgtInf ? 0 : 1) // guns vs inf, rockets vs veh/bld
       : ud?.kind === 'air' ? 3 : 2;

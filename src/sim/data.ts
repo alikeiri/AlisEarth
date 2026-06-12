@@ -40,6 +40,9 @@ export const UNITS: Record<string, UnitDef> = {
   mlrs:   { name: 'MLRS',         cost: 1600, hp: 220, speed: 1.6, range: 13.0, dmg: 74, rof: 3.6, builtAt: 'factory',  buildTime: 16, kind: 'veh' },
   // the anti-infantry vehicle: autocannon IFV — shreds infantry, loses to tanks
   ifv:    { name: 'IFV',          cost: 700,  hp: 300, speed: 3.4, range: 5.0, dmg: 24, rof: 0.8, builtAt: 'factory',  buildTime: 9,  kind: 'veh' },
+  // mobile anti-air pair: missile AA hunts airplanes, flak shreds drone swarms
+  aatank: { name: 'AA Vehicle',   cost: 950,  hp: 280, speed: 3.0, range: 8.0, dmg: 42, rof: 1.6, builtAt: 'factory',  buildTime: 11, kind: 'veh' },
+  flak:   { name: 'Flak Gun',     cost: 650,  hp: 240, speed: 2.6, range: 6.5, dmg: 16, rof: 0.45, builtAt: 'factory', buildTime: 9,  kind: 'veh' },
   engineer: { name: 'Engineer',   cost: 600,  hp: 200, speed: 2.2, range: 0,   dmg: 0,  rof: 1,   builtAt: 'factory',  buildTime: 10, kind: 'veh', repair: true, road: true },
   hive:    { name: 'Drone Hive',  cost: 1500, hp: 900, speed: 1.1, range: 0,   dmg: 0,  rof: 1,   builtAt: 'barracks', buildTime: 16, kind: 'inf', fortify: true, emits: 'minidrone' },
   minidrone: { name: 'Mini Drone', cost: 0,   hp: 40,  speed: 4.2, range: 4.0, dmg: 200, rof: 1, builtAt: '',         buildTime: 0,  kind: 'air', fly: true, alt: 1.6, ephemeral: 26, internal: true, kamikaze: true },
@@ -165,19 +168,25 @@ export const FACTIONS: Record<string, Faction> = {
 
 export const PLAYER_COLORS = [0x3da5ff, 0xff5043, 0x57d977, 0xffc940];
 
-// Damage matrix: attacker type vs target class.
-export function dmgMul(attType: string, tgtIsBuilding: boolean, tgtKind: string): number {
+// drone-class flyers: flak shreds these, but airplanes shrug it off
+export const DRONE_TYPES = new Set(['recon', 'strike', 'msldrone', 'helidrone', 'minidrone', 'chemdrone', 'biodrone', 'dbomber', 'navdrone']);
+
+// Damage matrix: attacker type vs target class (tgtType refines air targets).
+export function dmgMul(attType: string, tgtIsBuilding: boolean, tgtKind: string, tgtType?: string): number {
   if (tgtKind === 'air') {
     if (attType === 'fighter') return 2.2;       // interceptor
     if (attType === 'sam') return 2.2;
+    if (attType === 'aatank') return 2.3;        // dedicated mobile AA
+    if (attType === 'flak') return tgtType && DRONE_TYPES.has(tgtType) ? 2.4 : 0.5; // drone shredder
     if (attType === 'rocket') return 1.8;
     if (attType === 'destroyer') return 1.5;
     if (attType === 'rifle') return 1.2;
     if (attType === 'ifv') return 0.8;           // autocannon can pepper aircraft
     if (attType === 'turret') return 0;          // gun turret can't elevate (defensive AA = SAM)
+    if (attType === 'mlrs') return 0;            // artillery cannot engage aircraft
     if (attType === 'tank' || attType === 'heavy') return 0.4;
     if (attType === 'bomber') return 0.1;
-    if (attType === 'mlrs' || attType === 'sub') return 0.15;
+    if (attType === 'sub') return 0.15;
     return 1.0;
   }
   if (tgtKind === 'sea') {
@@ -211,6 +220,8 @@ export function dmgMul(attType: string, tgtIsBuilding: boolean, tgtKind: string)
   if (attType === 'rocket') return tgtIsBuilding ? 1.8 : (tgtKind === 'veh' ? 2.2 : 0.45);
   if (attType === 'rifle')  return tgtIsBuilding ? 0.35 : (tgtKind === 'veh' ? 0.35 : 1.35);
   if (attType === 'ifv')    return tgtIsBuilding ? 0.5 : (tgtKind === 'inf' ? 2.2 : 0.5);
+  if (attType === 'aatank') return 0.25; // AA missiles are wasted on ground targets
+  if (attType === 'flak')   return tgtIsBuilding ? 0.3 : (tgtKind === 'inf' ? 0.9 : 0.4);
   if (attType === 'tank' || attType === 'heavy') return tgtIsBuilding ? 1.3 : (tgtKind === 'inf' ? 0.5 : 1.35);
   if (attType === 'turret') return tgtIsBuilding ? 0.8 : (tgtKind === 'veh' ? 0.6 : 1.1); // armor shrugs off turret fire
   return 1.0; // gunboat / destroyer guns

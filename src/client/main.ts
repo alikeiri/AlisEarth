@@ -209,8 +209,9 @@ class GameClient {
     rDown: false, rDownX: 0, rDownY: 0, rDragging: false,
   };
   private grab: { x: number; z: number } | null = null;
-  private rMode: 'pan' | 'form' = 'pan';
+  private rMode: 'pan' | 'form' | 'aatk' = 'pan';
   private formPath: { x: number; z: number }[] | null = null;
+  private areaDrag: { cx: number; cz: number; r: number } | null = null;
   private patrolMode = false;
   private patrolDraw: { x: number; z: number }[] | null = null;
   private cheatBuf = '';
@@ -518,8 +519,18 @@ class GameClient {
       this.mouse.rDown = true;
       this.mouse.rDragging = false;
       this.mouse.rDownX = e.clientX; this.mouse.rDownY = e.clientY;
-      // 2+ units selected: right-drag draws a formation line; otherwise it pans
-      this.rMode = this.myUnitIds().length >= 2 ? 'form' : 'pan';
+      // right-press ON an enemy with units selected: drag opens an attack
+      // circle — everything inside gets targeted on release
+      const enemyUnder = this.myUnitIds().length
+        ? this.pickView(e.clientX, e.clientY, v => v.o !== this.game.me) : null;
+      if (enemyUnder) {
+        const g = this.renderer.groundPoint(e.clientX / window.innerWidth, e.clientY / window.innerHeight);
+        this.rMode = 'aatk';
+        this.areaDrag = g ? { cx: g.x, cz: g.z, r: 0 } : null;
+      } else {
+        // 2+ units selected: right-drag draws a formation line; otherwise it pans
+        this.rMode = this.myUnitIds().length >= 2 ? 'form' : 'pan';
+      }
     }
   }
 
@@ -532,8 +543,24 @@ class GameClient {
       this.grab = null;
       const path = this.formPath;
       this.formPath = null;
+      const area = this.areaDrag;
+      this.areaDrag = null;
       this.renderer.setFormationPath(null);
       if (!wasDrag) this.contextCommand(e.clientX, e.clientY, e.shiftKey); // quick right-click = order
+      else if (this.rMode === 'aatk' && area && area.r >= 1) {
+        // area attack: everything inside the circle becomes a target
+        const ids = this.myUnitIds();
+        if (ids.length) {
+          this.game.issue({
+            k: 'aattack', p: this.game.me, ids,
+            x: Math.round(area.cx * 10) / 10, z: Math.round(area.cz * 10) / 10,
+            r: Math.round(area.r * 10) / 10,
+          });
+          audio.play('confirm');
+          audio.ack(this.dominantType(ids), 'attack');
+          this.markCmd(ids, area.cx, area.cz, true);
+        }
+      }
       else if (this.rMode === 'form' && path && path.length >= 2) this.issueFormation(path, e.shiftKey);
       return;
     }
@@ -781,6 +808,10 @@ class GameClient {
           }
         }
         this.renderer.setFormationPath(this.formPath);
+      } else if (this.rMode === 'aatk' && this.areaDrag) {
+        // attack circle grows with the drag
+        const g = this.renderer.groundPoint(this.mouse.x / window.innerWidth, this.mouse.y / window.innerHeight);
+        if (g) this.areaDrag.r = Math.min(14, Math.hypot(g.x - this.areaDrag.cx, g.z - this.areaDrag.cz));
       }
     }
 
@@ -861,6 +892,9 @@ class GameClient {
         if (r > 0) circles.push({ x: v.x, z: v.z, r, atk: true });
       }
     }
+    // live attack-circle while dragging an area target
+    if (this.mouse.rDragging && this.rMode === 'aatk' && this.areaDrag && this.areaDrag.r > 0.5)
+      circles.push({ x: this.areaDrag.cx, z: this.areaDrag.cz, r: this.areaDrag.r, atk: true });
     // age out command effects
     for (const f of this.cmdFx) f.t -= dt;
     this.cmdFx = this.cmdFx.filter(f => f.t > 0);

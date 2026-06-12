@@ -158,7 +158,7 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
   // infantry is the cheap screen, vehicles the core (tester: "AI only builds
   // infantry"). Once a factory stands, infantry is capped at ~45% of the army
   // and the factory gets first claim on credits.
-  const armyCount = nU('rifle') + nU('rocket') + nU('tank') + nU('heavy') + nU('ifv') + nU('mlrs')
+  const armyCount = nU('rifle') + nU('rocket') + nU('tank') + nU('heavy') + nU('ifv') + nU('aatank') + nU('flak') + nU('mlrs')
     + nU('recon') + nU('strike') + nU('msldrone') + nU('fighter') + nU('heli') + nU('helidrone');
   const infCount = nU('rifle') + nU('rocket') + nU('chemtrooper') + nU('biotrooper');
   const hasFac = (myB['factory'] || []).some(b => b.progress >= b.total);
@@ -180,6 +180,7 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
     else if (armyCount < cap && pl.credits > 1000) {
       const r = sim.rng.next();
       const t = nU('mlrs') < L.siege ? 'mlrs'
+        : (antiAir && nU('aatank') + nU('flak') < 4 && r < 0.35) ? (r < 0.18 ? 'aatank' : 'flak')
         : r < (antiInf ? 0.4 : 0.25) ? 'mlrs' // artillery shreds infantry masses
         : r < (antiInf ? 0.7 : 0.42) ? 'ifv'  // autocannons mop up the rest
         : (pl.credits > 2000 && r < 0.6) ? 'heavy'
