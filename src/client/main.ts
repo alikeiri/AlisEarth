@@ -60,8 +60,9 @@ class LocalGame implements GameLike {
         { name: `AI ${FACTIONS[aiFac].name} (${LVL_NAMES[aiLvl] || 'Normal'})`, faction: aiFac, isAI: true, aiLvl },
       ]);
     }
-    // the AI studies past games against this player and adapts its strategy
-    try { this.sim.aiProfile = JSON.parse(localStorage.getItem('ae_aiprofile') || 'null'); } catch { /* fresh AI */ }
+    // the AI studies past games and adapts: server intelligence is primary,
+    // the browser's own profile fills in when the server is unreachable
+    this.sim.aiProfile = mergedProfile();
   }
   get map() { return this.sim.map; }
   get tickN() { return this.sim.tickN; }
@@ -69,7 +70,8 @@ class LocalGame implements GameLike {
   update(dtMs: number) {
     this.acc += dtMs * this.speed;
     let guard = 0;
-    while (this.acc >= 100 && guard < 8) {
+    const gMax = this.speed > 8 ? 48 : 8; // 16×/32× need more ticks per frame
+    while (this.acc >= 100 && guard < gMax) {
       this.acc -= 100; guard++;
       const cmds = this.pending; this.pending = [];
       this.sim.players.forEach((pl, i) => { if (pl.isAI) cmds.push(...aiTick(this.sim, i)); });
@@ -83,7 +85,7 @@ class LocalGame implements GameLike {
       }
       this.evQ.push(...this.sim.events);
     }
-    if (guard >= 8) this.acc = 0; // tab was backgrounded — drop the backlog
+    if (guard >= gMax) this.acc = 0; // tab was backgrounded — drop the backlog
   }
   views(): any[] {
     const a = Math.max(0, Math.min(1, this.acc / 100));
@@ -107,6 +109,8 @@ class LocalGame implements GameLike {
         if (e.rpt) v.rp = 1;
         if (e.primary) v.pm = 1;
         if (e.research) { v.rs = e.research.tech; v.rsf = 1 - e.research.t / e.research.t0; }
+        if (e.storedMissile) v.ms = e.storedMissile;
+        if (e.burnT && e.burnT > 0) v.bn = 1;
       } else {
         if (e.stance) v.st = e.stance;
         if (e.fortified) v.fo = 1;
@@ -129,6 +133,86 @@ class LocalGame implements GameLike {
   drainEvents() { const e = this.evQ; this.evQ = []; return e; }
   status() { return this.sim.done ? { over: true, winner: this.sim.winner } : { over: false, winner: -2 }; }
   leave() {}
+}
+
+// ---------------- Replay playback ----------------
+// A replay is { meta, seed, size, cmds } — the deterministic sim rebuilt from
+// the seed and fed the recorded command stream (including the AI's commands).
+class ReplayGame implements GameLike {
+  sim: Sim;
+  me = 0;
+  speed = 2; // replays default to 2× — +/- adjusts as usual
+  isSim = true;
+  isReplay = true;
+  meta: any;
+  private cmds: { k: number; c: any[] }[];
+  private ci = 0;
+  private acc = 0;
+  private evQ: any[] = [];
+
+  constructor(data: any) {
+    setMapSize(data.size || 96);
+    this.meta = data.meta || {};
+    this.sim = new Sim(data.seed, this.meta.players || []);
+    this.cmds = data.cmds || [];
+  }
+  get map() { return this.sim.map; }
+  get tickN() { return this.sim.tickN; }
+  issue() { /* spectators don't command the past */ }
+  update(dtMs: number) {
+    this.acc += dtMs * this.speed;
+    let guard = 0;
+    const gMax = this.speed > 8 ? 48 : 8;
+    while (this.acc >= 100 && guard < gMax) {
+      this.acc -= 100; guard++;
+      const cs: any[] = [];
+      while (this.ci < this.cmds.length && this.cmds[this.ci].k <= this.sim.tickN) {
+        cs.push(...this.cmds[this.ci].c); this.ci++;
+      }
+      this.sim.tick(cs);
+      // note: NO aiReport handling — a replayed match must not double-learn
+      this.evQ.push(...this.sim.events.filter(ev => ev.e !== 'aiReport'));
+    }
+    if (guard >= gMax) this.acc = 0;
+  }
+  views(): any[] {
+    const a = Math.max(0, Math.min(1, this.acc / 100));
+    const out: any[] = [];
+    for (const e of this.sim.ents.values()) {
+      const v: any = {
+        i: e.id, o: e.owner, t: e.type, b: e.b ? 1 : 0,
+        x: e.b ? e.x : e.px + (e.x - e.px) * a,
+        z: e.b ? e.z : e.pz + (e.z - e.pz) * a,
+        h: e.hp, m: e.maxHp, pr: e.b ? e.progress / e.total : 1,
+      };
+      if (e.b) {
+        v.cx = e.cx; v.cz = e.cz; v.sz = e.size; v.lv = e.lvl; v.qn = e.queue.length;
+        if (e.storedMissile) v.ms = e.storedMissile;
+        if (e.burnT && e.burnT > 0) v.bn = 1;
+      } else {
+        if (e.fortified) v.fo = 1;
+        if (e.cd > 0 && UNITS[e.type]?.dmg > 0) {
+          v.fr = 1;
+          if (e.aimX !== undefined) { v.ax = e.aimX; v.az = e.aimZ; }
+        }
+      }
+      out.push(v);
+    }
+    return out;
+  }
+  players(): any[] {
+    return this.sim.players.map(pl => ({
+      c: Math.floor(pl.credits), a: pl.alive, pm: Math.round(pl.powerMade), pu: Math.round(pl.powerUsed),
+      n: pl.name, f: pl.faction, tech: Object.keys(pl.tech).filter(k => pl.tech[k]),
+    }));
+  }
+  drainEvents() { const e = this.evQ; this.evQ = []; return e; }
+  status() {
+    // a replay is over when the sim ends OR the recorded commands run dry
+    const dry = this.ci >= this.cmds.length && this.sim.tickN > (this.cmds[this.cmds.length - 1]?.k || 0) + 300;
+    return (this.sim.done || dry) ? { over: true, winner: this.sim.winner } : { over: false, winner: -2 };
+  }
+  leave() { /* nothing to clean up */ }
 }
 
 // ---------------- Networked game ----------------
@@ -246,6 +330,10 @@ class GameClient {
   private over = false;
   private overlayCtx: CanvasRenderingContext2D;
   private cleanups: (() => void)[] = [];
+
+  // fog of war: 0 never seen, 1 explored, 2 currently visible — client-side
+  // per-player view masking (spectator modes see everything)
+  private fog: Uint8Array | null = null;
 
   constructor(public game: GameLike, private onEnd: (won: boolean, winnerName: string) => void) {
     const canvas = document.getElementById('three') as HTMLCanvasElement;
@@ -678,20 +766,35 @@ class GameClient {
     }
   }
 
-  // sim speed ladder, skirmish only
+  // recompute the fog mask from my units' sight: demote visible→explored,
+  // then light up cells around everything I own
+  private updateFog(allViews: any[]) {
+    const f = this.fog!;
+    for (let i = 0; i < f.length; i++) if (f[i] === 2) f[i] = 1;
+    for (const v of allViews) {
+      if (v.o !== this.game.me) continue;
+      const def = (UNITS as any)[v.t] || (BUILDINGS as any)[v.t];
+      const sight = v.b ? 7 : Math.max(5, (def?.range || 4) + 3);
+      const cx = Math.floor(v.x), cz = Math.floor(v.z), r = Math.ceil(sight);
+      for (let dz = -r; dz <= r; dz++) for (let dx = -r; dx <= r; dx++) {
+        if (dx * dx + dz * dz > sight * sight) continue;
+        const x = cx + dx, z = cz + dz;
+        if (x >= 0 && z >= 0 && x < W && z < H) f[z * W + x] = 2;
+      }
+    }
+  }
+
+  // sim speed ladder: skirmish caps at 8×, spectator modes go to 32×
   private changeSpeed(dir: number) {
     const g: any = this.game;
     if (g.speed === undefined) return; // networked game: server keeps the clock
-    const S = [0.5, 1, 2, 4, 8];
+    const S = g.isSim ? [0.5, 1, 2, 4, 8, 16, 32] : [0.5, 1, 2, 4, 8];
     let i = S.indexOf(g.speed);
     if (i < 0) i = 1;
     i = Math.max(0, Math.min(S.length - 1, i + dir));
     g.speed = S[i];
-    const el = document.getElementById('speedInd');
-    if (el) {
-      el.textContent = g.speed + '× SPEED';
-      el.classList.toggle('hidden', g.speed === 1);
-    }
+    if (g.isSim && !g.isReplay && simQueue) simQueue.speed = g.speed; // carry into the next match
+    updateSpeedInd(g.speed);
     audio.play('click');
   }
 
@@ -708,9 +811,15 @@ class GameClient {
     const g = this.renderer.groundPoint(sx / window.innerWidth, sy / window.innerHeight);
     if (!g) return;
 
-    // single selected production building → rally point
+    // single selected production building → rally point (armed silo → LAUNCH)
     const sel = [...this.selection].map(id => this.byId.get(id)).filter(Boolean);
     if (sel.length === 1 && sel[0].b && sel[0].o === me) {
+      if (sel[0].t === 'silo' && sel[0].ms) {
+        this.game.issue({ k: 'launch', p: me, bid: sel[0].i, x: Math.round(g.x * 10) / 10, z: Math.round(g.z * 10) / 10 });
+        audio.play('confirm');
+        this.markCmd([sel[0].i], g.x, g.z, true);
+        return;
+      }
       this.game.issue({ k: 'rally', p: me, bid: sel[0].i, x: g.x, z: g.z });
       return;
     }
@@ -865,7 +974,20 @@ class GameClient {
       }
     }
 
-    const views = this.game.views();
+    const allViews = this.game.views();
+    // fog of war for human players (spectator/replay modes see everything)
+    let views = allViews;
+    if (!(this.game as any).isSim) {
+      if (!this.fog) this.fog = new Uint8Array(W * H);
+      if (this.frame % 3 === 0) this.updateFog(allViews);
+      const f = this.fog;
+      views = allViews.filter(v => {
+        if (v.o === this.game.me) return true;
+        const fv = f[Math.floor(v.z) * W + Math.floor(v.x)] || 0;
+        return v.b ? fv >= 1 : fv === 2; // buildings stay on the map once scouted
+      });
+      if (this.frame % 6 === 0) this.renderer.setFog(f);
+    }
     this.lastViews = views;
     this.byId.clear();
     for (const v of views) this.byId.set(v.i, v);
@@ -911,7 +1033,10 @@ class GameClient {
 
     const players = this.game.players();
     this.ui.update(this.game.me, players, views, this.game.tickN, this.selection);
-    if (this.frame++ % 3 === 0) this.ui.minimap(this.game.map, views, this.camQuad(), dt * 3);
+    if (this.frame++ % 3 === 0) {
+      const fogFn = (!(this.game as any).isSim && this.fog) ? (cx: number, cz: number) => this.renderer.fogValue(cx, cz) : undefined;
+      this.ui.minimap(this.game.map, views, this.camQuad(), dt * 3, fogFn);
+    }
     const dragRect = this.mouse.dragging && !this.patrolMode // no selection box while drawing a patrol route
       ? { x0: this.mouse.downX, y0: this.mouse.downY, x1: this.mouse.x, y1: this.mouse.y }
       : null;
@@ -1155,6 +1280,15 @@ class ClaudeAdvisor {
   }
 }
 let advisor: ClaudeAdvisor | null = null;
+// back-to-back AI-vs-AI simulation runs (count chosen by the user at start)
+let simQueue: { left: number; total: number; speed: number } | null = null;
+function updateSpeedInd(speed: number) {
+  const el = document.getElementById('speedInd');
+  if (el) {
+    el.textContent = speed + '× SPEED';
+    el.classList.toggle('hidden', speed === 1);
+  }
+}
 
 function startGame(game: GameLike) {
   if (client) { client.destroy(); client = null; }
@@ -1164,6 +1298,22 @@ function startGame(game: GameLike) {
   client = new GameClient(game, (won, winnerName) => {
     const isSim = (game as any).isSim;
     audio.play(won || isSim ? 'win' : 'lose');
+    if ((game as any).isReplay) {
+      $('endTitle').textContent = 'REPLAY OVER';
+      ($('endTitle') as HTMLElement).style.color = '#ffc940';
+      $('endSub').textContent = `${winnerName || 'Nobody'} won this match. Asking Claude for a critical review…`;
+      show('endScreen');
+      // critical review: match report + everything the server AI already knows
+      fetch('/advisor', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ mode: 'analyze', summary: JSON.stringify((game as any).meta || {}) }),
+      }).then(r => r.ok ? r.json() : null).then(j => {
+        if (j?.critique) $('endSub').textContent = `${winnerName || 'Nobody'} won. Claude's review: ${j.critique}` +
+          (j.lesson ? ` → Doctrine for next time: ${j.lesson}` : '');
+        else $('endSub').textContent = `${winnerName || 'Nobody'} won this match.`;
+      }).catch(() => { $('endSub').textContent = `${winnerName || 'Nobody'} won this match.`; });
+      return;
+    }
     if (isSim) {
       $('endTitle').textContent = 'SIMULATION OVER';
       ($('endTitle') as HTMLElement).style.color = '#ffc940';
@@ -1173,6 +1323,18 @@ function startGame(game: GameLike) {
         const n = (prof?.games || 0) + (prof?.simGames || 0);
         if (n) sub += ` Match studied — ${n} game${n > 1 ? 's' : ''} in the AI's memory.`;
       } catch { /* no profile */ }
+      // queued simulation runs: auto-start the next match
+      if (simQueue && simQueue.left > 1) {
+        simQueue.left--;
+        sub += ` Next match starting… (${simQueue.total - simQueue.left + 1}/${simQueue.total})`;
+        setTimeout(() => {
+          if (!simQueue) return; // user exited to menu meanwhile
+          const g2 = new LocalGame('', '', selDiff, selSize, selDiff2);
+          g2.speed = simQueue.speed;
+          startGame(g2);
+          updateSpeedInd(g2.speed);
+        }, 3000);
+      } else simQueue = null;
       $('endSub').textContent = sub;
       show('endScreen');
       return;
@@ -1213,7 +1375,35 @@ function playerName(): string {
 
 // rolling AI study profile: outcome streaks, the player's rush timing and
 // favourite weapon classes — read by the AI at the start of the next game
+// server is the PRIMARY intelligence store: every report also flows there,
+// and the richer of (server, local) profile is used at game start
+let serverIntel: any = null;
+function syncIntelFromServer() {
+  fetch('/intel').then(r => r.ok ? r.json() : null).then(j => { if (j) serverIntel = j; }).catch(() => { /* offline */ });
+}
+function pushIntelToServer(r: any) {
+  fetch('/intel', {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ report: r }),
+  }).then(res => res.ok ? res.json() : null).then(j => { if (j) serverIntel = j; }).catch(() => { /* offline */ });
+}
+function mergedProfile(): any {
+  let local: any = null;
+  try { local = JSON.parse(localStorage.getItem('ae_aiprofile') || 'null'); } catch { /* none */ }
+  const sv = serverIntel;
+  if (!sv && !local) return null;
+  if (!sv) return local;
+  if (!local) return sv;
+  // server primary: take the profile with more total study, union the lessons
+  const weight = (p: any) => (p.games || 0) + (p.simGames || 0);
+  const base = { ...(weight(sv) >= weight(local) ? sv : local) };
+  const lessons = [...new Set([...(sv.lessons || []), ...(local.lessons || [])])];
+  if (lessons.length) base.lessons = lessons.slice(-5);
+  return base;
+}
+
 function saveAiReport(r: any) {
+  pushIntelToServer(r); // fire-and-forget: the server brain learns too
   try {
     const p = JSON.parse(localStorage.getItem('ae_aiprofile') || '{}');
     if (r.simMatch) {
@@ -1345,8 +1535,34 @@ function initMenus() {
     startGame(new LocalGame(playerName(), selFaction, selDiff, selSize));
   });
   $('btnSimulate').addEventListener('click', () => {
-    // spectate AI (level 1 row) vs AI 2 (level 2 row); +/- adjusts speed
+    // spectate AI (level 1 row) vs AI 2 (level 2 row); +/- adjusts speed to 32×
+    const nRaw = window.prompt('How many AI vs AI matches should run back-to-back?\n(Each match teaches the AI — speed carries over, +/- up to 32×)', '1');
+    if (nRaw === null) return;
+    const n = Math.max(1, Math.min(20, parseInt(nRaw, 10) || 1));
+    simQueue = { left: n, total: n, speed: 1 };
     startGame(new LocalGame('', '', selDiff, selSize, selDiff2));
+  });
+  $('btnReplays').addEventListener('click', async () => {
+    const list = $('replayList');
+    if (!list.classList.contains('hidden')) { list.classList.add('hidden'); return; }
+    list.classList.remove('hidden');
+    list.innerHTML = 'Loading…';
+    try {
+      const res = await fetch('/replays');
+      if (!res.ok) throw new Error('no server');
+      const idx = await res.json();
+      if (!idx.length) { list.innerHTML = 'No matches recorded on this server yet.'; return; }
+      list.innerHTML = idx.slice(0, 20).map((m: any) =>
+        `<div class="replayRow" data-id="${m.id}" style="cursor:pointer">▶ ${new Date(m.date).toLocaleString()} — ` +
+        `${(m.players || []).map((pl: any) => pl.name).join(' vs ')} · ` +
+        `${m.winnerName ? m.winnerName + ' won' : 'abandoned'} · ${Math.round((m.lenSec || 0) / 60)}min</div>`).join('');
+      list.querySelectorAll('.replayRow').forEach(row => row.addEventListener('click', async () => {
+        try {
+          const data = await (await fetch('/replays/' + row.getAttribute('data-id'))).json();
+          startGame(new ReplayGame(data));
+        } catch { list.innerHTML = 'Replay could not be loaded.'; }
+      }));
+    } catch { list.innerHTML = 'Replays live on the game server — open the deployed site to browse them.'; }
   });
   $('btnCreate').addEventListener('click', async () => {
     $('menuErr').textContent = '';
@@ -1370,6 +1586,7 @@ function initMenus() {
   $('exitBtn').addEventListener('click', () => {
     if (!client) return;
     if (!confirm('Exit to main menu? The current game will end.')) return;
+    simQueue = null; // cancel any queued simulation runs
     client.destroy(); client = null;
     if (net) { net.close(); net = null; }
     show('menu');
@@ -1385,5 +1602,6 @@ if (!glOk) {
   initMenus();
   rollCallsign();
   renderAiIntel();
+  syncIntelFromServer();
   try { ($('claudeKey') as HTMLInputElement).value = localStorage.getItem('ae_claude_key') || ''; } catch { /* no storage */ }
 }

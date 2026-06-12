@@ -5,5 +5,7 @@ server.mjs
 .claude/
 batch-progress.txt
 batch-results.json
+ai-profile.json
+replays/
 *.log
 .DS_Store

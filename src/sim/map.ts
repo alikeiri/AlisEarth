@@ -187,9 +187,12 @@ export function genMap(seed: number, nPlayers: number): GameMap {
     for (let x = 0; x <= W; x++) {
       const dEdge = Math.min(x, W - x, z, H - z) / (W * 0.5);
       const e = Math.min(1, dEdge / 0.14); // thin sea border at map edges
-      // domain-warped mask sample = detailed coastline from a coarse shape
-      const wu = (x / W - 0.5) * 1.12 + 0.5 + (fbm(seed + 91, x * 0.045, z * 0.045) - 0.5) * 0.14;
-      const wv = (z / H - 0.5) * 1.12 + 0.5 + (fbm(seed + 92, x * 0.045, z * 0.045) - 0.5) * 0.14;
+      // domain-warped mask sample = detailed coastline from a coarse shape;
+      // seed bits mirror the continent for extra per-game variety
+      let wu = (x / W - 0.5) * 1.12 + 0.5 + (fbm(seed + 91, x * 0.045, z * 0.045) - 0.5) * 0.14;
+      let wv = (z / H - 0.5) * 1.12 + 0.5 + (fbm(seed + 92, x * 0.045, z * 0.045) - 0.5) * 0.14;
+      if (seed & 32) wu = 1 - wu;
+      if (seed & 64) wv = 1 - wv;
       const mask = maskAt(cont.rows, wu, wv);
       let h = (mask * 2.3 - 0.78) * 5.6 * e;
       h += (fbm(seed, x * 0.05, z * 0.05) - 0.5) * 2.4 * mask; // interior variation
@@ -241,10 +244,15 @@ export function genMap(seed: number, nPlayers: number): GameMap {
         }
     return { ...c }; // no land anywhere near — the plateau pass will make some
   };
-  const corners = [
-    { x: 17, z: 17 }, { x: W - 17, z: H - 17 },
-    { x: 17, z: H - 17 }, { x: W - 17, z: 17 },
-  ];
+  // randomized battle axis: player 1 and player 2 spawn on OPPOSITE ends of a
+  // seed-derived diagonal; players 3/4 sit perpendicular to it
+  const ang = (((seed >>> 7) % 1000) / 1000) * Math.PI * 2;
+  const ringR = 0.36 * Math.min(W, H);
+  const pos = (a: number) => ({
+    x: Math.max(14, Math.min(W - 14, Math.round(W / 2 + Math.cos(a) * ringR))),
+    z: Math.max(14, Math.min(H - 14, Math.round(H / 2 + Math.sin(a) * ringR))),
+  });
+  const corners = [pos(ang), pos(ang + Math.PI), pos(ang + Math.PI / 2), pos(ang - Math.PI / 2)];
   const starts = corners.map(snap);
   for (let p = 0; p < Math.max(2, nPlayers); p++) m.spawns.push({ ...starts[p] });
 

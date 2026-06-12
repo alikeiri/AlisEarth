@@ -6,16 +6,18 @@ import { GameMap, W, H, SEA } from '../sim/map';
 const B_ICONS: Record<string, string> = {
   power: '⚡', refinery: '⛏️', barracks: '\u{1F396}️', factory: '\u{1F3ED}', turret: '\u{1F5FC}',
   dronefac: '\u{1F4E1}', sam: '\u{1F3AF}', shipyard: '⚓', airforce: '\u{2708}️', airfield: '\u{1F6EB}', lab: '\u{1F9EA}',
+  silo: '\u{1F687}',
 };
 const U_ICONS: Record<string, string> = {
   rifle: '\u{1FA96}', rocket: '\u{1F680}', tank: '\u{1F699}', heavy: '\u{1F69B}', ifv: '\u{1F6FB}', aatank: '\u{1F3AF}', flak: '\u{1F4A5}', harv: '\u{1F69C}', engineer: '\u{1F527}',
+  fueltruck: '\u{1F6E2}️', cmissile: '\u{1F680}', bbmissile: '\u{1F4A3}', chemissile: '\u{2623}️',
   hive: '\u{1F41D}', recon: '\u{1F6F8}', strike: '\u{1F6F0}️', msldrone: '☄️', mlrs: '\u{1F9E8}',
   chemtrooper: '\u{2623}️', chemtank: '\u{2623}️', chemdrone: '\u{2623}️',
   biotrooper: '\u{2622}️', biotank: '\u{2622}️', biodrone: '\u{2622}️', stealthtank: '\u{1F977}',
   gunboat: '\u{1F6A4}', destroyer: '\u{1F6F3}️', sub: '\u{1F93F}', navdrone: '\u{1F6F6}',
   fighter: '\u{1F6E9}️', bomber: '\u{1F4A3}', dbomber: '\u{1F916}', heli: '\u{1F681}', helidrone: '\u{1FA81}',
 };
-export const B_LIST = ['power', 'refinery', 'barracks', 'factory', 'turret', 'sam', 'dronefac', 'shipyard', 'airforce', 'airfield', 'lab'];
+export const B_LIST = ['power', 'refinery', 'barracks', 'factory', 'turret', 'sam', 'dronefac', 'shipyard', 'airforce', 'airfield', 'lab', 'silo'];
 
 // what each building gains per upgrade level (mirrors the sim's effects)
 const UPG_INFO: Record<string, string> = {
@@ -30,9 +32,10 @@ const UPG_INFO: Record<string, string> = {
   airforce: '+25% production speed',
   shipyard: '+25% production speed',
 };
-export const U_LIST = ['rifle', 'rocket', 'hive', 'tank', 'heavy', 'ifv', 'aatank', 'flak', 'harv', 'engineer', 'mlrs', 'recon', 'strike', 'msldrone',
+export const U_LIST = ['rifle', 'rocket', 'hive', 'tank', 'heavy', 'ifv', 'aatank', 'flak', 'fueltruck', 'harv', 'engineer', 'mlrs', 'recon', 'strike', 'msldrone',
   'chemtrooper', 'chemtank', 'chemdrone', 'biotrooper', 'biotank', 'biodrone', 'stealthtank',
-  'gunboat', 'destroyer', 'sub', 'navdrone', 'fighter', 'bomber', 'dbomber', 'heli', 'helidrone'];
+  'gunboat', 'destroyer', 'sub', 'navdrone', 'fighter', 'bomber', 'dbomber', 'heli', 'helidrone',
+  'cmissile', 'bbmissile', 'chemissile'];
 
 // strengths/weaknesses tooltip, derived from the live damage matrix so it can
 // never drift out of sync with balance changes
@@ -42,6 +45,11 @@ const TIP_NOTES: Record<string, string> = {
   aatank: 'Dedicated anti-air missiles',
   mlrs: 'Cannot engage aircraft',
   turret: 'Cannot engage aircraft',
+  fueltruck: 'Suicide truck: huge fireball, sets buildings ablaze (burn damage over time)',
+  cmissile: 'Silo weapon — select the silo, right-click anywhere to launch',
+  bbmissile: 'Silo weapon vs structures — select the silo, right-click to launch',
+  chemissile: 'Silo weapon vs infantry — select the silo, right-click to launch',
+  silo: 'Builds missiles; select with an armed missile and right-click a target to launch',
 };
 export function counterTip(t: string): string {
   const d = UNITS[t] || BUILDINGS[t];
@@ -426,7 +434,7 @@ export class UI {
 
   ping(x: number, z: number) { this.pings.push({ x, z, t: 1.2 }); }
 
-  minimap(map: GameMap, views: any[], camQuad: { x: number; z: number }[] | null, dt: number) {
+  minimap(map: GameMap, views: any[], camQuad: { x: number; z: number }[] | null, dt: number, fog?: (cx: number, cz: number) => number) {
     const ctx = this.mmCtx;
     if (!this.terrainCache) {
       const c = document.createElement('canvas');
@@ -463,7 +471,16 @@ export class UI {
           ctx.fillStyle = map.gem[cz * W + cx] === 1 ? '#3ee8e0' : '#d9a520';
           ctx.fillRect(mx(cx + 1), my(cz + 1), 1.6, 1.6);
         }
-    // entities
+    // fog overlay (drawn over terrain+ore, under entities the player can see)
+    if (fog) {
+      for (let cz = 0; cz < H; cz++) for (let cx = 0; cx < W; cx++) {
+        const fv = fog(cx, cz);
+        if (fv === 2) continue;
+        ctx.fillStyle = fv === 1 ? 'rgba(5,8,12,0.45)' : 'rgba(5,8,12,0.92)';
+        ctx.fillRect(mx(cx + 1), my(cz + 1), sx + 1, sz + 1);
+      }
+    }
+    // entities (already fog-filtered by the caller's view list)
     for (const v of views) {
       ctx.fillStyle = '#' + (PLAYER_COLORS[v.o] ?? 0xffffff).toString(16).padStart(6, '0');
       const s = v.b ? 4 : 2.2;

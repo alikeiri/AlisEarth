@@ -36,6 +36,8 @@ export interface Entity {
   patPts: { x: number; z: number }[] | null; // building patrol route for produced units
   rpt: boolean; // repeat production: finished units re-queue themselves
   primary: boolean; // primary building of its type (new units train here)
+  storedMissile?: string | null; // silo: armed missile type awaiting launch
+  burnT?: number; burnPs?: number; // building on fire: seconds left, damage/s
 }
 
 export interface PlayerState {
@@ -79,6 +81,7 @@ export class Sim {
   // per-AI-player ledgers (AI-vs-AI simulations study the winner's doctrine)
   private dealtP: Record<number, Record<string, number>> = {};
   private lostP: Record<number, Record<string, number>> = {};
+  private pendingBlasts: { t: number; x: number; z: number; type: string; owner: number }[] = [];
   private firstHumanHit = -1;
   private reported = false;
   private grid = new Map<number, number[]>(); // spatial hash of units, cell = 2 units
@@ -236,6 +239,7 @@ export class Sim {
       if (!b || !b.b || b.owner !== c.p || !def || def.builtAt !== b.type) return;
       if (def.tech && !pl.tech[def.tech]) return; // not yet researched
       if (def.internal) return;
+      if (def.missile && (b.storedMissile || b.queue.length)) return; // one missile per silo
       if (b.progress < b.total || b.queue.length >= 6) return;
       // aircraft are limited by total airfield capacity
       if (def.pad && !this.padCapacityFree(c.p)) return;
@@ -248,6 +252,19 @@ export class Sim {
     if (c.k === 'godmode') {
       pl.credits += 50000;
       this.events.push({ e: 'cash', x: pl.spawn.x, z: pl.spawn.z });
+      return;
+    }
+    if (c.k === 'launch') {
+      // fire the silo's stored missile at any map position
+      const b = this.ents.get(c.bid);
+      if (!b || !b.b || b.owner !== c.p || b.type !== 'silo' || !b.storedMissile) return;
+      if (b.progress < b.total) return;
+      const mdef = UNITS[b.storedMissile];
+      const tx = Math.max(0, Math.min(W - 0.01, c.x)), tz = Math.max(0, Math.min(H - 0.01, c.z));
+      const ft = Math.max(12, Math.round((Math.hypot(tx - b.x, tz - b.z) / (mdef.speed || 7)) * 10));
+      this.pendingBlasts.push({ t: this.tickN + ft, x: tx, z: tz, type: b.storedMissile, owner: c.p });
+      this.events.push({ e: 'silo', x: b.x, z: b.z, tx, tz, ft });
+      b.storedMissile = null;
       return;
     }
     if (c.k === 'aattack') {
@@ -506,6 +523,13 @@ export class Sim {
     this.dmgLog = [];
     for (const c of cmds) this.applyCmd(c);
 
+    // incoming missiles reach their targets
+    if (this.pendingBlasts.length && this.pendingBlasts.some(p => this.tickN >= p.t)) {
+      const due = this.pendingBlasts.filter(p => this.tickN >= p.t);
+      this.pendingBlasts = this.pendingBlasts.filter(p => this.tickN < p.t);
+      for (const bl of due) this.missileBlast(bl);
+    }
+
     // power factors
     for (const pl of this.players) { pl.powerMade = 10; pl.powerUsed = 0; }
     for (const e of this.ents.values()) {
@@ -648,6 +672,15 @@ export class Sim {
     const def = BUILDINGS[b.type];
     const rate = pl.fac.buildMul * pl.pf;
 
+    // on fire (suicide truck): long-term damage until it burns out
+    if (b.burnT && b.burnT > 0) {
+      b.burnT -= TICK;
+      b.hp -= (b.burnPs || 12) * TICK;
+      if (this.tickN % 7 === b.id % 7)
+        this.events.push({ e: 'burnfx', x: b.x + (this.rng.next() - 0.5) * b.size, z: b.z + (this.rng.next() - 0.5) * b.size });
+      if (b.hp <= 0) return; // the death sweep takes it from here
+    }
+
     if (b.progress < b.total) {
       const d = TICK * rate;
       b.progress = Math.min(b.total, b.progress + d);
@@ -679,7 +712,12 @@ export class Sim {
         else return;
       }
       it.t -= TICK * rate * (1 + 0.25 * (b.lvl - 1)); // upgrades speed up production
-      if (it.t <= 0) {
+      if (it.t <= 0 && UNITS[it.type].missile) {
+        // missiles don't spawn — they arm the silo, ready to launch
+        b.storedMissile = it.type;
+        b.queue.shift();
+        this.events.push({ e: 'ready', p: b.owner });
+      } else if (it.t <= 0) {
         const c = UNITS[it.type].move === 'sea'
           ? nearestSea(this.map, b.cx + ((b.size / 2) | 0), b.cz + b.size, 8)
           : nearestPassable(this.map, b.cx + ((b.size / 2) | 0), b.cz + b.size);
@@ -927,6 +965,21 @@ export class Sim {
         this.stepPath(u, speed * 1.3, 1); // terminal dive — faster than cruise
         return;
       }
+      // suicide truck: drive to contact, then one giant fireball
+      if (def.bombTruck) {
+        if (d <= 1.4) { this.truckBoom(u); return; }
+        u.repath -= 1;
+        if (!u.path || u.repath <= 0) {
+          u.path = findPath(this.map, u.x, u.z, tgt.x, tgt.z, 9000, false);
+          u.pi = 0; u.repath = 12;
+          if (!u.path) {
+            if (++u.pathFail >= 3) { u.orders.shift(); u.path = null; u.pathFail = 0; return; }
+            u.repath = 40;
+          } else u.pathFail = 0;
+        }
+        this.stepPath(u, speed, 0);
+        return;
+      }
       // bombers fly OVER the target, release the whole stick once (area
       // damage), then turn for home — no hovering in front of buildings
       if (u.type === 'bomber' || u.type === 'dbomber') {
@@ -965,6 +1018,38 @@ export class Sim {
     } else if (ord.k === 'harvest') {
       this.tickHarvest(u, ord, def);
     }
+  }
+
+  // missile impact: area damage with falloff; the warhead type drives dmgMul
+  private missileBlast(bl: { x: number; z: number; type: string; owner: number }) {
+    const mdef = UNITS[bl.type];
+    const R = mdef.blastR || 3;
+    const fake: any = { id: 0, owner: bl.owner, type: bl.type, b: false };
+    for (const e of [...this.ents.values()]) {
+      if (e.owner === bl.owner || e.hp <= 0 || !this.players[e.owner].alive) continue;
+      const d = e.b ? this.distToEnt(bl.x, bl.z, e) : Math.hypot(e.x - bl.x, e.z - bl.z);
+      if (d > R) continue;
+      this.dealDamage(fake, e, mdef.dmg * (1 - 0.45 * (d / R)));
+    }
+    this.events.push({ e: 'boom', x: bl.x, z: bl.z, big: true });
+  }
+
+  // suicide truck: fuel-and-explosives fireball — incinerates infantry and
+  // leaves buildings BURNING (damage over time) long after the blast
+  private truckBoom(u: Entity) {
+    const def = UNITS[u.type];
+    const R = 3.0;
+    for (const e of [...this.ents.values()]) {
+      if (e.owner === u.owner || e.hp <= 0 || !this.players[e.owner].alive) continue;
+      const d = e.b ? this.distToEnt(u.x, u.z, e) : Math.hypot(e.x - u.x, e.z - u.z);
+      if (d > R) continue;
+      this.dealDamage(u, e, def.dmg * (1 - 0.4 * (d / R)));
+      if (e.b && e.hp > 0) { e.burnT = Math.max(e.burnT || 0, 10); e.burnPs = 14; }
+    }
+    u.hp = 0;
+    this.events.push({ e: 'boom', x: u.x, z: u.z, big: true });
+    this.events.push({ e: 'boom', x: u.x + 0.8, z: u.z - 0.5, big: false });
+    this.events.push({ e: 'boom', x: u.x - 0.6, z: u.z + 0.7, big: false });
   }
 
   // carpet release: the full remaining payload detonates around the target
@@ -1265,6 +1350,8 @@ export class Sim {
         if (e.rpt) v.rp = 1;
         if (e.primary) v.pm = 1;
         if (e.research) { v.rs = e.research.tech; v.rsf = 1 - e.research.t / e.research.t0; }
+        if (e.storedMissile) v.ms = e.storedMissile;
+        if (e.burnT && e.burnT > 0) v.bn = 1;
       } else {
         if (e.stance) v.st = e.stance;
         if (e.fortified) v.fo = 1;

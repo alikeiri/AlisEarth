@@ -4,7 +4,7 @@
 
 import { createServer } from 'http';
 import { readFile } from 'fs/promises';
-import { readFileSync, writeFileSync } from 'fs';
+import { readFileSync, writeFileSync, mkdirSync, unlinkSync } from 'fs';
 import { extname, join, normalize } from 'path';
 import { fileURLToPath } from 'url';
 import { WebSocketServer, WebSocket } from 'ws';
@@ -38,6 +38,10 @@ const ADVISOR_SYS = 'You command an army in a C&C-style RTS. You receive a JSON 
 const LESSON_SYS = 'You are the AI commander after an RTS match. aiWon says if you won. dealt/lost show '
   + 'damage done and units lost per weapon class. Write ONE concise tactical lesson for your next match. '
   + 'Reply ONLY JSON: {"lesson":"max 25 words"}';
+const ANALYZE_SYS = 'You are the RTS AI commander critically reviewing a finished match. You receive the '
+  + 'match report plus your accumulated knowledge from all previous games. Analyze what the loser did '
+  + 'wrong, what won the game, and state the strategy you will adopt in future matches given everything '
+  + 'you know. Reply ONLY JSON: {"critique":"3-5 sentences","lesson":"max 25 words"}';
 const advisorLast = new Map<string, number>();
 async function handleAdvisor(req: any, res: any) {
   if (!ADVISOR_KEY) { res.writeHead(404); res.end(); return; }
@@ -51,14 +55,18 @@ async function handleAdvisor(req: any, res: any) {
   req.on('end', async () => {
     try {
       const parsed = JSON.parse(raw);
-      const summary = String(parsed.summary || '').slice(0, 2000);
-      const lessonMode = parsed.mode === 'lesson';
+      let summary = String(parsed.summary || '').slice(0, 2000);
+      const mode = parsed.mode === 'lesson' ? 'lesson' : parsed.mode === 'analyze' ? 'analyze' : 'stance';
+      if (mode === 'analyze') {
+        // critical review uses EVERYTHING the AI already knows (server profile)
+        try { summary += '\nYour accumulated knowledge: ' + readFileSync(AI_PROFILE_FILE, 'utf8').slice(0, 1200); } catch { /* none */ }
+      }
       const r = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: { 'content-type': 'application/json', 'x-api-key': ADVISOR_KEY, 'anthropic-version': '2023-06-01' },
         body: JSON.stringify({
-          model: 'claude-haiku-4-5-20251001', max_tokens: lessonMode ? 120 : 200,
-          system: lessonMode ? LESSON_SYS : ADVISOR_SYS,
+          model: 'claude-haiku-4-5-20251001', max_tokens: mode === 'stance' ? 200 : mode === 'lesson' ? 120 : 350,
+          system: mode === 'lesson' ? LESSON_SYS : mode === 'analyze' ? ANALYZE_SYS : ADVISOR_SYS,
           messages: [{ role: 'user', content: summary }],
         }),
       });
@@ -67,11 +75,34 @@ async function handleAdvisor(req: any, res: any) {
       const text = j.content?.[0]?.text || '';
       const m = text.match(/\{[\s\S]*\}/);
       const d = m ? JSON.parse(m[0]) : {};
+      // lessons from post-mortems and replay reviews enter the SERVER's brain
+      if ((mode === 'lesson' || mode === 'analyze') && d.lesson) mergeServerLesson(String(d.lesson));
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(lessonMode
-        ? JSON.stringify({ lesson: d.lesson || null })
+      res.end(mode === 'lesson' ? JSON.stringify({ lesson: d.lesson || null })
+        : mode === 'analyze' ? JSON.stringify({ critique: d.critique || null, lesson: d.lesson || null })
         : JSON.stringify({ stance: d.stance || null, taunt: d.taunt || null }));
     } catch { res.writeHead(500); res.end(); }
+  });
+}
+
+// shared AI intelligence: GET serves the server's profile (clients merge it in
+// before each game), POST absorbs a client's post-game report. Server is the
+// primary store; localStorage is the per-browser cache.
+function handleIntel(req: any, res: any) {
+  if (req.method === 'GET') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(readProfile()));
+    return;
+  }
+  let raw = '';
+  req.on('data', (c: Buffer) => { raw += c; if (raw.length > 8192) req.destroy(); });
+  req.on('end', () => {
+    try {
+      const r = JSON.parse(raw).report;
+      if (r && typeof r === 'object') saveAiReport(r);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(readProfile()));
+    } catch { res.writeHead(400); res.end(); }
   });
 }
 
@@ -79,6 +110,22 @@ const http = createServer(async (req, res) => {
   try {
     let p = (req.url || '/').split('?')[0];
     if (req.method === 'POST' && p === '/advisor') { handleAdvisor(req, res); return; }
+    if (p === '/intel') { handleIntel(req, res); return; }
+    if (req.method === 'GET' && p === '/replays') {
+      let idx = '[]';
+      try { idx = readFileSync(REPLAY_INDEX, 'utf8'); } catch { /* none yet */ }
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(idx);
+      return;
+    }
+    if (req.method === 'GET' && /^\/replays\/[a-z0-9]+$/.test(p)) {
+      try {
+        const body = readFileSync(join(REPLAY_DIR, p.slice('/replays/'.length) + '.json'));
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(body);
+      } catch { res.writeHead(404); res.end(); }
+      return;
+    }
     if (p === '/') p = '/index.html';
     const file = normalize(join(DIST, p));
     if (!file.startsWith(DIST)) { res.writeHead(403); res.end(); return; }
@@ -97,6 +144,8 @@ interface Room {
   code: string; clients: Client[]; started: boolean;
   sim: Sim | null; timer: ReturnType<typeof setInterval> | null; cmdQ: any[];
   aiSlots: number[]; size: number; diff: number;
+  rec?: { seed: number; size: number; players: any[]; cmds: { k: number; c: any[] }[] };
+  lastReport?: any; replaySaved?: boolean;
 }
 const rooms = new Map<string, Room>();
 
@@ -114,10 +163,24 @@ function send(ws: WebSocket, obj: any) {
 // rolling study profile of human-vs-AI games (mirrors the client's localStorage
 // version) — the AI reads it at game start and adapts strategy and unit mix
 const AI_PROFILE_FILE = join(fileURLToPath(new URL('.', import.meta.url)), 'ai-profile.json');
+function readProfile(): any {
+  try { return JSON.parse(readFileSync(AI_PROFILE_FILE, 'utf8')); } catch { return {}; }
+}
 function saveAiReport(r: any) {
   try {
-    let p: any = {};
-    try { p = JSON.parse(readFileSync(AI_PROFILE_FILE, 'utf8')); } catch { /* first game */ }
+    const p = readProfile();
+    if (r.simMatch) {
+      // AI-vs-AI match: absorb the winner's doctrine payoffs only
+      p.simGames = (p.simGames || 0) + 1;
+      const eff = p.eff || {};
+      for (const k of ['inf', 'veh', 'air', 'sea']) {
+        const e = (r.dealt?.[k] || 0) / ((r.lost?.[k] || 0) + 1);
+        eff[k] = Math.round(((eff[k] || 0) * 0.7 + e * 0.3) * 10) / 10;
+      }
+      p.eff = eff;
+      writeFileSync(AI_PROFILE_FILE, JSON.stringify(p));
+      return;
+    }
     p.games = (p.games || 0) + 1;
     if (r.aiWon) { p.aiWins = (p.aiWins || 0) + 1; p.lossStreak = 0; }
     else p.lossStreak = (p.lossStreak || 0) + 1;
@@ -126,8 +189,54 @@ function saveAiReport(r: any) {
     for (const k of ['inf', 'veh', 'air', 'sea'])
       d[k] = Math.round((d[k] || 0) * 0.7 + (r.dmg?.[k] || 0));
     p.dmg = d;
+    const eff = p.eff || {};
+    for (const k of ['inf', 'veh', 'air', 'sea']) {
+      const e = (r.dealt?.[k] || 0) / ((r.lost?.[k] || 0) + 1);
+      eff[k] = Math.round(((eff[k] || 0) * 0.6 + e * 0.4) * 10) / 10;
+    }
+    p.eff = eff;
+    p.harvLost = Math.round(((p.harvLost || 0) * 0.6 + (r.harvLost || 0) * 0.4) * 10) / 10;
     writeFileSync(AI_PROFILE_FILE, JSON.stringify(p));
   } catch { /* read-only fs — learning disabled */ }
+}
+function mergeServerLesson(lesson: string) {
+  try {
+    const p = readProfile();
+    p.lessons = [...(p.lessons || []), lesson.slice(0, 160)].slice(-5);
+    writeFileSync(AI_PROFILE_FILE, JSON.stringify(p));
+  } catch { /* read-only fs */ }
+}
+
+// ---- replays: every server game is recorded (seed + command stream = exact
+// deterministic playback) and can be re-watched by anyone ----
+const REPLAY_DIR = join(fileURLToPath(new URL('.', import.meta.url)), 'replays');
+const REPLAY_INDEX = join(REPLAY_DIR, 'index.json');
+try { mkdirSync(REPLAY_DIR, { recursive: true }); } catch { /* exists */ }
+function saveReplay(room: Room) {
+  if (!room.rec || room.replaySaved || !room.sim) return;
+  room.replaySaved = true;
+  try {
+    const sim = room.sim;
+    const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+    const meta = {
+      id, date: Date.now(),
+      players: room.rec.players,
+      winner: sim.winner,
+      winnerName: sim.winner >= 0 ? room.rec.players[sim.winner]?.name : null,
+      lenSec: Math.round(sim.tickN / 10),
+      done: sim.done,
+      report: room.lastReport || null,
+    };
+    writeFileSync(join(REPLAY_DIR, id + '.json'),
+      JSON.stringify({ meta, seed: room.rec.seed, size: room.rec.size, cmds: room.rec.cmds }));
+    let idx: any[] = [];
+    try { idx = JSON.parse(readFileSync(REPLAY_INDEX, 'utf8')); } catch { /* first replay */ }
+    idx.unshift(meta);
+    for (const old of idx.slice(40)) { // keep the latest 40
+      try { unlinkSync(join(REPLAY_DIR, old.id + '.json')); } catch { /* gone */ }
+    }
+    writeFileSync(REPLAY_INDEX, JSON.stringify(idx.slice(0, 40)));
+  } catch { /* disk trouble — skip */ }
 }
 
 function broadcast(room: Room, obj: any) {
@@ -157,6 +266,7 @@ function startRoom(room: Room) {
   const seed = (Math.random() * 0x7fffffff) | 0;
   setMapSize(room.size);
   room.sim = new Sim(seed, specs);
+  room.rec = { seed, size: room.size, players: specs.map(s => ({ ...s })), cmds: [] };
   try { room.sim.aiProfile = JSON.parse(readFileSync(AI_PROFILE_FILE, 'utf8')); } catch { /* fresh AI */ }
   room.clients.forEach((c, i) =>
     send(c.ws, { t: 'start', seed, size: room.size, you: i, players: specs.map(s => ({ name: s.name, faction: s.faction, isAI: !!s.isAI })) }));
@@ -166,13 +276,15 @@ function startRoom(room: Room) {
     const cmds = room.cmdQ;
     room.cmdQ = [];
     for (const slot of room.aiSlots) cmds.push(...aiTick(sim, slot));
+    if (cmds.length && room.rec) room.rec.cmds.push({ k: sim.tickN, c: cmds }); // replay: full cmd stream incl. AI
     sim.tick(cmds);
-    for (const ev of sim.events) if (ev.e === 'aiReport') saveAiReport(ev.r);
+    for (const ev of sim.events) if (ev.e === 'aiReport') { room.lastReport = ev.r; saveAiReport(ev.r); }
     broadcast(room, { t: 'snap', ...sim.snapshot() });
     if (sim.done) {
       broadcast(room, { t: 'end', winner: sim.winner });
       clearInterval(room.timer!);
       room.timer = null;
+      saveReplay(room);
       // room stays so players can read the result; it dies when they disconnect
     }
   }, 100);
@@ -237,6 +349,8 @@ wss.on('connection', ws => {
     if (idx >= 0) room.clients.splice(idx, 1);
     if (!room.clients.length) {
       if (room.timer) clearInterval(room.timer);
+      // abandoned mid-game: still keep the replay if it ran long enough
+      if (room.started && room.sim && room.sim.tickN > 600) saveReplay(room);
       rooms.delete(room.code);
     } else if (!room.started) {
       room.clients.forEach((c, i) => { c.slot = i; });

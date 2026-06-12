@@ -27,6 +27,9 @@ export interface UnitDef {
   cloak?: boolean;                               // stealth: low detection range to the enemy
   internal?: boolean;                            // not buildable from a sidebar
   kamikaze?: boolean;                            // one-way: explodes on contact (dmg = blast)
+  bombTruck?: boolean;                           // suicide truck: ground contact fireball + sets buildings ablaze
+  missile?: boolean;                             // built at the silo, stored there, launched at a map position
+  blastR?: number;                               // missile blast radius
 }
 
 export const UNITS: Record<string, UnitDef> = {
@@ -66,6 +69,12 @@ export const UNITS: Record<string, UnitDef> = {
   dbomber:   { name: 'Drone Bomber', cost: 2600, hp: 280, speed: 3.0, range: 4.0, dmg: 90,  rof: 4.0, builtAt: 'airforce', buildTime: 20, kind: 'air', fly: true, alt: 3.4, pad: true, payload: 3 },
   heli:      { name: 'Helicopter',   cost: 1600, hp: 260, speed: 3.2, range: 5.5, dmg: 40,  rof: 1.4, builtAt: 'airforce', buildTime: 14, kind: 'air', fly: true, alt: 2.7, pad: true },
   helidrone: { name: 'Helidrone',    cost: 800,  hp: 120, speed: 3.6, range: 4.5, dmg: 20,  rof: 0.9, builtAt: 'airforce', buildTime: 9,  kind: 'air', fly: true, alt: 2.7, pad: true },
+  // suicide truck: fuel + explosives, huge fireball, sets buildings ablaze
+  fueltruck: { name: 'Fuel Truck',   cost: 900,  hp: 220, speed: 3.6, range: 4.0, dmg: 280, rof: 1, builtAt: 'factory', buildTime: 10, kind: 'veh', bombTruck: true },
+  // missiles: built AT the silo, stored there, launched at any map position
+  cmissile:   { name: 'Cruise Missile', cost: 1400, hp: 1, speed: 7, range: 0, dmg: 480, rof: 1, builtAt: 'silo', buildTime: 25, kind: 'air', missile: true, blastR: 3.0 },
+  bbmissile:  { name: 'Bunker Buster',  cost: 1800, hp: 1, speed: 7, range: 0, dmg: 650, rof: 1, builtAt: 'silo', buildTime: 30, kind: 'air', missile: true, blastR: 2.2 },
+  chemissile: { name: 'Chem Warhead',   cost: 2000, hp: 1, speed: 7, range: 0, dmg: 320, rof: 1, builtAt: 'silo', buildTime: 32, kind: 'air', missile: true, blastR: 3.6, tech: 'chem' },
 };
 
 export const AIRFIELD_CAP = (lvl: number) => 2 + 2 * lvl; // capacity per airfield level
@@ -95,6 +104,7 @@ export const BUILDINGS: Record<string, BuildingDef> = {
   airforce: { name: 'Aircraft Plant',    cost: 2200, hp: 1000, power: -45,  buildTime: 15, size: 3, prereq: 'factory' },
   airfield: { name: 'Airfield',          cost: 800,  hp: 600,  power: -15,  buildTime: 8,  size: 2, prereq: 'airforce' },
   lab:      { name: 'Research Lab',       cost: 2000, hp: 850,  power: -50,  buildTime: 14, size: 2, prereq: 'factory' },
+  silo:     { name: 'Missile Silo',       cost: 2500, hp: 900,  power: -60,  buildTime: 16, size: 2, prereq: 'lab' },
 };
 
 // Researchable technologies (at the Research Lab). Each unlocks tech-gated units.
@@ -223,6 +233,11 @@ export function dmgMul(attType: string, tgtIsBuilding: boolean, tgtKind: string,
   if (attType === 'ifv')    return tgtIsBuilding ? 0.5 : (tgtKind === 'inf' ? 2.2 : 0.5);
   if (attType === 'aatank') return 0.25; // AA missiles are wasted on ground targets
   if (attType === 'flak')   return tgtIsBuilding ? 0.3 : (tgtKind === 'inf' ? 0.9 : 0.4);
+  // suicide truck fireball: incinerates infantry; the burn DoT handles buildings
+  if (attType === 'fueltruck') return tgtIsBuilding ? 0.8 : (tgtKind === 'inf' ? 2.2 : 0.7);
+  if (attType === 'cmissile')  return tgtIsBuilding ? 1.2 : 1.0;
+  if (attType === 'bbmissile') return tgtIsBuilding ? 2.0 : 0.4;
+  if (attType === 'chemissile') return tgtIsBuilding ? 0.6 : (tgtKind === 'inf' ? 2.6 : 0.8);
   if (attType === 'tank' || attType === 'heavy') return tgtIsBuilding ? 1.3 : (tgtKind === 'inf' ? 0.5 : 1.35);
   if (attType === 'turret') return tgtIsBuilding ? 0.8 : (tgtKind === 'veh' ? 0.6 : 1.1); // armor shrugs off turret fire
   return 1.0; // gunboat / destroyer guns

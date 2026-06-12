@@ -167,6 +167,7 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
   else if ((L.air || island || dirAir || prefAir) && !nB('airforce') && nB('factory') && pl.credits > (dirAir || prefAir ? 2400 : 3000)) want = 'airforce';
   else if ((L.air || island || dirAir || prefAir) && nB('airforce') && nB('airfield') < 2 && pl.credits > 1600) want = 'airfield';
   else if ((pl.aiLvl >= 2 || dirTech) && !nB('lab') && nB('factory') && pl.credits > (dirTech ? 2400 : 3000)) want = 'lab';
+  else if (pl.aiLvl >= 2 && nB('lab') && !nB('silo') && pl.credits > 3200) want = 'silo';
   else if (nB('turret') < turrets + 1 && pl.credits > 2600) want = 'turret';
   else if (surplus < 60 && pl.credits > 2400) want = 'power';
 
@@ -239,6 +240,7 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
         : (antiAir && nU('aatank') + nU('flak') < 4 && r < 0.35) ? (r < 0.18 ? 'aatank' : 'flak')
         : r < (antiInf ? 0.4 : 0.25) ? 'mlrs' // artillery shreds infantry masses
         : r < (antiInf ? 0.7 : 0.42) ? 'ifv'  // autocannons mop up the rest
+        : r < (antiInf ? 0.76 : 0.47) && pl.credits > 1600 ? 'fueltruck' // breach charge
         : (pl.credits > 2000 && r < 0.6) ? 'heavy'
         : 'tank';
       cmds.push({ k: 'train', p, bid: fac.id, type: t });
@@ -266,6 +268,17 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
       const r = sim.rng.next();
       cmds.push({ k: 'train', p, bid: sy.id, type: r < 0.5 ? 'gunboat' : r < 0.85 ? 'destroyer' : 'sub' });
     }
+  }
+
+  // missile silo: keep one warhead cooking, launch at the best target when armed
+  const silo = (myB['silo'] || []).find(b => b.progress >= b.total);
+  if (silo && !silo.storedMissile && !silo.queue.length && pl.credits > 2400) {
+    const t = pl.tech['chem'] && sim.rng.next() < 0.4 ? 'chemissile' : 'cmissile';
+    cmds.push({ k: 'train', p, bid: silo.id, type: t });
+  }
+  if (silo && silo.storedMissile && (sim.tickN >= mem.peaceUntil || mem.peaceBroken)) {
+    const tgt = bestStrikeTarget(sim, p);
+    if (tgt) cmds.push({ k: 'launch', p, bid: silo.id, x: tgt.x, z: tgt.z });
   }
 
   // research a tech when a lab is idle and we're flush

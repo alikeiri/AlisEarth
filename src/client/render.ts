@@ -18,6 +18,7 @@ const MODEL_DEFS: Record<string, { file: string; size: number; axis: 'l' | 'h'; 
   heavy:     { file: 'heavy',     size: 1.85, axis: 'l', ry: 0 },
   ifv:       { file: 'tank',      size: 1.25, axis: 'l', ry: 0, tint: 0x9aa86a }, // light olive scout chassis
   aatank:    { file: 'mlrs',      size: 1.40, axis: 'l', ry: 0, tint: 0x7c93b5 }, // blue-gray missile carrier
+  fueltruck: { file: 'harv',      size: 1.50, axis: 'l', ry: Math.PI, tint: 0xc0392b }, // red bomb truck (harv flip)
   flak:      { file: 'engineer',  size: 1.30, axis: 'l', ry: Math.PI, tint: 0x848e97 }, // gun truck (same flip as the pickup)
   mlrs:      { file: 'mlrs',      size: 1.60, axis: 'l', ry: 0 },
   // trucks: cab/bed geometry defeats the front heuristic — flip both (user-verified)
@@ -605,6 +606,13 @@ function buildingGroupPro(type: string, teamColor: number): THREE.Group {
     add(new THREE.TorusGeometry(0.3, 0.05, 8, 16), steel, 0, 1.35, 0).rotation.x = Math.PI / 2.5;
     add(new THREE.CylinderGeometry(0.06, 0.06, 0.4, 6), steel, 0.6, 0.5, 0.6);
     add(roundedSlabGeo(1.5, 0.2, 0.06, 0.06), team, 0, 0.45, -0.75);
+  } else if (type === 'silo') {
+    add(roundedSlabGeo(1.85, 1.85, 0.35), concrete);
+    add(new THREE.CylinderGeometry(0.62, 0.7, 0.25, 16), darkM, 0, 0.45, 0); // blast ring
+    add(new THREE.CylinderGeometry(0.55, 0.55, 0.1, 16), steel, 0, 0.58, 0); // hatch
+    add(new THREE.ConeGeometry(0.18, 0.55, 10), mat(0xd8dde2, 0.4, 0.5), 0, 0.85, 0); // warhead tip
+    add(new THREE.BoxGeometry(0.32, 0.5, 0.32), olive, 0.65, 0.55, 0.65); // control bunker
+    add(roundedSlabGeo(1.4, 0.18, 0.06, 0.06), team, 0, 0.4, -0.78);
   } else if (type === 'airfield') {
     add(roundedSlabGeo(1.9, 1.9, 0.14, 0.08), mat(0x4e545a));
     for (const sz2 of [-0.55, 0, 0.55]) add(new THREE.BoxGeometry(0.1, 0.02, 0.45), mat(0xd8d8d8), 0, 0.16, sz2);
@@ -736,6 +744,8 @@ export class Renderer {
   private time = 0;
   private terrainShader: any = null;
   private extTex: Record<string, THREE.Texture> = {};
+  private fogTex: THREE.DataTexture | null = null;
+  private fogMesh: THREE.Mesh | null = null;
 
   constructor(canvas: HTMLCanvasElement, map: GameMap) {
     this.map = map;
@@ -797,6 +807,7 @@ export class Renderer {
     this.scene.add(this.terrain);
     this.loadTerrainTextures(maxAniso); // CC0 photo textures; procedural fallback
     this.buildTrees();
+    this.buildFog();
 
     // water: animated normal-mapped surface
     this.waterMat = new THREE.MeshPhongMaterial({
@@ -1236,6 +1247,48 @@ export class Renderer {
     else delete this.posedParts[type];
   }
 
+  // fog of war: a high overlay plane sampling a W×H mask texture; unseen =
+  // opaque dark, explored = dim, visible = clear. Hidden in spectator modes.
+  private buildFog() {
+    const data = new Uint8Array(W * H * 4);
+    for (let i = 0; i < W * H; i++) { data[i * 4 + 3] = 235; } // start fully fogged
+    const tex = new THREE.DataTexture(data, W, H, THREE.RGBAFormat);
+    tex.needsUpdate = true;
+    tex.magFilter = THREE.LinearFilter; tex.minFilter = THREE.LinearFilter;
+    this.fogTex = tex;
+    const geo = new THREE.PlaneGeometry(W, H);
+    geo.rotateX(-Math.PI / 2);
+    geo.translate(W / 2, 0, H / 2);
+    const mat = new THREE.MeshBasicMaterial({
+      map: tex, transparent: true, depthWrite: false, color: 0x05080c, fog: false,
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.y = 14; // above units/buildings, below the camera
+    mesh.renderOrder = 5;
+    mesh.frustumCulled = false;
+    mesh.visible = false;
+    this.scene.add(mesh);
+    this.fogMesh = mesh;
+  }
+
+  // push the client's fog mask (0 unseen, 1 explored, 2 visible) to the texture
+  setFog(mask: Uint8Array) {
+    if (!this.fogTex || !this.fogMesh) return;
+    this.fogMesh.visible = true;
+    const d = this.fogTex.image.data as Uint8Array;
+    for (let i = 0; i < W * H; i++) {
+      const v = mask[i];
+      d[i * 4 + 3] = v === 2 ? 0 : v === 1 ? 120 : 235;
+    }
+    this.fogTex.needsUpdate = true;
+  }
+  fogValue(cx: number, cz: number): number {
+    if (!this.fogMesh || !this.fogMesh.visible || !this.fogTex) return 2;
+    const d = this.fogTex.image.data as Uint8Array;
+    const a = d[(cz * W + cx) * 4 + 3] ?? 0;
+    return a === 0 ? 2 : a < 200 ? 1 : 0;
+  }
+
   private buildTrees() {
     const cells: { x: number; z: number }[] = [];
     for (let cz = 0; cz < H; cz++)
@@ -1395,6 +1448,21 @@ export class Renderer {
           if (this.tracers.length < MAX_TRACER) this.tracers.push({ x1: ev.x, y1, z1: ev.z, x2: ev.tx, y2, z2: ev.tz, t: 0.1 });
           this.spawnParts(ev.tx, y2, ev.tz, 2, false);
         }
+      } else if (ev.e === 'silo') {
+        // ballistic missile: one big high-arc rocket from silo to target
+        const dist = Math.hypot(ev.tx - ev.x, ev.tz - ev.z);
+        const y1s = Math.max(this.map.heightAt(ev.x, ev.z), SEA) + 1.2;
+        const y2s = Math.max(this.map.heightAt(ev.tx, ev.tz), SEA) + 0.2;
+        if (this.rockets.length < 64) this.rockets.push({
+          x0: ev.x, y0: y1s, z0: ev.z, x1: ev.tx, y1: y2s, z1: ev.tz,
+          t: 0, delay: 0, dur: Math.max(1.0, (ev.ft || 20) / 10), arc: 6 + dist * 0.35,
+        });
+        this.spawnParts(ev.x, y1s, ev.z, 8, true); // launch plume
+      } else if (ev.e === 'burnfx') {
+        // building on fire: rising smoke
+        const yb = Math.max(this.map.heightAt(ev.x, ev.z), SEA) + 0.8;
+        this.smokeParts.push({ x: ev.x, y: yb, z: ev.z, vx: 0, vy: 1.1, vz: 0, life: 0, max: 1.4, s: 2.2 });
+        this.spawnParts(ev.x, yb, ev.z, 1, false);
       } else if (ev.e === 'boom') {
         const y = Math.max(this.map.heightAt(ev.x, ev.z), SEA) + 0.4;
         this.spawnParts(ev.x, y, ev.z, ev.big ? 26 : 12, ev.big);
