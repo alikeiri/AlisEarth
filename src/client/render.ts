@@ -1257,24 +1257,36 @@ export class Renderer {
     else delete this.posedParts[type];
   }
 
-  // fog of war: a high overlay plane sampling a W×H mask texture; unseen =
-  // opaque dark, explored = dim, visible = clear. Hidden in spectator modes.
+  // fog of war: a terrain-HUGGING mesh (same heightfield as the ground, lifted
+  // a hair) sampling a W×H mask texture — unseen = opaque dark, explored = dim,
+  // visible = clear. Following the surface kills the parallax that made a
+  // floating plane read as all-black. Hidden in spectator/replay modes.
   private buildFog() {
     const data = new Uint8Array(W * H * 4);
-    for (let i = 0; i < W * H; i++) { data[i * 4 + 3] = 235; } // start fully fogged
+    for (let i = 0; i < W * H; i++) data[i * 4 + 3] = 235; // start fully fogged
     const tex = new THREE.DataTexture(data, W, H, THREE.RGBAFormat);
     tex.needsUpdate = true;
+    tex.flipY = false; // DataTexture row 0 = cz 0, matches mask index cz*W+cx
     tex.magFilter = THREE.LinearFilter; tex.minFilter = THREE.LinearFilter;
     this.fogTex = tex;
-    const geo = new THREE.PlaneGeometry(W, H);
+
+    const geo = new THREE.PlaneGeometry(W, H, W, H);
     geo.rotateX(-Math.PI / 2);
     geo.translate(W / 2, 0, H / 2);
+    const pos = geo.getAttribute('position') as THREE.BufferAttribute;
+    const uv = geo.getAttribute('uv') as THREE.BufferAttribute;
+    for (let i = 0; i < pos.count; i++) {
+      const x = pos.getX(i), z = pos.getZ(i);
+      pos.setY(i, Math.max(this.map.heightAt(x, z), SEA) + 0.4); // sit just above ground/water
+      uv.setXY(i, x / W, z / H); // sample the mask by world cell
+    }
+    pos.needsUpdate = true; uv.needsUpdate = true;
+
     const mat = new THREE.MeshBasicMaterial({
       map: tex, transparent: true, depthWrite: false, color: 0x05080c, fog: false,
     });
     const mesh = new THREE.Mesh(geo, mat);
-    mesh.position.y = 14; // above units/buildings, below the camera
-    mesh.renderOrder = 5;
+    mesh.renderOrder = 4;
     mesh.frustumCulled = false;
     mesh.visible = false;
     this.scene.add(mesh);
