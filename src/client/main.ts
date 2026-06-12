@@ -62,7 +62,11 @@ class LocalGame implements GameLike {
       this.sim.players.forEach((pl, i) => { if (pl.isAI) cmds.push(...aiTick(this.sim, i)); });
       this.sim.tick(cmds);
       for (const ev of this.sim.events) {
-        if (ev.e === 'aiReport' && !this.reportSaved) { this.reportSaved = true; saveAiReport(ev.r); }
+        if (ev.e === 'aiReport' && !this.reportSaved) {
+          this.reportSaved = true;
+          saveAiReport(ev.r);
+          requestLesson(ev.r); // fire-and-forget post-mortem
+        }
       }
       this.evQ.push(...this.sim.events);
     }
@@ -1022,13 +1026,18 @@ class ClaudeAdvisor {
       }
       return { buildings: b, units: u, credits: Math.round(sim.players[p].credits) };
     };
+    let lessons = '';
+    try {
+      const p = JSON.parse(localStorage.getItem('ae_aiprofile') || 'null');
+      if (p?.lessons?.length) lessons = '\nLessons you learned from previous matches (apply them): ' + p.lessons.join(' | ');
+    } catch { /* none */ }
     return JSON.stringify({
       minute: Math.round(sim.tickN / 600),
       you: side(1),                 // the AI Claude commands
       enemy: side(0),               // the human
       island: sim.aiMem[1]?.landOk === false,
       currentStance: sim.aiDirective?.stance || 'none',
-    });
+    }) + lessons;
   }
   private async consult() {
     if (this.game.sim.done) { this.stop(); return; }
@@ -1141,8 +1150,58 @@ function saveAiReport(r: any) {
     for (const k of ['inf', 'veh', 'air', 'sea'])
       d[k] = Math.round((d[k] || 0) * 0.7 + (r.dmg?.[k] || 0)); // recency-weighted
     p.dmg = d;
+    // payoff per weapon class: damage dealt per unit lost — the AI leans into
+    // what worked last time and away from what died for nothing
+    const eff = p.eff || {};
+    for (const k of ['inf', 'veh', 'air', 'sea']) {
+      const e = (r.dealt?.[k] || 0) / ((r.lost?.[k] || 0) + 1);
+      eff[k] = Math.round(((eff[k] || 0) * 0.6 + e * 0.4) * 10) / 10;
+    }
+    p.eff = eff;
+    p.harvLost = Math.round(((p.harvLost || 0) * 0.6 + (r.harvLost || 0) * 0.4) * 10) / 10;
     localStorage.setItem('ae_aiprofile', JSON.stringify(p));
   } catch { /* storage unavailable */ }
+}
+
+// post-mortem: ask Claude for ONE tactical lesson from this match; the lessons
+// journal is fed back into the strategist's prompts in future games
+async function requestLesson(r: any) {
+  try {
+    const key = (localStorage.getItem('ae_claude_key') || '').trim();
+    const report = JSON.stringify(r);
+    let lesson = '';
+    if (key) {
+      const res = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json', 'x-api-key': key,
+          'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true',
+        },
+        body: JSON.stringify({
+          model: 'claude-haiku-4-5-20251001', max_tokens: 120,
+          system: 'You are the AI commander after an RTS match. aiWon says if you won. dealt/lost show '
+            + 'damage done and units lost per weapon class. Write ONE concise tactical lesson for your '
+            + 'next match. Reply ONLY JSON: {"lesson":"max 25 words"}',
+          messages: [{ role: 'user', content: report }],
+        }),
+      });
+      if (!res.ok) return;
+      const j = await res.json();
+      const m = (j.content?.[0]?.text || '').match(/\{[\s\S]*\}/);
+      lesson = m ? String(JSON.parse(m[0]).lesson || '') : '';
+    } else {
+      const res = await fetch('/advisor', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ summary: report, mode: 'lesson' }),
+      });
+      if (!res.ok) return;
+      lesson = String((await res.json()).lesson || '');
+    }
+    if (!lesson) return;
+    const p = JSON.parse(localStorage.getItem('ae_aiprofile') || '{}');
+    p.lessons = [...(p.lessons || []), lesson.slice(0, 160)].slice(-5);
+    localStorage.setItem('ae_aiprofile', JSON.stringify(p));
+  } catch { /* offline — no lesson this time */ }
 }
 
 async function connectNet(): Promise<Net> {

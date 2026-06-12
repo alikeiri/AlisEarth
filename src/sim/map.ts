@@ -61,33 +61,195 @@ export class GameMap {
   }
 }
 
+// Hand-drawn continent silhouettes ('#' = land). Coastlines get fbm domain
+// warping at sample time, so the low-res masks read as detailed coasts.
+const CONTINENTS: { name: string; rows: string[] }[] = [
+  { name: 'Africa', rows: [
+    '......########......',
+    '...###########......',
+    '.#############......',
+    '##############......',
+    '###############.....',
+    '###############.....',
+    '##############......',
+    '.############.......',
+    '...###########......',
+    '...############.....',
+    '....###########.....',
+    '....#########.......',
+    '.....########..##...',
+    '.....########..##...',
+    '......######....#...',
+    '......######........',
+    '......#####.........',
+    '......####..........',
+    '.......###..........',
+    '.......##...........',
+  ] },
+  { name: 'South America', rows: [
+    '.....#######........',
+    '...##########.......',
+    '..############......',
+    '.##############.....',
+    '.###############....',
+    '..###############...',
+    '..###############...',
+    '...##############...',
+    '...#############....',
+    '....###########.....',
+    '....##########......',
+    '....#########.......',
+    '....########........',
+    '...########.........',
+    '...#######..........',
+    '...######...........',
+    '...#####............',
+    '...####.............',
+    '....###.............',
+    '....##..............',
+  ] },
+  { name: 'Australia', rows: [
+    '...####....######...',
+    '.######...########..',
+    '.#################..',
+    '###################.',
+    '###################.',
+    '###################.',
+    '##################..',
+    '.################...',
+    '..##############....',
+    '....###########.....',
+    '......########......',
+    '....................',
+    '..............##....',
+    '..............##....',
+  ] },
+  { name: 'North America', rows: [
+    '###########..#####..',
+    '#################...',
+    '.################...',
+    '..###############...',
+    '..##############....',
+    '...#############....',
+    '...############.....',
+    '....###########.....',
+    '....##########......',
+    '.....#########......',
+    '......########......',
+    '.......######.......',
+    '........#####.......',
+    '........####........',
+    '.........###........',
+    '.........###........',
+    '..........###.......',
+    '...........##.......',
+  ] },
+  { name: 'Eurasia', rows: [
+    '....################',
+    '..##################',
+    '####################',
+    '####################',
+    '####################',
+    '.###################',
+    '.##################.',
+    '..#####.###########.',
+    '..####..##########..',
+    '..####.####.######..',
+    '...##..####..#####..',
+    '...#...###...#####..',
+    '.......###....###...',
+    '.......##......##...',
+    '.......##......###..',
+    '........#.......#...',
+  ] },
+];
+
+// bilinear sample of a mask, 0 (sea) .. 1 (land); outside the grid = sea
+function maskAt(rows: string[], u: number, v: number): number {
+  const gw = rows[0].length, gh = rows.length;
+  const x = u * (gw - 1), y = v * (gh - 1);
+  if (x < 0 || y < 0 || x > gw - 1 || y > gh - 1) return 0;
+  const xi = Math.floor(x), yi = Math.floor(y);
+  const xf = x - xi, yf = y - yi;
+  const at = (gx: number, gy: number) =>
+    (rows[Math.min(gh - 1, gy)]?.charAt(Math.min(gw - 1, gx)) === '#') ? 1 : 0;
+  const a = at(xi, yi), b = at(xi + 1, yi), c = at(xi, yi + 1), d = at(xi + 1, yi + 1);
+  return a + (b - a) * xf + (c - a) * yf + (a - b - c + d) * xf * yf;
+}
+
 export function genMap(seed: number, nPlayers: number): GameMap {
   const m = new GameMap();
   const rng = new RNG(seed ^ 0x5eed);
 
-  // -- heights: continental noise * edge falloff (sea border), plus ridges
+  // -- heights: an Earth continent silhouette + warped coasts + ridges
+  const cont = CONTINENTS[(seed >>> 3) % CONTINENTS.length];
   for (let z = 0; z <= H; z++) {
     for (let x = 0; x <= W; x++) {
       const dEdge = Math.min(x, W - x, z, H - z) / (W * 0.5);
-      const e = Math.min(1, dEdge / 0.24);
-      let h = (fbm(seed, x * 0.035, z * 0.035) * 1.65 - 0.42) * 7.0 * e;
+      const e = Math.min(1, dEdge / 0.14); // thin sea border at map edges
+      // domain-warped mask sample = detailed coastline from a coarse shape
+      const wu = (x / W - 0.5) * 1.12 + 0.5 + (fbm(seed + 91, x * 0.045, z * 0.045) - 0.5) * 0.14;
+      const wv = (z / H - 0.5) * 1.12 + 0.5 + (fbm(seed + 92, x * 0.045, z * 0.045) - 0.5) * 0.14;
+      const mask = maskAt(cont.rows, wu, wv);
+      let h = (mask * 2.3 - 0.78) * 5.6 * e;
+      h += (fbm(seed, x * 0.05, z * 0.05) - 0.5) * 2.4 * mask; // interior variation
       const ridge = fbm(seed + 777, x * 0.06, z * 0.06);
-      h += Math.max(0, ridge - 0.66) * 16;
+      h += Math.max(0, ridge - 0.66) * 16 * mask;
       h += fbm(seed + 313, x * 0.18, z * 0.18) * 0.5; // small texture
       m.hN[z * (W + 1) + x] = Math.max(-1.2, h);
     }
   }
 
-  // -- spawn plateaus (guaranteed buildable land)
+  // -- blocked cells: water or cliffs
+  const recomputeBlocked = (x0: number, z0: number, x1: number, z1: number) => {
+    for (let cz = Math.max(0, z0); cz < Math.min(H, z1); cz++) {
+      for (let cx = Math.max(0, x0); cx < Math.min(W, x1); cx++) {
+        const i = cz * (W + 1) + cx;
+        const a = m.hN[i], b = m.hN[i + 1], c = m.hN[i + W + 1], d = m.hN[i + W + 2];
+        const avg = (a + b + c + d) / 4;
+        const slope = Math.max(a, b, c, d) - Math.min(a, b, c, d);
+        const ci = cz * W + cx;
+        m.tBlocked[ci] = 0; m.water[ci] = 0;
+        if (avg < SEA + 0.05) { m.tBlocked[ci] = 1; m.water[ci] = 1; }
+        else if (slope > 1.7) m.tBlocked[ci] = 1;
+      }
+    }
+  };
+  recomputeBlocked(0, 0, W, H);
+
+  // -- start positions: snap each corner onto the continent (deterministic
+  // spiral; first cell whose 7x7 neighborhood is mostly solid land)
+  const landFrac = (cx: number, cz: number) => {
+    let n = 0, land = 0;
+    for (let dz = -3; dz <= 3; dz++) for (let dx = -3; dx <= 3; dx++) {
+      const x = cx + dx, z = cz + dz;
+      if (!m.inB(x, z)) continue;
+      n++;
+      if (!m.water[z * W + x]) land++;
+    }
+    return n ? land / n : 0;
+  };
+  const snap = (c: { x: number; z: number }) => {
+    if (landFrac(c.x, c.z) >= 0.85) return { ...c };
+    for (let r = 1; r <= 46; r++)
+      for (let dz = -r; dz <= r; dz++)
+        for (let dx = -r; dx <= r; dx++) {
+          if (Math.max(Math.abs(dx), Math.abs(dz)) !== r) continue;
+          const x = c.x + dx, z = c.z + dz;
+          if (x < 12 || z < 12 || x > W - 12 || z > H - 12) continue;
+          if (landFrac(x, z) >= 0.85) return { x, z };
+        }
+    return { ...c }; // no land anywhere near — the plateau pass will make some
+  };
   const corners = [
     { x: 17, z: 17 }, { x: W - 17, z: H - 17 },
     { x: 17, z: H - 17 }, { x: W - 17, z: 17 },
   ];
-  for (let p = 0; p < Math.max(2, nPlayers); p++) {
-    const s = corners[p];
-    m.spawns.push({ x: s.x, z: s.z });
-    const R = 9;
-    // plateau height: solid land
+  const starts = corners.map(snap);
+  for (let p = 0; p < Math.max(2, nPlayers); p++) m.spawns.push({ ...starts[p] });
+
+  // -- spawn plateaus (guaranteed buildable land)
+  const raisePad = (s: { x: number; z: number }, R: number) => {
     const target = Math.max(SEA + 1.0, m.heightAt(s.x, s.z));
     for (let z = s.z - R; z <= s.z + R; z++) {
       for (let x = s.x - R; x <= s.x + R; x++) {
@@ -96,20 +258,41 @@ export function genMap(seed: number, nPlayers: number): GameMap {
         if (d > R) continue;
         const t = Math.min(1, (1 - d / R) * 2.2);
         const i = z * (W + 1) + x;
+        // flatten toward the target (target >= SEA+1, so this never digs sea)
         m.hN[i] = m.hN[i] + (target - m.hN[i]) * t;
       }
     }
-  }
+    recomputeBlocked(s.x - R - 1, s.z - R - 1, s.x + R + 2, s.z + R + 2);
+  };
+  for (const s of starts) raisePad(s, 9);
 
-  // -- blocked cells: water or cliffs
-  for (let cz = 0; cz < H; cz++) {
-    for (let cx = 0; cx < W; cx++) {
-      const i = cz * (W + 1) + cx;
-      const a = m.hN[i], b = m.hN[i + 1], c = m.hN[i + W + 1], d = m.hN[i + W + 2];
-      const avg = (a + b + c + d) / 4;
-      const slope = Math.max(a, b, c, d) - Math.min(a, b, c, d);
-      if (avg < SEA + 0.05) { m.tBlocked[cz * W + cx] = 1; m.water[cz * W + cx] = 1; }
-      else if (slope > 1.7) m.tBlocked[cz * W + cx] = 1;
+  // -- contiguous-land guarantee: every start needs room for a real base.
+  // Flood-fill the buildable area around each spawn; widen the plateau until
+  // at least ~300 connected cells exist (a 17x17 base footprint).
+  const floodArea = (s: { x: number; z: number }): number => {
+    const seen = new Set<number>();
+    const q = [s.z * W + s.x];
+    seen.add(q[0]);
+    let count = 0;
+    while (q.length && count < 1000) {
+      const i = q.pop()!;
+      const cx = i % W, cz = (i / W) | 0;
+      if (m.tBlocked[i]) continue;
+      if (Math.abs(cx - s.x) > 18 || Math.abs(cz - s.z) > 18) continue;
+      count++;
+      for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
+        const nx = cx + dx, nz = cz + dz;
+        if (!m.inB(nx, nz)) continue;
+        const ni = nz * W + nx;
+        if (!seen.has(ni)) { seen.add(ni); q.push(ni); }
+      }
+    }
+    return count;
+  };
+  for (const s of m.spawns) {
+    for (const R of [11, 13, 15, 17]) {
+      if (floodArea(s) >= 300) break;
+      raisePad(s, R);
     }
   }
 
@@ -121,7 +304,7 @@ export function genMap(seed: number, nPlayers: number): GameMap {
       const h = m.cellH(cx, cz);
       if (h < SEA + 0.45 || h > 6.2) continue;
       let nearSpawn = false;
-      for (const s of corners)
+      for (const s of starts)
         if ((cx - s.x) ** 2 + (cz - s.z) ** 2 < 15 * 15) { nearSpawn = true; break; }
       if (nearSpawn) continue;
       if (fbm(seed + 555, cx * 0.055, cz * 0.055) > 0.635) { m.forest[i] = 1; m.tBlocked[i] = 1; }
@@ -139,9 +322,9 @@ export function genMap(seed: number, nPlayers: number): GameMap {
       }
     }
   };
-  // two fields near every spawn (even unused ones - they become expansions)
-  for (const s of corners) {
-    const dx = Math.sign(W / 2 - s.x), dz = Math.sign(H / 2 - s.z);
+  // two fields near every start (even unused ones - they become expansions)
+  for (const s of starts) {
+    const dx = Math.sign(W / 2 - s.x) || 1, dz = Math.sign(H / 2 - s.z) || 1;
     addOre(Math.round(s.x + dx * 10), Math.round(s.z + dz * 3 + rng.range(-3, 3)), 2, 700);
     addOre(Math.round(s.x + dx * 3 + rng.range(-3, 3)), Math.round(s.z + dz * 10), 2, 700);
   }
@@ -164,7 +347,7 @@ export function genMap(seed: number, nPlayers: number): GameMap {
     const cx = 20 + rng.int(W - 40), cz = 20 + rng.int(H - 40);
     if (m.blockedT(cx, cz)) continue;
     let farFromSpawns = true;
-    for (const s of corners)
+    for (const s of starts)
       if ((cx - s.x) ** 2 + (cz - s.z) ** 2 < 24 * 24) { farFromSpawns = false; break; }
     if (!farFromSpawns) continue;
     for (let z = cz - 2; z <= cz + 2; z++)

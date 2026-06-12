@@ -35,6 +35,9 @@ const ADVISOR_SYS = 'You command an army in a C&C-style RTS. You receive a JSON 
   + '"rush" (mass attack now), "defend" (fortify), "expand" (economy), "air" (build air power), '
   + '"tech" (research superweapons). Counter what the enemy is doing. '
   + 'Reply ONLY with JSON: {"stance":"...","taunt":"one short in-character radio line to your enemy"}';
+const LESSON_SYS = 'You are the AI commander after an RTS match. aiWon says if you won. dealt/lost show '
+  + 'damage done and units lost per weapon class. Write ONE concise tactical lesson for your next match. '
+  + 'Reply ONLY JSON: {"lesson":"max 25 words"}';
 const advisorLast = new Map<string, number>();
 async function handleAdvisor(req: any, res: any) {
   if (!ADVISOR_KEY) { res.writeHead(404); res.end(); return; }
@@ -47,13 +50,16 @@ async function handleAdvisor(req: any, res: any) {
   req.on('data', (c: Buffer) => { raw += c; if (raw.length > 4096) req.destroy(); });
   req.on('end', async () => {
     try {
-      const summary = String(JSON.parse(raw).summary || '').slice(0, 2000);
+      const parsed = JSON.parse(raw);
+      const summary = String(parsed.summary || '').slice(0, 2000);
+      const lessonMode = parsed.mode === 'lesson';
       const r = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: { 'content-type': 'application/json', 'x-api-key': ADVISOR_KEY, 'anthropic-version': '2023-06-01' },
         body: JSON.stringify({
-          model: 'claude-haiku-4-5-20251001', max_tokens: 200,
-          system: ADVISOR_SYS, messages: [{ role: 'user', content: summary }],
+          model: 'claude-haiku-4-5-20251001', max_tokens: lessonMode ? 120 : 200,
+          system: lessonMode ? LESSON_SYS : ADVISOR_SYS,
+          messages: [{ role: 'user', content: summary }],
         }),
       });
       if (!r.ok) { res.writeHead(502); res.end(); return; }
@@ -62,7 +68,9 @@ async function handleAdvisor(req: any, res: any) {
       const m = text.match(/\{[\s\S]*\}/);
       const d = m ? JSON.parse(m[0]) : {};
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ stance: d.stance || null, taunt: d.taunt || null }));
+      res.end(lessonMode
+        ? JSON.stringify({ lesson: d.lesson || null })
+        : JSON.stringify({ stance: d.stance || null, taunt: d.taunt || null }));
     } catch { res.writeHead(500); res.end(); }
   });
 }

@@ -33,7 +33,7 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
   // weapon classes the player leans on
   let cap = L.cap, waveEvery = L.waveEvery, peaceSec = L.peace;
   let turrets = L.turrets, sams = L.sams, refs = L.refs;
-  let antiArmor = false, antiInf = false, antiAir = false;
+  let antiArmor = false, antiInf = false, antiAir = false, prefAir = false;
   const prof = sim.aiProfile;
   if (prof && prof.games > 0) {
     const esc = Math.min(4, prof.lossStreak || 0);
@@ -53,6 +53,11 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
       antiInf = (d.inf || 0) / tot > 0.45;
     }
     if (antiAir) sams = Math.max(2, sams + 1);
+    // lean into what paid off last games: if air damage-per-loss beat ground,
+    // shift toward air power; bleeding harvesters earns an extra eco turret
+    const eff = prof.eff || null;
+    if (eff && prof.games >= 2 && (eff.air || 0) > ((eff.veh || 0) + (eff.inf || 0)) * 1.2) prefAir = true;
+    if ((prof.harvLost || 0) >= 2) turrets++;
   }
 
   let mem: AiMem = sim.aiMem[p];
@@ -159,8 +164,8 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
   else if (island && !nB('shipyard') && pl.credits > 2000) want = 'shipyard';
   else if (!nB('dronefac') && nB('factory') && pl.credits > 2400) want = 'dronefac';
   else if (nB('sam') < sams && nB('factory') && pl.credits > (antiAir ? 1400 : 2200)) want = 'sam';
-  else if ((L.air || island || dirAir) && !nB('airforce') && nB('factory') && pl.credits > (dirAir ? 2400 : 3000)) want = 'airforce';
-  else if ((L.air || island || dirAir) && nB('airforce') && nB('airfield') < 2 && pl.credits > 1600) want = 'airfield';
+  else if ((L.air || island || dirAir || prefAir) && !nB('airforce') && nB('factory') && pl.credits > (dirAir || prefAir ? 2400 : 3000)) want = 'airforce';
+  else if ((L.air || island || dirAir || prefAir) && nB('airforce') && nB('airfield') < 2 && pl.credits > 1600) want = 'airfield';
   else if ((pl.aiLvl >= 2 || dirTech) && !nB('lab') && nB('factory') && pl.credits > (dirTech ? 2400 : 3000)) want = 'lab';
   else if (nB('turret') < turrets + 1 && pl.credits > 2600) want = 'turret';
   else if (surplus < 60 && pl.credits > 2400) want = 'power';
@@ -246,7 +251,7 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
     cmds.push({ k: 'train', p, bid: dro.id, type: t });
   }
   const af = (myB['airforce'] || []).find(b => b.progress >= b.total && b.queue.length < 2);
-  if (af && armyCount < cap && pl.credits > (island || dirAir ? 1800 : 2200)) {
+  if (af && armyCount < cap && pl.credits > (island || dirAir || prefAir ? 1800 : 2200)) {
     const r = sim.rng.next();
     // vs an air-heavy player, prioritize interceptors; islanders love bombers
     const t = island && r < 0.35 ? 'bomber'

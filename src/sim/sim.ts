@@ -73,6 +73,9 @@ export class Sim {
   aiProfile: any = null; // host-provided study of past human-vs-AI games (adaptive AI)
   aiDirective: any = null; // optional LLM strategist (Claude API) high-level orders
   private aiDmg = { inf: 0, veh: 0, air: 0, sea: 0 }; // human damage to the AI, by weapon class
+  private aiDealt = { inf: 0, veh: 0, air: 0, sea: 0 }; // AI damage to the human, by its own weapon class
+  private aiLost = { inf: 0, veh: 0, air: 0, sea: 0 }; // AI units lost, by kind
+  private aiHarvLost = 0;
   private firstHumanHit = -1;
   private reported = false;
   private grid = new Map<number, number[]>(); // spatial hash of units, cell = 2 units
@@ -596,12 +599,16 @@ export class Sim {
     let mul = dmgMul(att.type, tgt.b, tgt.b ? 'b' : UNITS[tgt.type].kind, tgt.b ? undefined : tgt.type);
     if (!tgt.b && tgt.fortified) mul *= 0.5; // dug-in drone hive is hard to kill
     tgt.hp -= base * mul;
-    // study material for the adaptive AI: what weapon classes the human leans on
+    // study material for the adaptive AI: what weapon classes the human leans
+    // on, and which of the AI's own weapon classes actually pay off
     const ap = this.players[att.owner], vp = this.players[tgt.owner];
     if (ap && vp && !ap.isAI && vp.isAI && !att.b) {
       const k = UNITS[att.type]?.kind as keyof typeof this.aiDmg;
       if (k && this.aiDmg[k] !== undefined) this.aiDmg[k] += base * mul;
       if (this.firstHumanHit < 0) this.firstHumanHit = this.tickN;
+    } else if (ap && vp && ap.isAI && !vp.isAI && !att.b) {
+      const k = UNITS[att.type]?.kind as keyof typeof this.aiDealt;
+      if (k && this.aiDealt[k] !== undefined) this.aiDealt[k] += base * mul;
     }
     if (!tgt.b) { tgt.lastHitBy = att.id; tgt.lastHitT = this.tickN; } // for return-fire / flee
     this.dmgLog.push({ vOwner: tgt.owner, victim: tgt.id, by: att.id, x: tgt.x, z: tgt.z, b: tgt.b });
@@ -1131,6 +1138,12 @@ export class Sim {
         this.events.push({ e: 'boom', x: e.x, z: e.z, big: true });
       } else {
         this.events.push({ e: 'boom', x: e.x, z: e.z, big: false });
+        // AI casualty ledger (drives the next game's unit-mix preferences)
+        if (this.players[e.owner]?.isAI) {
+          const k = UNITS[e.type]?.kind as keyof typeof this.aiLost;
+          if (k && this.aiLost[k] !== undefined && !UNITS[e.type]?.internal) this.aiLost[k]++;
+          if (e.type === 'harv') this.aiHarvLost++;
+        }
       }
     }
   }
@@ -1176,6 +1189,12 @@ export class Sim {
               inf: Math.round(this.aiDmg.inf), veh: Math.round(this.aiDmg.veh),
               air: Math.round(this.aiDmg.air), sea: Math.round(this.aiDmg.sea),
             },
+            dealt: {
+              inf: Math.round(this.aiDealt.inf), veh: Math.round(this.aiDealt.veh),
+              air: Math.round(this.aiDealt.air), sea: Math.round(this.aiDealt.sea),
+            },
+            lost: { ...this.aiLost },
+            harvLost: this.aiHarvLost,
             len: Math.round(this.tickN / 10),
           },
         });
