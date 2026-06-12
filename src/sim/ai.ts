@@ -7,10 +7,12 @@
 import { Sim, Entity, Cmd } from './sim';
 import { UNITS, BUILDINGS, TICKS_PER_SEC } from './data';
 import { W, H } from './map';
+import { findPath } from './path';
 
 interface AiMem {
   nextWave: number; waveSize: number; tog: number; defCd: number;
   peaceUntil: number; peaceBroken: boolean; nextRaid: number;
+  landOk?: boolean; landCheckT?: number; // island detection (cached pathfind)
 }
 
 const LVL = [
@@ -96,6 +98,16 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
   const nB = (t: string) => (myB[t] || []).length;
   const nU = (t: string) => (myU[t] || []).length;
 
+  // island doctrine: when no land route reaches the enemy, ground armies are
+  // useless — pivot to drones, aircraft and ships. The pathfind is cached and
+  // rechecked occasionally (bridges of rubble can open up).
+  if (mem.landCheckT === undefined || sim.tickN >= mem.landCheckT) {
+    mem.landCheckT = sim.tickN + 45 * TICKS_PER_SEC;
+    const en = nearestEnemyBuilding(sim, p);
+    mem.landOk = !en || !!findPath(sim.map, pl.spawn.x, pl.spawn.z, en.x, en.z, 16000, false);
+  }
+  const island = mem.landOk === false;
+
   // hopeless position: no conyard (can't build), no production buildings and
   // no fighting units left — wave the white flag instead of dragging it out
   const production = nB('barracks') + nB('factory') + nB('dronefac') + nB('airforce') + nB('shipyard');
@@ -125,10 +137,15 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
   else if (nB('factory') < L.factories && pl.credits > 1900) want = 'factory';
   else if (nB('turret') < turrets) want = 'turret';
   else if (nB('barracks') < L.barracks && pl.credits > 1200) want = 'barracks';
+  // stranded on an island: drone works, air force and shipyard come early
+  else if (island && !nB('dronefac') && nB('factory') && pl.credits > 1600) want = 'dronefac';
+  else if (island && !nB('airforce') && nB('factory') && pl.credits > 2000) want = 'airforce';
+  else if (island && nB('airforce') && nB('airfield') < 3 && pl.credits > 1100) want = 'airfield';
+  else if (island && !nB('shipyard') && pl.credits > 2000) want = 'shipyard';
   else if (!nB('dronefac') && nB('factory') && pl.credits > 2400) want = 'dronefac';
   else if (nB('sam') < sams && nB('factory') && pl.credits > (antiAir ? 1400 : 2200)) want = 'sam';
-  else if (L.air && !nB('airforce') && nB('factory') && pl.credits > 3000) want = 'airforce';
-  else if (L.air && nB('airforce') && nB('airfield') < 2 && pl.credits > 1600) want = 'airfield';
+  else if ((L.air || island) && !nB('airforce') && nB('factory') && pl.credits > 3000) want = 'airforce';
+  else if ((L.air || island) && nB('airforce') && nB('airfield') < 2 && pl.credits > 1600) want = 'airfield';
   else if (pl.aiLvl >= 2 && !nB('lab') && nB('factory') && pl.credits > 3000) want = 'lab';
   else if (nB('turret') < turrets + 1 && pl.credits > 2600) want = 'turret';
   else if (surplus < 60 && pl.credits > 2400) want = 'power';
@@ -170,6 +187,7 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
     if (bks.progress < bks.total || bks.queue.length >= 2) continue;
     if (armyCount >= cap) continue;
     if (ecoShort && pl.credits < 2200) continue; // harvesters get first claim
+    if (island && infCount >= 4) continue; // infantry can't swim — token garrison only
     if (hasFac && infCount >= Math.max(3, armyCount * 0.35)) continue; // leave credits for vehicles
     if (pl.credits > (hasFac ? 900 : 500)) {
       // vs an armor-heavy player every 2nd squad is rockets, else every 3rd
@@ -183,6 +201,9 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
     if (nU('harv') < harvTarget && pl.credits > 1000) cmds.push({ k: 'train', p, bid: fac.id, type: 'harv' });
     else if (nU('engineer') < 1 && pl.aiLvl >= 1 && pl.credits > 1500) cmds.push({ k: 'train', p, bid: fac.id, type: 'engineer' });
     else if (armyCount < cap && pl.credits > (ecoShort ? 2200 : 1000)) {
+      // islanders keep only a small home guard of vehicles
+      const groundArmy = nU('tank') + nU('heavy') + nU('ifv') + nU('mlrs') + nU('aatank') + nU('flak');
+      if (island && groundArmy >= 8) continue;
       const r = sim.rng.next();
       const t = nU('mlrs') < L.siege ? 'mlrs'
         : (antiAir && nU('aatank') + nU('flak') < 4 && r < 0.35) ? (r < 0.18 ? 'aatank' : 'flak')
@@ -200,11 +221,21 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
     cmds.push({ k: 'train', p, bid: dro.id, type: t });
   }
   const af = (myB['airforce'] || []).find(b => b.progress >= b.total && b.queue.length < 2);
-  if (af && armyCount < cap && pl.credits > 2200) {
+  if (af && armyCount < cap && pl.credits > (island ? 1800 : 2200)) {
     const r = sim.rng.next();
-    // vs an air-heavy player, prioritize interceptors
-    const t = r < (antiAir ? 0.7 : 0.4) ? 'fighter' : r < 0.7 ? 'heli' : 'helidrone';
+    // vs an air-heavy player, prioritize interceptors; islanders love bombers
+    const t = island && r < 0.35 ? 'bomber'
+      : r < (antiAir ? 0.7 : 0.4) ? 'fighter' : r < 0.7 ? 'heli' : 'helidrone';
     cmds.push({ k: 'train', p, bid: af.id, type: t });
+  }
+  // island navy: gunboats and destroyers shell the enemy coast
+  const sy = (myB['shipyard'] || []).find(b => b.progress >= b.total && b.queue.length < 2);
+  if (sy && island) {
+    const seaN = nU('gunboat') + nU('destroyer') + nU('sub') + nU('navdrone');
+    if (seaN < 6 && pl.credits > (ecoShort ? 2600 : 1500)) {
+      const r = sim.rng.next();
+      cmds.push({ k: 'train', p, bid: sy.id, type: r < 0.5 ? 'gunboat' : r < 0.85 ? 'destroyer' : 'sub' });
+    }
   }
 
   // research a tech when a lab is idle and we're flush

@@ -31,6 +31,7 @@ interface GameLike {
 class LocalGame implements GameLike {
   sim: Sim;
   me = 0;
+  speed = 1; // 0.5×–8× sim speed (+/- keys); multiplayer has no such field
   private pending: any[] = [];
   private acc = 0;
   private evQ: any[] = [];
@@ -53,9 +54,9 @@ class LocalGame implements GameLike {
   get tickN() { return this.sim.tickN; }
   issue(cmd: any) { this.pending.push(cmd); }
   update(dtMs: number) {
-    this.acc += dtMs;
+    this.acc += dtMs * this.speed;
     let guard = 0;
-    while (this.acc >= 100 && guard < 6) {
+    while (this.acc >= 100 && guard < 8) {
       this.acc -= 100; guard++;
       const cmds = this.pending; this.pending = [];
       this.sim.players.forEach((pl, i) => { if (pl.isAI) cmds.push(...aiTick(this.sim, i)); });
@@ -65,7 +66,7 @@ class LocalGame implements GameLike {
       }
       this.evQ.push(...this.sim.events);
     }
-    if (guard >= 6) this.acc = 0; // tab was backgrounded — drop the backlog
+    if (guard >= 8) this.acc = 0; // tab was backgrounded — drop the backlog
   }
   views(): any[] {
     const a = Math.max(0, Math.min(1, this.acc / 100));
@@ -310,6 +311,9 @@ class GameClient {
         this.renderer.setFormationPath(null);
       }
       if (e.code === 'KeyH') this.issueToUnits({ k: 'stop' });
+      // +/- game speed (skirmish only — multiplayer is server-paced)
+      if (e.code === 'Equal' || e.code === 'NumpadAdd') this.changeSpeed(1);
+      if (e.code === 'Minus' || e.code === 'NumpadSubtract') this.changeSpeed(-1);
       // control groups: Ctrl/Alt+1-9 assign, 1-9 recall (double-tap centers camera)
       const dm = e.code.match(/^Digit([1-9])$/);
       if (dm) {
@@ -648,6 +652,23 @@ class GameClient {
       if (this.selection.has(hit.i) && e.shiftKey) this.selection.delete(hit.i);
       else { this.selection.add(hit.i); audio.play('click'); }
     }
+  }
+
+  // sim speed ladder, skirmish only
+  private changeSpeed(dir: number) {
+    const g: any = this.game;
+    if (g.speed === undefined) return; // networked game: server keeps the clock
+    const S = [0.5, 1, 2, 4, 8];
+    let i = S.indexOf(g.speed);
+    if (i < 0) i = 1;
+    i = Math.max(0, Math.min(S.length - 1, i + dir));
+    g.speed = S[i];
+    const el = document.getElementById('speedInd');
+    if (el) {
+      el.textContent = g.speed + '× SPEED';
+      el.classList.toggle('hidden', g.speed === 1);
+    }
+    audio.play('click');
   }
 
   // transient destination marker + lines from each commanded unit
