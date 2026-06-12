@@ -76,6 +76,9 @@ export class Sim {
   private aiDealt = { inf: 0, veh: 0, air: 0, sea: 0 }; // AI damage to the human, by its own weapon class
   private aiLost = { inf: 0, veh: 0, air: 0, sea: 0 }; // AI units lost, by kind
   private aiHarvLost = 0;
+  // per-AI-player ledgers (AI-vs-AI simulations study the winner's doctrine)
+  private dealtP: Record<number, Record<string, number>> = {};
+  private lostP: Record<number, Record<string, number>> = {};
   private firstHumanHit = -1;
   private reported = false;
   private grid = new Map<number, number[]>(); // spatial hash of units, cell = 2 units
@@ -609,6 +612,13 @@ export class Sim {
     } else if (ap && vp && ap.isAI && !vp.isAI && !att.b) {
       const k = UNITS[att.type]?.kind as keyof typeof this.aiDealt;
       if (k && this.aiDealt[k] !== undefined) this.aiDealt[k] += base * mul;
+    }
+    if (ap?.isAI && att.owner !== tgt.owner && !att.b) {
+      const k = UNITS[att.type]?.kind;
+      if (k === 'inf' || k === 'veh' || k === 'air' || k === 'sea') {
+        const led = this.dealtP[att.owner] || (this.dealtP[att.owner] = { inf: 0, veh: 0, air: 0, sea: 0 });
+        led[k] += base * mul;
+      }
     }
     if (!tgt.b) { tgt.lastHitBy = att.id; tgt.lastHitT = this.tickN; } // for return-fire / flee
     this.dmgLog.push({ vOwner: tgt.owner, victim: tgt.id, by: att.id, x: tgt.x, z: tgt.z, b: tgt.b });
@@ -1153,6 +1163,10 @@ export class Sim {
           const k = UNITS[e.type]?.kind as keyof typeof this.aiLost;
           if (k && this.aiLost[k] !== undefined && !UNITS[e.type]?.internal) this.aiLost[k]++;
           if (e.type === 'harv') this.aiHarvLost++;
+          if (k && !UNITS[e.type]?.internal) {
+            const led = this.lostP[e.owner] || (this.lostP[e.owner] = { inf: 0, veh: 0, air: 0, sea: 0 });
+            if (led[k] !== undefined) led[k]++;
+          }
         }
       }
     }
@@ -1188,7 +1202,23 @@ export class Sim {
       // hand the host a study report so the AI can adapt next game
       const hasHuman = this.players.some(pl => !pl.isAI);
       const hasAI = this.players.some(pl => pl.isAI);
-      if (!this.reported && hasHuman && hasAI) {
+      if (!this.reported && !hasHuman && hasAI && this.winner >= 0) {
+        // AI-vs-AI simulation: study the WINNER's doctrine (damage dealt and
+        // units lost per weapon class) — spectated matches train the AI too
+        this.reported = true;
+        const wd = this.dealtP[this.winner] || { inf: 0, veh: 0, air: 0, sea: 0 };
+        const wl = this.lostP[this.winner] || { inf: 0, veh: 0, air: 0, sea: 0 };
+        this.events.push({
+          e: 'aiReport',
+          r: {
+            simMatch: true, aiWon: true,
+            winnerName: this.players[this.winner].name, winnerLvl: this.players[this.winner].aiLvl,
+            dealt: { inf: Math.round(wd.inf), veh: Math.round(wd.veh), air: Math.round(wd.air), sea: Math.round(wd.sea) },
+            lost: { ...wl },
+            len: Math.round(this.tickN / 10),
+          },
+        });
+      } else if (!this.reported && hasHuman && hasAI) {
         this.reported = true;
         this.events.push({
           e: 'aiReport',

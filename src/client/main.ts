@@ -32,21 +32,34 @@ class LocalGame implements GameLike {
   sim: Sim;
   me = 0;
   speed = 1; // 0.5×–8× sim speed (+/- keys); multiplayer has no such field
+  isSim = false; // spectator simulation: AI vs AI, no human player
   private pending: any[] = [];
   private acc = 0;
   private evQ: any[] = [];
   private reportSaved = false;
 
-  constructor(name: string, faction: string, aiLvl = 1, size = 96) {
+  // simLvl2 !== null switches to simulation mode: two AIs fight, you spectate
+  constructor(name: string, faction: string, aiLvl = 1, size = 96, simLvl2: number | null = null) {
     setMapSize(size);
-    const aiFacs = Object.keys(FACTIONS).filter(f => f !== faction);
-    const aiFac = aiFacs[Math.floor(Math.random() * aiFacs.length)];
     const seed = (Date.now() ^ (Math.random() * 0x7fffffff)) >>> 0;
-    const lvlName = ['Easy', 'Normal', 'Hard', 'Brutal'][aiLvl] || 'Normal';
-    this.sim = new Sim(seed, [
-      { name, faction },
-      { name: `AI ${FACTIONS[aiFac].name} (${lvlName})`, faction: aiFac, isAI: true, aiLvl },
-    ]);
+    const LVL_NAMES = ['Easy', 'Normal', 'Hard', 'Brutal'];
+    if (simLvl2 !== null) {
+      this.isSim = true;
+      const facs = Object.keys(FACTIONS);
+      const f1 = facs[Math.floor(Math.random() * facs.length)];
+      const f2 = facs.filter(f => f !== f1)[Math.floor(Math.random() * (facs.length - 1))];
+      this.sim = new Sim(seed, [
+        { name: `AI ${FACTIONS[f1].name} (${LVL_NAMES[aiLvl]})`, faction: f1, isAI: true, aiLvl },
+        { name: `AI ${FACTIONS[f2].name} (${LVL_NAMES[simLvl2]})`, faction: f2, isAI: true, aiLvl: simLvl2 },
+      ]);
+    } else {
+      const aiFacs = Object.keys(FACTIONS).filter(f => f !== faction);
+      const aiFac = aiFacs[Math.floor(Math.random() * aiFacs.length)];
+      this.sim = new Sim(seed, [
+        { name, faction },
+        { name: `AI ${FACTIONS[aiFac].name} (${LVL_NAMES[aiLvl] || 'Normal'})`, faction: aiFac, isAI: true, aiLvl },
+      ]);
+    }
     // the AI studies past games against this player and adapts its strategy
     try { this.sim.aiProfile = JSON.parse(localStorage.getItem('ae_aiprofile') || 'null'); } catch { /* fresh AI */ }
   }
@@ -951,6 +964,7 @@ class GameClient {
 const $ = (id: string) => document.getElementById(id)!;
 let selFaction = 'usa';
 let selDiff = 1;
+let selDiff2 = 2;
 let selSize = 96;
 let client: GameClient | null = null;
 let net: Net | null = null;
@@ -979,15 +993,18 @@ function renderAiIntel() {
   if (!el) return;
   let p: any = null;
   try { p = JSON.parse(localStorage.getItem('ae_aiprofile') || 'null'); } catch { /* none */ }
-  if (!p || !p.games) { el.classList.add('hidden'); return; }
+  const totalGames = (p?.games || 0) + (p?.simGames || 0);
+  if (!p || !totalGames) { el.classList.add('hidden'); return; }
   el.classList.remove('hidden');
   const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;');
-  const losses = p.games - (p.aiWins || 0);
   const rows: string[] = [];
-  rows.push(`<b style="color:#d3e1ee">ENEMY AI INTEL</b> — ${p.games} game${p.games > 1 ? 's' : ''} studied ` +
+  rows.push(`<b style="color:#d3e1ee">ENEMY AI INTEL</b> — ${p.games || 0} vs you · ${p.simGames || 0} observed AI battles ` +
     `<a href="#" id="aiIntelReset" style="float:right;color:#5d7891">forget all</a>`);
-  rows.push(`Record vs you: ${p.aiWins || 0}W–${losses}L` +
-    ((p.lossStreak || 0) >= 2 ? ` · <span style="color:#ffc940">escalating after ${p.lossStreak} straight losses</span>` : ''));
+  if (p.games) {
+    const losses = p.games - (p.aiWins || 0);
+    rows.push(`Record vs you: ${p.aiWins || 0}W–${losses}L` +
+      ((p.lossStreak || 0) >= 2 ? ` · <span style="color:#ffc940">escalating after ${p.lossStreak} straight losses</span>` : ''));
+  }
   const d = p.dmg || {};
   const tot = (d.inf || 0) + (d.veh || 0) + (d.air || 0) + (d.sea || 0);
   if (tot > 0) {
@@ -1145,7 +1162,21 @@ function startGame(game: GameLike) {
   hideAll();
   audio.init();
   client = new GameClient(game, (won, winnerName) => {
-    audio.play(won ? 'win' : 'lose');
+    const isSim = (game as any).isSim;
+    audio.play(won || isSim ? 'win' : 'lose');
+    if (isSim) {
+      $('endTitle').textContent = 'SIMULATION OVER';
+      ($('endTitle') as HTMLElement).style.color = '#ffc940';
+      let sub = `${winnerName} wins.`;
+      try {
+        const prof = JSON.parse(localStorage.getItem('ae_aiprofile') || 'null');
+        const n = (prof?.games || 0) + (prof?.simGames || 0);
+        if (n) sub += ` Match studied — ${n} game${n > 1 ? 's' : ''} in the AI's memory.`;
+      } catch { /* no profile */ }
+      $('endSub').textContent = sub;
+      show('endScreen');
+      return;
+    }
     $('endTitle').textContent = won ? 'VICTORY' : 'DEFEAT';
     ($('endTitle') as HTMLElement).style.color = won ? '#57d977' : '#ff5043';
     let sub = won ? 'All enemy structures destroyed.' : `${winnerName} controls the region.`;
@@ -1156,9 +1187,9 @@ function startGame(game: GameLike) {
     $('endSub').textContent = sub;
     show('endScreen');
   });
-  // Claude strategist: local skirmish only. Personal key if entered, else the
-  // game server's /advisor proxy; announces itself on the first successful read.
-  if (game instanceof LocalGame) {
+  // Claude strategist: local skirmish only (a shared directive would steer
+  // BOTH sides of a simulation). Personal key if entered, else the proxy.
+  if (game instanceof LocalGame && !game.isSim) {
     const key = (localStorage.getItem('ae_claude_key') || '').trim();
     advisor = new ClaudeAdvisor(game, key, taunt => client?.aiSays(taunt));
     advisor.start();
@@ -1185,6 +1216,19 @@ function playerName(): string {
 function saveAiReport(r: any) {
   try {
     const p = JSON.parse(localStorage.getItem('ae_aiprofile') || '{}');
+    if (r.simMatch) {
+      // spectated AI-vs-AI match: absorb the winner's doctrine payoffs, but
+      // don't touch the vs-you record (wins, rush timing, your weapon style)
+      p.simGames = (p.simGames || 0) + 1;
+      const eff = p.eff || {};
+      for (const k of ['inf', 'veh', 'air', 'sea']) {
+        const e = (r.dealt?.[k] || 0) / ((r.lost?.[k] || 0) + 1);
+        eff[k] = Math.round(((eff[k] || 0) * 0.7 + e * 0.3) * 10) / 10;
+      }
+      p.eff = eff;
+      localStorage.setItem('ae_aiprofile', JSON.stringify(p));
+      return;
+    }
     p.games = (p.games || 0) + 1;
     if (r.aiWon) { p.aiWins = (p.aiWins || 0) + 1; p.lossStreak = 0; }
     else p.lossStreak = (p.lossStreak || 0) + 1;
@@ -1289,6 +1333,9 @@ function initMenus() {
   buildOptionRow('diffRow',
     [{ label: 'Easy', v: 0 }, { label: 'Normal', v: 1 }, { label: 'Hard', v: 2 }, { label: 'Brutal', v: 3 }],
     () => selDiff, v => { selDiff = v; });
+  buildOptionRow('diffRow2',
+    [{ label: 'Easy', v: 0 }, { label: 'Normal', v: 1 }, { label: 'Hard', v: 2 }, { label: 'Brutal', v: 3 }],
+    () => selDiff2, v => { selDiff2 = v; });
   buildOptionRow('sizeRow',
     [{ label: 'Small', v: 72 }, { label: 'Medium', v: 96 }, { label: 'Large', v: 128 }],
     () => selSize, v => { selSize = v; });
@@ -1296,6 +1343,10 @@ function initMenus() {
     const key = (($('claudeKey') as HTMLInputElement).value || '').trim();
     try { localStorage.setItem('ae_claude_key', key); } catch { /* no storage */ }
     startGame(new LocalGame(playerName(), selFaction, selDiff, selSize));
+  });
+  $('btnSimulate').addEventListener('click', () => {
+    // spectate AI (level 1 row) vs AI 2 (level 2 row); +/- adjusts speed
+    startGame(new LocalGame('', '', selDiff, selSize, selDiff2));
   });
   $('btnCreate').addEventListener('click', async () => {
     $('menuErr').textContent = '';

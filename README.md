@@ -65,6 +65,11 @@ against air players and rockets/artillery against armor or infantry spam.
 A hopelessly beaten AI surrenders instead of dragging the game out.
 Stranded on an island, it pivots to drones, aircraft and ships.
 
+**Simulation mode:** WATCH AI VS AI pits two AIs of chosen difficulty
+against each other while you spectate (+/- adjusts speed up to 8×). The
+winner's doctrine — damage dealt per unit lost, by weapon class — feeds the
+same study profile, so spectated matches make the AI smarter against you.
+
 **Claude as enemy commander (optional):** paste an Anthropic API key into
 the menu and Claude (Haiku) reads a battlefield report every ~50 s and sets
 the enemy AI's strategic stance (rush / defend / expand / air / tech) —
