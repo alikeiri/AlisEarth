@@ -969,7 +969,50 @@ function buildOptionRow(rowId: string, opts: { label: string; v: number }[], get
 
 function show(id: string) {
   for (const s of ['menu', 'lobby', 'endScreen']) $(s).classList.toggle('hidden', s !== id);
-  if (id === 'menu') rollCallsign(); // fresh funny name for the next game
+  if (id === 'menu') { rollCallsign(); renderAiIntel(); } // fresh name + AI study readout
+}
+
+// decode the AI's study profile into a human-readable intel panel on the menu
+const KIND_NAMES: Record<string, string> = { inf: 'infantry', veh: 'vehicles', air: 'aircraft', sea: 'ships' };
+function renderAiIntel() {
+  const el = document.getElementById('aiIntel');
+  if (!el) return;
+  let p: any = null;
+  try { p = JSON.parse(localStorage.getItem('ae_aiprofile') || 'null'); } catch { /* none */ }
+  if (!p || !p.games) { el.classList.add('hidden'); return; }
+  el.classList.remove('hidden');
+  const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;');
+  const losses = p.games - (p.aiWins || 0);
+  const rows: string[] = [];
+  rows.push(`<b style="color:#d3e1ee">ENEMY AI INTEL</b> — ${p.games} game${p.games > 1 ? 's' : ''} studied ` +
+    `<a href="#" id="aiIntelReset" style="float:right;color:#5d7891">forget all</a>`);
+  rows.push(`Record vs you: ${p.aiWins || 0}W–${losses}L` +
+    ((p.lossStreak || 0) >= 2 ? ` · <span style="color:#ffc940">escalating after ${p.lossStreak} straight losses</span>` : ''));
+  const d = p.dmg || {};
+  const tot = (d.inf || 0) + (d.veh || 0) + (d.air || 0) + (d.sea || 0);
+  if (tot > 0) {
+    const fav = Object.keys(KIND_NAMES).sort((a, b) => (d[b] || 0) - (d[a] || 0))[0];
+    rows.push(`Your style on file: ${Math.round((d[fav] || 0) / tot * 100)}% of your damage comes from ${KIND_NAMES[fav]} — it stocks counters to that`);
+  }
+  const rushes: number[] = p.rushTimes || [];
+  if (rushes.length) {
+    const med = [...rushes].sort((a, b) => a - b)[rushes.length >> 1];
+    rows.push(`Expects your first strike around ${med}s${med < 240 ? ' — digs in early against your rushes' : ''}`);
+  }
+  const eff = p.eff || {};
+  const bestK = Object.keys(KIND_NAMES).sort((a, b) => (eff[b] || 0) - (eff[a] || 0))[0];
+  if (eff[bestK] > 0) rows.push(`Its most profitable arm vs you: ${KIND_NAMES[bestK]} (payoff ${eff[bestK]}) — it leans into that`);
+  if ((p.harvLost || 0) >= 2) rows.push(`Remembers losing harvesters to you — guards its economy harder`);
+  if (p.lessons?.length) {
+    rows.push(`<b style="color:#b9a5e3">Claude's lessons:</b>`);
+    for (const l of p.lessons) rows.push(`· <i>${esc(String(l))}</i>`);
+  }
+  el.innerHTML = rows.join('<br>');
+  document.getElementById('aiIntelReset')?.addEventListener('click', e => {
+    e.preventDefault();
+    localStorage.removeItem('ae_aiprofile');
+    renderAiIntel();
+  });
 }
 
 // pre-fill the name box with a new random callsign whenever the menu appears —
@@ -1290,5 +1333,6 @@ if (!glOk) {
 } else {
   initMenus();
   rollCallsign();
+  renderAiIntel();
   try { ($('claudeKey') as HTMLInputElement).value = localStorage.getItem('ae_claude_key') || ''; } catch { /* no storage */ }
 }
