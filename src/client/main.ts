@@ -975,9 +975,10 @@ class GameClient {
     }
 
     const allViews = this.game.views();
-    // fog of war for human players (spectator/replay modes see everything)
+    // fog of war for human players (spectator/replay modes see everything;
+    // disabled when the player unchecked it on the start screen)
     let views = allViews;
-    if (!(this.game as any).isSim) {
+    if (!(this.game as any).isSim && fogEnabled) {
       if (!this.fog) this.fog = new Uint8Array(W * H);
       if (this.frame % 3 === 0) this.updateFog(allViews);
       const f = this.fog;
@@ -1034,7 +1035,7 @@ class GameClient {
     const players = this.game.players();
     this.ui.update(this.game.me, players, views, this.game.tickN, this.selection);
     if (this.frame++ % 3 === 0) {
-      const fogFn = (!(this.game as any).isSim && this.fog) ? (cx: number, cz: number) => this.renderer.fogValue(cx, cz) : undefined;
+      const fogFn = (!(this.game as any).isSim && fogEnabled && this.fog) ? (cx: number, cz: number) => this.renderer.fogValue(cx, cz) : undefined;
       this.ui.minimap(this.game.map, views, this.camQuad(), dt * 3, fogFn);
     }
     const dragRect = this.mouse.dragging && !this.patrolMode // no selection box while drawing a patrol route
@@ -1091,6 +1092,7 @@ let selFaction = 'usa';
 let selDiff = 1;
 let selDiff2 = 2;
 let selSize = 96;
+let fogEnabled = true; // start-screen checkbox; spectator/replay always show all
 let client: GameClient | null = null;
 let net: Net | null = null;
 
@@ -1532,6 +1534,7 @@ function initMenus() {
   $('btnSkirmish').addEventListener('click', () => {
     const key = (($('claudeKey') as HTMLInputElement).value || '').trim();
     try { localStorage.setItem('ae_claude_key', key); } catch { /* no storage */ }
+    fogEnabled = ($('fogChk') as HTMLInputElement)?.checked ?? true;
     startGame(new LocalGame(playerName(), selFaction, selDiff, selSize));
   });
   $('btnSimulate').addEventListener('click', () => {
@@ -1566,6 +1569,7 @@ function initMenus() {
   });
   $('btnCreate').addEventListener('click', async () => {
     $('menuErr').textContent = '';
+    fogEnabled = ($('fogChk') as HTMLInputElement)?.checked ?? true; // per-client visual choice
     try {
       net = await connectNet();
       net.send({ t: 'create', name: playerName(), faction: selFaction, size: selSize, diff: selDiff });
@@ -1573,6 +1577,7 @@ function initMenus() {
   });
   $('btnJoin').addEventListener('click', async () => {
     $('menuErr').textContent = '';
+    fogEnabled = ($('fogChk') as HTMLInputElement)?.checked ?? true;
     const code = ($('joinCode') as HTMLInputElement).value.trim().toUpperCase();
     if (code.length !== 4) { $('menuErr').textContent = 'Enter a 4-letter room code'; return; }
     try {
