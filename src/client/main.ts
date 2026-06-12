@@ -34,6 +34,7 @@ class LocalGame implements GameLike {
   private pending: any[] = [];
   private acc = 0;
   private evQ: any[] = [];
+  private reportSaved = false;
 
   constructor(name: string, faction: string, aiLvl = 1, size = 96) {
     setMapSize(size);
@@ -45,6 +46,8 @@ class LocalGame implements GameLike {
       { name, faction },
       { name: `AI ${FACTIONS[aiFac].name} (${lvlName})`, faction: aiFac, isAI: true, aiLvl },
     ]);
+    // the AI studies past games against this player and adapts its strategy
+    try { this.sim.aiProfile = JSON.parse(localStorage.getItem('ae_aiprofile') || 'null'); } catch { /* fresh AI */ }
   }
   get map() { return this.sim.map; }
   get tickN() { return this.sim.tickN; }
@@ -57,6 +60,9 @@ class LocalGame implements GameLike {
       const cmds = this.pending; this.pending = [];
       this.sim.players.forEach((pl, i) => { if (pl.isAI) cmds.push(...aiTick(this.sim, i)); });
       this.sim.tick(cmds);
+      for (const ev of this.sim.events) {
+        if (ev.e === 'aiReport' && !this.reportSaved) { this.reportSaved = true; saveAiReport(ev.r); }
+      }
       this.evQ.push(...this.sim.events);
     }
     if (guard >= 6) this.acc = 0; // tab was backgrounded — drop the backlog
@@ -87,7 +93,10 @@ class LocalGame implements GameLike {
         if (e.stance) v.st = e.stance;
         if (e.fortified) v.fo = 1;
         if (UNITS[e.t]?.cloak || UNITS[e.type]?.cloak) v.ck = 1;
-        if (e.cd > 0 && UNITS[e.type]?.dmg > 0) v.fr = 1; // firing — drives infantry aim pose
+        if (e.cd > 0 && UNITS[e.type]?.dmg > 0) {
+          v.fr = 1; // firing — drives infantry aim pose
+          if (e.aimX !== undefined) { v.ax = e.aimX; v.az = e.aimZ; } // turn toward the target
+        }
       }
       out.push(v);
     }
@@ -910,13 +919,46 @@ function startGame(game: GameLike) {
     audio.play(won ? 'win' : 'lose');
     $('endTitle').textContent = won ? 'VICTORY' : 'DEFEAT';
     ($('endTitle') as HTMLElement).style.color = won ? '#57d977' : '#ff5043';
-    $('endSub').textContent = won ? 'All enemy structures destroyed.' : `${winnerName} controls the region.`;
+    let sub = won ? 'All enemy structures destroyed.' : `${winnerName} controls the region.`;
+    try {
+      const prof = JSON.parse(localStorage.getItem('ae_aiprofile') || 'null');
+      if (prof?.games) sub += ` The AI studied this match — ${prof.games} game${prof.games > 1 ? 's' : ''} learned.`;
+    } catch { /* no profile */ }
+    $('endSub').textContent = sub;
     show('endScreen');
   });
 }
 
+// a fresh ridiculous callsign every game when no name is entered
+const FUNNY_NAMES = [
+  'General Confusion', 'Major Disaster', 'Colonel Popcorn', 'Captain Chaos',
+  'Sergeant Snacks', 'Commander Cuddles', 'Admiral Awkward', 'Baron von Boom',
+  'Major Mayhem', 'Private Pancake', 'Colonel Panic', 'General Error',
+  'Captain Kaboom', 'Atomic Hamster', 'Tiny Napoleon', 'Marshal Mallow',
+  'The Ore Baron', 'Warlord Waffles', 'Duke of Dirt', 'Sir Kaboomski',
+  'Major Glitch', 'Corporal Crumbs', 'Doctor Boomling', 'Lady Lazerbeam',
+  'General Giggles', 'Madam Mayhem', 'Captain Obvious', 'Count Cratersson',
+];
 function playerName(): string {
-  return (($('nameInput') as HTMLInputElement).value || 'Commander').trim().slice(0, 14);
+  const typed = (($('nameInput') as HTMLInputElement).value || '').trim();
+  return (typed || FUNNY_NAMES[Math.floor(Math.random() * FUNNY_NAMES.length)]).slice(0, 18);
+}
+
+// rolling AI study profile: outcome streaks, the player's rush timing and
+// favourite weapon classes — read by the AI at the start of the next game
+function saveAiReport(r: any) {
+  try {
+    const p = JSON.parse(localStorage.getItem('ae_aiprofile') || '{}');
+    p.games = (p.games || 0) + 1;
+    if (r.aiWon) { p.aiWins = (p.aiWins || 0) + 1; p.lossStreak = 0; }
+    else p.lossStreak = (p.lossStreak || 0) + 1;
+    if (r.rushSec) p.rushTimes = [...(p.rushTimes || []), r.rushSec].slice(-7);
+    const d = p.dmg || { inf: 0, veh: 0, air: 0, sea: 0 };
+    for (const k of ['inf', 'veh', 'air', 'sea'])
+      d[k] = Math.round((d[k] || 0) * 0.7 + (r.dmg?.[k] || 0)); // recency-weighted
+    p.dmg = d;
+    localStorage.setItem('ae_aiprofile', JSON.stringify(p));
+  } catch { /* storage unavailable */ }
 }
 
 async function connectNet(): Promise<Net> {

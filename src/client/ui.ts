@@ -1,6 +1,6 @@
 // DOM HUD: top bar, build sidebar, minimap, overlay (health bars, drag box).
 
-import { UNITS, BUILDINGS, FACTIONS, PLAYER_COLORS, AIRFIELD_CAP, UPG_MAX, upgCost, TECHS } from '../sim/data';
+import { UNITS, BUILDINGS, FACTIONS, PLAYER_COLORS, AIRFIELD_CAP, UPG_MAX, upgCost, TECHS, dmgMul } from '../sim/data';
 import { GameMap, W, H, SEA } from '../sim/map';
 
 const B_ICONS: Record<string, string> = {
@@ -33,6 +33,34 @@ const UPG_INFO: Record<string, string> = {
 export const U_LIST = ['rifle', 'rocket', 'hive', 'tank', 'heavy', 'harv', 'engineer', 'mlrs', 'recon', 'strike', 'msldrone',
   'chemtrooper', 'chemtank', 'chemdrone', 'biotrooper', 'biotank', 'biodrone', 'stealthtank',
   'gunboat', 'destroyer', 'sub', 'navdrone', 'fighter', 'bomber', 'dbomber', 'heli', 'helidrone'];
+
+// strengths/weaknesses tooltip, derived from the live damage matrix so it can
+// never drift out of sync with balance changes
+export function counterTip(t: string): string {
+  const d = UNITS[t] || BUILDINGS[t];
+  if (!d) return '';
+  const lines: string[] = [];
+  const dmg = (d as any).dmg ?? (d as any).attack?.dmg ?? 0;
+  if (dmg > 0) {
+    const cats: [string, boolean, string][] = [
+      ['infantry', false, 'inf'], ['vehicles', false, 'veh'], ['aircraft', false, 'air'],
+      ['ships', false, 'sea'], ['buildings', true, 'b'],
+    ];
+    const strong: string[] = [], weak: string[] = [];
+    for (const [label, isB, kind] of cats) {
+      const m = dmgMul(t, isB, kind);
+      if (m >= 1.3) strong.push(label);
+      else if (m <= 0.7) weak.push(label);
+    }
+    if ((d as any).kamikaze) lines.push('One-way suicide drone');
+    if (strong.length) lines.push('Strong vs ' + strong.join(', '));
+    if (weak.length) lines.push('Weak vs ' + weak.join(', '));
+    if (!strong.length && !weak.length) lines.push('All-round weapon');
+  } else if ((d as any).cargo) lines.push('Collects ore — no weapons');
+  else if ((d as any).repair) lines.push('Repairs units, builds roads — no weapons');
+  else if ((d as any).emits) lines.push('Fortifies, then launches suicide drones');
+  return lines.join('\n');
+}
 
 export class UI {
   private btns: Record<string, HTMLElement> = {};
@@ -104,8 +132,16 @@ export class UI {
     this.cleanups.push(() => sp.removeEventListener('click', chipClick));
     const gb = document.getElementById('gridB')!, gu = document.getElementById('gridU')!;
     gb.innerHTML = ''; gu.innerHTML = '';   // a fresh game rebuilds the sidebar
-    for (const t of B_LIST) gb.appendChild(this.makeBtn(t, BUILDINGS[t].name, B_ICONS[t], () => this.onBuild(t)));
-    for (const t of U_LIST) gu.appendChild(this.makeBtn(t, UNITS[t].name, U_ICONS[t], () => this.onTrain(t), () => this.onCancelTrain(t)));
+    for (const t of B_LIST) {
+      gb.appendChild(this.makeBtn(t, BUILDINGS[t].name, B_ICONS[t], () => this.onBuild(t)));
+      const tip = counterTip(t);
+      if (tip) this.btns[t].title = tip;
+    }
+    for (const t of U_LIST) {
+      gu.appendChild(this.makeBtn(t, UNITS[t].name, U_ICONS[t], () => this.onTrain(t), () => this.onCancelTrain(t)));
+      const tip = counterTip(t);
+      if (tip) this.btns[t].title = tip;
+    }
     const sb = document.getElementById('sidebar')!;
     const noMenu = (e: Event) => e.preventDefault();
     sb.addEventListener('contextmenu', noMenu);
@@ -226,7 +262,8 @@ export class UI {
         sp.innerHTML = entries.map(([t, n]) => {
           const name = UNITS[t]?.name || BUILDINGS[t]?.name || t;
           const icon = U_ICONS[t] || B_ICONS[t] || '';
-          return `<div class="selChip" data-type="${t}" title="Click to select only ${name}">${icon} <span class="n">${n}×</span> ${name}` +
+          const tip = counterTip(t);
+          return `<div class="selChip" data-type="${t}" title="${(tip ? tip + '\n' : '')}Click to select only ${name}">${icon} <span class="n">${n}×</span> ${name}` +
             `<div class="chipHp"><div class="chipHpFill"></div></div></div>`;
         }).join('');
       }
@@ -329,7 +366,10 @@ export class UI {
       this.btns[t].classList.toggle('hidden', !!def.tech && !myTech[def.tech]);
       const q = queueByUnit[t];
       this.styleBtn(t, ok, credits >= cost, cost, q?.n || 0, q?.prog || 0);
-      if (def.pad) this.btns[t].title = `Airfield capacity ${padHave}/${padCap}`;
+      if (def.pad) {
+        const tip = counterTip(t);
+        this.btns[t].title = `Airfield capacity ${padHave}/${padCap}` + (tip ? '\n' + tip : '');
+      }
     }
     this.updateResearchPanel(views, me, pl, fac, myTech);
   }

@@ -1473,6 +1473,13 @@ export class Renderer {
         while (da > Math.PI) da -= Math.PI * 2;
         while (da < -Math.PI) da += Math.PI * 2;
         f.a += da * Math.min(1, dt * 10);
+      } else if (v.ax !== undefined) {
+        // standing and firing: swing the hull toward the target
+        const want = Math.atan2(v.ax - v.x, v.az - v.z);
+        let da = want - f.a;
+        while (da > Math.PI) da -= Math.PI * 2;
+        while (da < -Math.PI) da += Math.PI * 2;
+        f.a += da * Math.min(1, dt * 8);
       }
       f.lx = v.x; f.lz = v.z;
 

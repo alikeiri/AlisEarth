@@ -23,6 +23,7 @@ export interface Entity {
   stance: number; // 0 aggressive (default), 1 hold position
   lastHitBy: number; lastHitT: number; reactCd: number; // return-fire / flee reactions
   fortified: boolean; emitCd: number; ephLife: number; // drone hive + ephemeral units
+  aimX?: number; aimZ?: number; // last firing target — renderer turns the unit toward it
   research: { tech: string; t: number; t0: number } | null; // research lab
   // buildings
   cx: number; cz: number; size: number;
@@ -66,6 +67,10 @@ export class Sim {
   aiMem: any[] = [];
   done = false;
   winner = -2;
+  aiProfile: any = null; // host-provided study of past human-vs-AI games (adaptive AI)
+  private aiDmg = { inf: 0, veh: 0, air: 0, sea: 0 }; // human damage to the AI, by weapon class
+  private firstHumanHit = -1;
+  private reported = false;
   private grid = new Map<number, number[]>(); // spatial hash of units, cell = 2 units
 
   constructor(seed: number, specs: { name: string; faction: string; isAI?: boolean; aiLvl?: number }[]) {
@@ -554,6 +559,13 @@ export class Sim {
     let mul = dmgMul(att.type, tgt.b, tgt.b ? 'b' : UNITS[tgt.type].kind);
     if (!tgt.b && tgt.fortified) mul *= 0.5; // dug-in drone hive is hard to kill
     tgt.hp -= base * mul;
+    // study material for the adaptive AI: what weapon classes the human leans on
+    const ap = this.players[att.owner], vp = this.players[tgt.owner];
+    if (ap && vp && !ap.isAI && vp.isAI && !att.b) {
+      const k = UNITS[att.type]?.kind as keyof typeof this.aiDmg;
+      if (k && this.aiDmg[k] !== undefined) this.aiDmg[k] += base * mul;
+      if (this.firstHumanHit < 0) this.firstHumanHit = this.tickN;
+    }
     if (!tgt.b) { tgt.lastHitBy = att.id; tgt.lastHitT = this.tickN; } // for return-fire / flee
     this.dmgLog.push({ vOwner: tgt.owner, victim: tgt.id, by: att.id, x: tgt.x, z: tgt.z, b: tgt.b });
   }
@@ -561,6 +573,7 @@ export class Sim {
   private fire(att: Entity, tgt: Entity, dmg: number, rof: number): boolean {
     if (att.cd > 0) return false;
     att.cd = rof;
+    att.aimX = tgt.x; att.aimZ = tgt.z;
     this.dealDamage(att, tgt, dmg);
     const ud = UNITS[att.type];
     // weapon class: 0 mg, 1 rocket, 2 cannon, 3 drone zap, 4 missile salvo
@@ -1064,6 +1077,24 @@ export class Sim {
     if (this.players.length > 1 && nAlive <= 1) {
       this.done = true;
       this.winner = lastAlive;
+      // hand the host a study report so the AI can adapt next game
+      const hasHuman = this.players.some(pl => !pl.isAI);
+      const hasAI = this.players.some(pl => pl.isAI);
+      if (!this.reported && hasHuman && hasAI) {
+        this.reported = true;
+        this.events.push({
+          e: 'aiReport',
+          r: {
+            aiWon: this.winner >= 0 ? !!this.players[this.winner].isAI : false,
+            rushSec: this.firstHumanHit > 0 ? Math.round(this.firstHumanHit / 10) : 0,
+            dmg: {
+              inf: Math.round(this.aiDmg.inf), veh: Math.round(this.aiDmg.veh),
+              air: Math.round(this.aiDmg.air), sea: Math.round(this.aiDmg.sea),
+            },
+            len: Math.round(this.tickN / 10),
+          },
+        });
+      }
     }
   }
 
@@ -1094,7 +1125,10 @@ export class Sim {
         if (e.stance) v.st = e.stance;
         if (e.fortified) v.fo = 1;
         if (UNITS[e.type]?.cloak) v.ck = 1;
-        if (e.cd > 0 && UNITS[e.type]?.dmg > 0) v.fr = 1; // mid-reload = in a firefight (drives aim pose)
+        if (e.cd > 0 && UNITS[e.type]?.dmg > 0) {
+          v.fr = 1; // mid-reload = in a firefight (drives aim pose)
+          if (e.aimX !== undefined) { v.ax = Math.round(e.aimX * 10) / 10; v.az = Math.round(e.aimZ! * 10) / 10; }
+        }
       }
       ents.push(v);
     }

@@ -191,18 +191,21 @@ export function dmgMul(attType: string, tgtIsBuilding: boolean, tgtKind: string)
   if (attType === 'stealthtank') return tgtIsBuilding ? 1.3 : 1.2;
   // kamikaze blast: 1-2 drones kill a tank, 3-4 crack a fortification
   if (attType === 'minidrone') return tgtIsBuilding ? 0.9 : (tgtKind === 'veh' ? 1.7 : 1.2);
+  // pronounced rock-paper-scissors: rifles shred infantry but bounce off armor,
+  // rockets crack armor but whiff on infantry, tanks duel tanks, artillery
+  // flattens structures but loses to anything that closes the distance.
   if (attType === 'sam')    return 0.5; // AA battery is weak vs ground
-  if (attType === 'fighter') return 0.6;
+  if (attType === 'fighter') return 0.45; // interceptor — near-useless vs ground
   if (attType === 'bomber') return tgtIsBuilding ? 2.4 : (tgtKind === 'inf' ? 1.3 : 1.0);
   if (attType === 'dbomber') return tgtIsBuilding ? 1.8 : 1.0;
-  if (attType === 'heli')   return tgtKind === 'veh' ? 1.5 : 1.0;
+  if (attType === 'heli')   return tgtKind === 'veh' ? 1.8 : 1.25; // rockets vs armor, guns vs inf
   if (attType === 'sub')    return tgtIsBuilding ? 0.7 : 0.8;
-  if (attType === 'mlrs')   return tgtIsBuilding ? 1.5 : (tgtKind === 'inf' ? 1.2 : 1.0);
-  if (attType === 'msldrone') return tgtIsBuilding ? 1.4 : (tgtKind === 'veh' ? 1.5 : 0.6);
-  if (attType === 'recon')  return tgtIsBuilding ? 0.5 : (tgtKind === 'inf' ? 1.0 : 0.7);
-  if (attType === 'strike') return tgtIsBuilding ? 1.2 : (tgtKind === 'veh' ? 1.5 : 0.8);
-  if (attType === 'rocket') return tgtIsBuilding ? 1.6 : (tgtKind === 'veh' ? 1.7 : 0.7);
-  if (attType === 'rifle')  return tgtIsBuilding ? 0.45 : (tgtKind === 'veh' ? 0.55 : 1.0);
-  if (attType === 'tank' || attType === 'heavy') return tgtIsBuilding ? 1.2 : (tgtKind === 'inf' ? 0.7 : 1.0);
+  if (attType === 'mlrs')   return tgtIsBuilding ? 2.0 : (tgtKind === 'inf' ? 1.5 : 0.7);
+  if (attType === 'msldrone') return tgtIsBuilding ? 1.5 : (tgtKind === 'veh' ? 1.8 : 0.5);
+  if (attType === 'recon')  return tgtIsBuilding ? 0.4 : (tgtKind === 'inf' ? 1.2 : 0.5);
+  if (attType === 'strike') return tgtIsBuilding ? 1.2 : (tgtKind === 'veh' ? 1.8 : 0.55);
+  if (attType === 'rocket') return tgtIsBuilding ? 1.8 : (tgtKind === 'veh' ? 2.2 : 0.45);
+  if (attType === 'rifle')  return tgtIsBuilding ? 0.35 : (tgtKind === 'veh' ? 0.35 : 1.35);
+  if (attType === 'tank' || attType === 'heavy') return tgtIsBuilding ? 1.3 : (tgtKind === 'inf' ? 0.5 : 1.35);
   return 1.0; // turret / gunboat / destroyer guns
 }

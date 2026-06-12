@@ -4,6 +4,7 @@
 
 import { createServer } from 'http';
 import { readFile } from 'fs/promises';
+import { readFileSync, writeFileSync } from 'fs';
 import { extname, join, normalize } from 'path';
 import { fileURLToPath } from 'url';
 import { WebSocketServer, WebSocket } from 'ws';
@@ -59,6 +60,25 @@ function makeCode(): string {
 function send(ws: WebSocket, obj: any) {
   if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj));
 }
+// rolling study profile of human-vs-AI games (mirrors the client's localStorage
+// version) — the AI reads it at game start and adapts strategy and unit mix
+const AI_PROFILE_FILE = join(fileURLToPath(new URL('.', import.meta.url)), 'ai-profile.json');
+function saveAiReport(r: any) {
+  try {
+    let p: any = {};
+    try { p = JSON.parse(readFileSync(AI_PROFILE_FILE, 'utf8')); } catch { /* first game */ }
+    p.games = (p.games || 0) + 1;
+    if (r.aiWon) { p.aiWins = (p.aiWins || 0) + 1; p.lossStreak = 0; }
+    else p.lossStreak = (p.lossStreak || 0) + 1;
+    if (r.rushSec) p.rushTimes = [...(p.rushTimes || []), r.rushSec].slice(-7);
+    const d = p.dmg || { inf: 0, veh: 0, air: 0, sea: 0 };
+    for (const k of ['inf', 'veh', 'air', 'sea'])
+      d[k] = Math.round((d[k] || 0) * 0.7 + (r.dmg?.[k] || 0));
+    p.dmg = d;
+    writeFileSync(AI_PROFILE_FILE, JSON.stringify(p));
+  } catch { /* read-only fs — learning disabled */ }
+}
+
 function broadcast(room: Room, obj: any) {
   const s = JSON.stringify(obj);
   for (const c of room.clients) if (c.ws.readyState === WebSocket.OPEN) c.ws.send(s);
@@ -86,6 +106,7 @@ function startRoom(room: Room) {
   const seed = (Math.random() * 0x7fffffff) | 0;
   setMapSize(room.size);
   room.sim = new Sim(seed, specs);
+  try { room.sim.aiProfile = JSON.parse(readFileSync(AI_PROFILE_FILE, 'utf8')); } catch { /* fresh AI */ }
   room.clients.forEach((c, i) =>
     send(c.ws, { t: 'start', seed, size: room.size, you: i, players: specs.map(s => ({ name: s.name, faction: s.faction, isAI: !!s.isAI })) }));
 
@@ -95,6 +116,7 @@ function startRoom(room: Room) {
     room.cmdQ = [];
     for (const slot of room.aiSlots) cmds.push(...aiTick(sim, slot));
     sim.tick(cmds);
+    for (const ev of sim.events) if (ev.e === 'aiReport') saveAiReport(ev.r);
     broadcast(room, { t: 'snap', ...sim.snapshot() });
     if (sim.done) {
       broadcast(room, { t: 'end', winner: sim.winner });
