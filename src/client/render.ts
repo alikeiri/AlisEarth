@@ -1301,14 +1301,19 @@ export class Renderer {
   }
   zoomBy(f: number) { this.dist = Math.max(11, Math.min(58, this.dist * f)); }
   rotate(a: number) { this.yaw += a; }
+  // camera pitch above the horizon; default matches the classic RTS down-angle
+  pitch = Math.atan2(0.92, 0.78); // ≈ 0.868 rad
+  tiltBy(d: number) { this.pitch = Math.max(0.35, Math.min(1.45, this.pitch + d)); }
 
   private updateCamera() {
     const gh = Math.max(SEA, this.map.heightAt(this.camX, this.camZ));
     const s = Math.sin(this.yaw), c = Math.cos(this.yaw);
+    const m = this.dist * 1.206; // boom length (keeps zoom feel constant while tilting)
+    const cp = Math.cos(this.pitch), sp = Math.sin(this.pitch);
     this.camera.position.set(
-      this.camX - s * this.dist * 0.78,
-      gh + 2 + this.dist * 0.92,
-      this.camZ - c * this.dist * 0.78
+      this.camX - s * m * cp,
+      gh + 2 + m * sp,
+      this.camZ - c * m * cp
     );
     this.camera.lookAt(this.camX, gh, this.camZ);
   }

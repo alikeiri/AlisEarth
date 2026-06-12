@@ -283,7 +283,12 @@ class GameClient {
     });
     on(window, 'mouseup', (e: MouseEvent) => this.onUp(e));
     on(document, 'mouseleave', () => { this.mouse.in = false; });
-    on(canvas, 'wheel', (e: WheelEvent) => { e.preventDefault(); this.renderer.zoomBy(e.deltaY > 0 ? 1.12 : 0.89); }, { passive: false });
+    on(canvas, 'wheel', (e: WheelEvent) => {
+      e.preventDefault();
+      // Ctrl+wheel tilts the camera (horizon view ↔ top-down); plain wheel zooms
+      if (e.ctrlKey) this.renderer.tiltBy(e.deltaY > 0 ? 0.07 : -0.07);
+      else this.renderer.zoomBy(e.deltaY > 0 ? 1.12 : 0.89);
+    }, { passive: false });
     on(window, 'keydown', (e: KeyboardEvent) => {
       // typing in the chat input (or any form field) must not trigger hotkeys
       const tag = (e.target as HTMLElement)?.tagName;

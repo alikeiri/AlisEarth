@@ -120,7 +120,7 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
   // a couple of turrets for safety, then SPREAD: refineries toward the ore
   // frontier take priority over deep defense (tester: "AI not spreading out")
   else if (nB('turret') < Math.min(2, turrets) && nB('barracks')) want = 'turret';
-  else if (nB('refinery') < refs && pl.credits > 1400) want = 'refinery';
+  else if (nB('refinery') < refs && pl.credits > 1200) want = 'refinery';
   // vehicle throughput beats deep turret lines — factories before turret #3+
   else if (nB('factory') < L.factories && pl.credits > 1900) want = 'factory';
   else if (nB('turret') < turrets) want = 'turret';
@@ -162,9 +162,14 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
     + nU('recon') + nU('strike') + nU('msldrone') + nU('fighter') + nU('heli') + nU('helidrone');
   const infCount = nU('rifle') + nU('rocket') + nU('chemtrooper') + nU('biotrooper');
   const hasFac = (myB['factory'] || []).some(b => b.progress >= b.total);
+  // economy first: saturate every refinery with ~2 harvesters before army
+  // spending — cheap units must not starve the harvester budget
+  const harvTarget = Math.max(L.harv, nB('refinery') * 2);
+  const ecoShort = hasFac && nU('harv') < harvTarget;
   for (const bks of (myB['barracks'] || [])) {
     if (bks.progress < bks.total || bks.queue.length >= 2) continue;
     if (armyCount >= cap) continue;
+    if (ecoShort && pl.credits < 2200) continue; // harvesters get first claim
     if (hasFac && infCount >= Math.max(3, armyCount * 0.35)) continue; // leave credits for vehicles
     if (pl.credits > (hasFac ? 900 : 500)) {
       // vs an armor-heavy player every 2nd squad is rockets, else every 3rd
@@ -175,9 +180,9 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
   }
   for (const fac of (myB['factory'] || [])) {
     if (fac.progress < fac.total || fac.queue.length >= 2) continue;
-    if (nU('harv') < L.harv && pl.credits > 1100) cmds.push({ k: 'train', p, bid: fac.id, type: 'harv' });
+    if (nU('harv') < harvTarget && pl.credits > 1000) cmds.push({ k: 'train', p, bid: fac.id, type: 'harv' });
     else if (nU('engineer') < 1 && pl.aiLvl >= 1 && pl.credits > 1500) cmds.push({ k: 'train', p, bid: fac.id, type: 'engineer' });
-    else if (armyCount < cap && pl.credits > 1000) {
+    else if (armyCount < cap && pl.credits > (ecoShort ? 2200 : 1000)) {
       const r = sim.rng.next();
       const t = nU('mlrs') < L.siege ? 'mlrs'
         : (antiAir && nU('aatank') + nU('flak') < 4 && r < 0.35) ? (r < 0.18 ? 'aatank' : 'flak')
@@ -189,7 +194,7 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
     }
   }
   const dro = (myB['dronefac'] || []).find(b => b.progress >= b.total && b.queue.length < 2);
-  if (dro && armyCount < cap && pl.credits > 1100) {
+  if (dro && armyCount < cap && pl.credits > (ecoShort ? 2400 : 1100)) {
     const r = sim.rng.next();
     const t = pl.credits > 3000 && r < 0.35 ? 'msldrone' : pl.credits > 2600 && r < 0.65 ? 'strike' : 'recon';
     cmds.push({ k: 'train', p, bid: dro.id, type: t });
