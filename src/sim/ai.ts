@@ -117,7 +117,7 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
     waveEvery = Math.max(18, Math.round(waveEvery * 0.6));
     mem.peaceUntil = Math.min(mem.peaceUntil, sim.tickN + 15 * TICKS_PER_SEC);
     mem.nextWave = Math.min(mem.nextWave, sim.tickN + 25 * TICKS_PER_SEC);
-  } else if (dirStance === 'defend') { turrets += 2; sams = Math.max(2, sams); }
+  } else if (dirStance === 'defend') { turrets = Math.min(6, turrets + 2); sams = Math.max(2, sams); }
   else if (dirStance === 'expand') { refs = Math.min(6, refs + 1); }
   else if (dirStance === 'air') dirAir = true;
   else if (dirStance === 'tech') dirTech = true;
@@ -172,7 +172,17 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
       const enemy = nearestEnemyBuilding(sim, p);
       let toward: { x: number; z: number } | null = null;
       if (want === 'refinery') toward = oreFrontier(sim, p);
-      else if (want === 'turret' || want === 'sam') toward = enemy;
+      else if (want === 'turret' || want === 'sam') {
+        // guard the base perimeter facing the enemy — NOT a picket line
+        // strung out toward the enemy base (it gets picked off piecemeal)
+        if (enemy) {
+          let cx = 0, cz = 0, n = 0;
+          for (const e of sim.ents.values()) if (e.b && e.owner === p) { cx += e.x; cz += e.z; n++; }
+          cx /= n || 1; cz /= n || 1;
+          const dl = Math.hypot(enemy.x - cx, enemy.z - cz) || 1;
+          toward = { x: cx + ((enemy.x - cx) / dl) * 6, z: cz + ((enemy.z - cz) / dl) * 6 };
+        }
+      }
       let spot = findSpot(sim, p, want, toward);
       // expansion creep: if the ore frontier is beyond build range, push a
       // cheap power node toward it to extend the base footprint
@@ -401,19 +411,27 @@ function findSpot(sim: Sim, p: number, type: string, toward?: { x: number; z: nu
   if (toward) bases.sort((a, b) =>
     ((a.x - toward.x) ** 2 + (a.z - toward.z) ** 2) - ((b.x - toward.x) ** 2 + (b.z - toward.z) ** 2));
   const candidates: { x: number; z: number; score: number }[] = [];
+  const sz = BUILDINGS[type]?.size || 2;
   for (const base of bases.slice(0, 4)) {
-    for (let r = 3; r <= 10; r++) {
+    for (let r = 3; r <= 12; r++) {
       for (let k = 0; k < 8; k++) {
         const cx = Math.round(base.x + sim.rng.range(-r, r));
         const cz = Math.round(base.z + sim.rng.range(-r, r));
         if (!sim.canPlace(p, type, cx, cz)) continue;
         let score = sim.rng.next();
         if (toward) score -= Math.sqrt((cx - toward.x) ** 2 + (cz - toward.z) ** 2) * 0.08;
+        // breathing room: wall-to-wall placement traps harvesters and units —
+        // penalize spots that touch an existing building
+        const mx = cx + sz / 2, mz = cz + sz / 2;
+        for (const b of bases) {
+          const gap = Math.max(Math.abs(b.x - mx), Math.abs(b.z - mz)) - (b.size + sz) / 2;
+          if (gap < 1) { score -= 0.55; break; }
+        }
         candidates.push({ x: cx, z: cz, score });
       }
-      if (candidates.length >= 28) break;
+      if (candidates.length >= 36) break;
     }
-    if (candidates.length >= 28) break;
+    if (candidates.length >= 36) break;
   }
   if (!candidates.length) return null;
   candidates.sort((a, b) => b.score - a.score);
