@@ -218,6 +218,12 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
   else if ((pl.aiLvl >= 2 || dirTech) && !nB('lab') && nB('factory') && pl.credits > (dirTech ? 2400 : 3000)) want = 'lab';
   else if (pl.aiLvl >= 2 && nB('lab') && !nB('silo') && pl.credits > 3200) want = 'silo';
   else if (nB('turret') < turrets + 1 && pl.credits > 2600) want = 'turret';
+  // heavy cannon emplacements anchor the line against armor (and outrange MLRS)
+  else if (nB('factory') && nB('cannon') < (pl.aiLvl >= 2 ? 2 : 1) && pl.credits > 2200) want = 'cannon';
+  // tech defenses once a lab stands: tesla zappers, then an Iron Dome to swat
+  // incoming silo missiles (high difficulty / when the enemy has gone nuclear)
+  else if (pl.aiLvl >= 2 && nB('lab') && nB('tesla') < 1 && pl.credits > 2600) want = 'tesla';
+  else if (pl.aiLvl >= 2 && nB('radar') && !nB('irondome') && enemyHasSilo(sim, p) && pl.credits > 2800) want = 'irondome';
   else if (surplus < 60 && pl.credits > 2400) want = 'power';
 
   if (want && nB('conyard')) {
@@ -226,7 +232,7 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
     if (ok && pl.credits >= cost(want)) {
       // defensive structures: spread across the enemy-facing front so their
       // ranges tile the approach instead of clumping on one spot
-      if (want === 'turret' || want === 'sam') {
+      if (want === 'turret' || want === 'sam' || want === 'cannon' || want === 'tesla' || want === 'irondome') {
         const spot = defenseSpot(sim, p, want, basePos(sim, p), defenseDir(sim, p, mem))
           || findSpot(sim, p, want, null);
         if (spot) cmds.push({ k: 'place', p, type: want, cx: spot.x, cz: spot.z });
@@ -447,6 +453,13 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
   }
 
   return cmds;
+}
+
+// does any foe field a finished missile silo? (gates the Iron Dome investment)
+function enemyHasSilo(sim: Sim, p: number): boolean {
+  for (const e of sim.ents.values())
+    if (e.b && e.type === 'silo' && e.progress >= e.total && sim.foe(e.owner, p) && sim.players[e.owner].alive) return true;
+  return false;
 }
 
 // the player's home reference point: its construction yard, else its spawn

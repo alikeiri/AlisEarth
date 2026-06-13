@@ -18,6 +18,8 @@ const MODEL_DEFS: Record<string, { file: string; size: number; axis: 'l' | 'h'; 
   heavy:     { file: 'heavy',     size: 1.85, axis: 'l', ry: 0 },
   ifv:       { file: 'tank',      size: 1.25, axis: 'l', ry: 0, tint: 0x9aa86a }, // light olive scout chassis
   aatank:    { file: 'mlrs',      size: 1.40, axis: 'l', ry: 0, tint: 0x7c93b5 }, // blue-gray missile carrier
+  patriot:   { file: 'mlrs',      size: 1.45, axis: 'l', ry: 0, tint: 0x5f7d5a }, // olive interceptor battery
+  mine:      { file: 'drone',     size: 0.42, axis: 'l', ry: 0, tint: 0x33352f }, // small dark buried charge
   fueltruck: { file: 'harv',      size: 1.50, axis: 'l', ry: Math.PI, tint: 0xc0392b }, // red bomb truck (harv flip)
   flak:      { file: 'engineer',  size: 1.30, axis: 'l', ry: Math.PI, tint: 0x848e97 }, // gun truck (same flip as the pickup)
   mlrs:      { file: 'mlrs',      size: 1.60, axis: 'l', ry: 0 },
@@ -647,6 +649,42 @@ function buildingGroupPro(type: string, teamColor: number): THREE.Group {
     add(new THREE.CylinderGeometry(0.015, 0.015, 0.5, 5), steel, 0.75, 0.4, -0.75);
     const sock = add(new THREE.ConeGeometry(0.06, 0.22, 6), mat(0xd07020), 0.75, 0.62, -0.65);
     sock.rotation.x = Math.PI / 2;
+  } else if (type === 'cannon') {
+    // squat bunker with one big tracking gun barrel
+    add(new THREE.CylinderGeometry(0.6, 0.68, 0.4, 14), concrete, 0, 0.2, 0);
+    const pivot = new THREE.Group();
+    const addP = (geo: THREE.BufferGeometry, mt: THREE.Material, x = 0, y = 0, z = 0) => {
+      const mesh = new THREE.Mesh(geo, mt); mesh.position.set(x, y, z);
+      mesh.castShadow = true; mesh.receiveShadow = true; pivot.add(mesh); return mesh;
+    };
+    addP(roundedSlabGeo(0.6, 0.55, 0.4, 0.06), team, 0, 0.55, 0);
+    addP(new THREE.CylinderGeometry(0.11, 0.13, 1.4, 10), darkM, 0, 0.62, 0.6).rotation.x = Math.PI / 2;
+    addP(new THREE.CylinderGeometry(0.16, 0.16, 0.22, 10), steel, 0, 0.62, 1.25).rotation.x = Math.PI / 2;
+    g.add(pivot); g.userData.pivot = pivot;
+  } else if (type === 'tesla') {
+    // tall coil mast crowned with a glowing electrode orb
+    add(roundedSlabGeo(0.9, 0.9, 0.3), concrete, 0, 0.15, 0);
+    add(new THREE.CylinderGeometry(0.13, 0.2, 1.45, 10), steel, 0, 0.95, 0);
+    for (let i = 0; i < 3; i++)
+      add(new THREE.TorusGeometry(0.16 + i * 0.03, 0.04, 8, 16), darkM, 0, 1.0 + i * 0.16, 0).rotation.x = Math.PI / 2;
+    add(new THREE.SphereGeometry(0.28, 16, 12), mat(0x9fd8ff, 0.25, 0.6), 0, 1.78, 0);
+    add(new THREE.ConeGeometry(0.05, 0.22, 6), steel, 0, 2.05, 0);
+    add(roundedSlabGeo(0.78, 0.16, 0.05, 0.05), team, 0, 0.32, -0.42);
+  } else if (type === 'irondome') {
+    // angled multi-tube interceptor launcher + flat AESA radar panel
+    add(roundedSlabGeo(1.85, 1.85, 0.35), concrete);
+    add(new THREE.BoxGeometry(1.05, 0.45, 0.85), mat(0x7d8489), 0, 0.5, 0.1);
+    const rack = add(new THREE.BoxGeometry(0.95, 0.5, 0.7), darkM, 0, 0.78, 0.05);
+    rack.rotation.x = -0.5;
+    for (const tx of [-0.3, 0, 0.3]) {
+      const tube = add(new THREE.CylinderGeometry(0.07, 0.07, 0.6, 8), steel, tx, 0.95, 0.1);
+      tube.rotation.x = -0.5 + Math.PI / 2;
+      const tip = add(new THREE.ConeGeometry(0.06, 0.16, 6), mat(0x9a3030), tx, 1.18, 0.35);
+      tip.rotation.x = -0.5 + Math.PI / 2;
+    }
+    const panel = add(new THREE.BoxGeometry(0.55, 0.6, 0.07), mat(0x6b86a8, 0.3, 0.45), -0.62, 0.82, -0.55);
+    panel.rotation.y = 0.5;
+    add(roundedSlabGeo(1.5, 0.18, 0.06, 0.06), team, 0, 0.42, -0.8);
   }
   return g;
 }
@@ -1615,6 +1653,19 @@ export class Renderer {
             life: 0, max: 0.6 + Math.random() * 0.3, s: 1,
           });
         }
+      } else if (ev.e === 'intercept') {
+        // a streak from the battery up to the doomed warhead, then an airburst
+        const y1 = Math.max(this.map.heightAt(ev.x, ev.z), SEA) + 0.7;
+        const y2 = Math.max(this.map.heightAt(ev.tx, ev.tz), SEA) + 3.2; // warhead caught high
+        if (this.tracers.length < MAX_TRACER) this.tracers.push({ x1: ev.x, y1, z1: ev.z, x2: ev.tx, y2, z2: ev.tz, t: 0.12 });
+        this.spawnParts(ev.tx, y2, ev.tz, 10, true);
+      } else if (ev.e === 'empfx') {
+        // crackling blue arcs over a stunned unit
+        const y = Math.max(this.map.heightAt(ev.x, ev.z), SEA) + 0.6;
+        this.spawnParts(ev.x, y, ev.z, 3, false);
+      } else if (ev.e === 'mineset') {
+        const y = Math.max(this.map.heightAt(ev.x, ev.z), SEA) + 0.1;
+        this.spawnParts(ev.x, y, ev.z, 2, false);
       }
     }
   }

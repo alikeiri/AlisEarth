@@ -7,6 +7,7 @@ const B_ICONS: Record<string, string> = {
   power: '⚡', refinery: '⛏️', barracks: '\u{1F396}️', factory: '\u{1F3ED}', turret: '\u{1F5FC}',
   dronefac: '\u{1F4E1}', sam: '\u{1F3AF}', shipyard: '⚓', airforce: '\u{2708}️', airfield: '\u{1F6EB}', lab: '\u{1F9EA}',
   silo: '\u{1F687}', radar: '\u{1F4F6}', wall: '\u{1F9F1}', barrier: '\u{1F6A7}',
+  cannon: '\u{1F4A5}', tesla: '⚡', irondome: '\u{1F6E1}️',
 };
 const U_ICONS: Record<string, string> = {
   rifle: '\u{1FA96}', rocket: '\u{1F680}', tank: '\u{1F699}', heavy: '\u{1F69B}', ifv: '\u{1F6FB}', aatank: '\u{1F3AF}', flak: '\u{1F4A5}', harv: '\u{1F69C}', engineer: '\u{1F527}',
@@ -16,9 +17,9 @@ const U_ICONS: Record<string, string> = {
   biotrooper: '\u{2622}️', biotank: '\u{2622}️', biodrone: '\u{2622}️', stealthtank: '\u{1F977}',
   gunboat: '\u{1F6A4}', destroyer: '\u{1F6F3}️', sub: '\u{1F93F}', navdrone: '\u{1F6F6}',
   fighter: '\u{1F6E9}️', bomber: '\u{1F4A3}', dbomber: '\u{1F916}', heli: '\u{1F681}', helidrone: '\u{1FA81}',
-  mcv: '\u{1F3D7}️', dozer: '\u{1F69C}',
+  mcv: '\u{1F3D7}️', dozer: '\u{1F69C}', patriot: '\u{1F6F0}️',
 };
-export const B_LIST = ['power', 'refinery', 'radar', 'barracks', 'factory', 'turret', 'sam', 'wall', 'barrier', 'dronefac', 'shipyard', 'airforce', 'airfield', 'lab', 'silo'];
+export const B_LIST = ['power', 'refinery', 'radar', 'barracks', 'factory', 'turret', 'sam', 'cannon', 'tesla', 'irondome', 'wall', 'barrier', 'dronefac', 'shipyard', 'airforce', 'airfield', 'lab', 'silo'];
 
 // what each building gains per upgrade level (mirrors the sim's effects)
 const UPG_INFO: Record<string, string> = {
@@ -33,7 +34,7 @@ const UPG_INFO: Record<string, string> = {
   airforce: '+25% production speed',
   shipyard: '+25% production speed',
 };
-export const U_LIST = ['rifle', 'rocket', 'hive', 'tank', 'heavy', 'ifv', 'aatank', 'flak', 'fueltruck', 'harv', 'engineer', 'mcv', 'dozer', 'mlrs', 'recon', 'strike', 'msldrone',
+export const U_LIST = ['rifle', 'rocket', 'hive', 'tank', 'heavy', 'ifv', 'aatank', 'flak', 'patriot', 'fueltruck', 'harv', 'engineer', 'mcv', 'dozer', 'mlrs', 'recon', 'strike', 'msldrone',
   'chemtrooper', 'chemtank', 'chemdrone', 'biotrooper', 'biotank', 'biodrone', 'stealthtank',
   'gunboat', 'destroyer', 'sub', 'navdrone', 'fighter', 'bomber', 'dbomber', 'heli', 'helidrone',
   'cmissile', 'bbmissile', 'chemissile'];
@@ -54,6 +55,11 @@ const TIP_NOTES: Record<string, string> = {
   radar: 'Detects incoming enemy units near your base (through fog) and sounds an alert. Needs power.',
   wall: 'Cheap, tough wall that blocks movement. Click-drag on the map to lay a whole line at once.',
   barrier: 'Tank barrier: blocks vehicles and infantry. Click-drag to place a line of them.',
+  cannon: 'Heavy Cannon: long-range, hard-hitting anti-armor emplacement. Outranges most attackers; cannot hit aircraft.',
+  tesla: 'Tesla Coil: high-damage bolt that briefly EMP-freezes the unit it hits. Power-hungry; needs a Research Lab.',
+  irondome: 'Iron Dome: shoots down incoming silo missiles aimed inside its shield. One kill per reload — a heavy salvo can still overwhelm a single dome. Needs a Radar Dome.',
+  patriot: 'Patriot SAM: mobile missile interceptor. Park it over what you want protected — it downs incoming silo missiles. No offensive weapon.',
+  engineer: 'Repairs units, builds roads, and lays proximity mines (press F to lay one from its stock of 4).',
 };
 export function counterTip(t: string): string {
   const d = UNITS[t] || BUILDINGS[t];

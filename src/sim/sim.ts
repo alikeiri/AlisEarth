@@ -46,6 +46,9 @@ export interface Entity {
   strikeX?: number; strikeZ?: number; strikeR?: number; // silo: persistent strike zone
   terraPath?: { x: number; z: number }[]; terraI?: number; terraH?: number; // bulldozer job
   burnT?: number; burnPs?: number; // building on fire: seconds left, damage/s
+  icd?: number; // interceptor (Iron Dome / Patriot): reload cooldown between missile kills
+  stunT?: number; // EMP stun: seconds the unit is frozen (can't move or fire)
+  mineStock?: number; // engineer: proximity mines left to lay
 }
 
 export interface PlayerState {
@@ -179,6 +182,7 @@ export class Sim {
     e.maxHp = Math.round(def.hp * this.players[p].fac.hpMul);
     e.hp = e.maxHp;
     if (def.payload) e.ammo = def.payload;
+    if (def.mines) e.mineStock = def.mines;
     if (def.cargo) this.autoHarvest(e);
     return e;
   }
@@ -459,6 +463,17 @@ export class Sim {
       for (const id of (c.ids || [])) {
         const u = this.ents.get(id);
         if (!u || u.b || u.owner !== c.p) continue;
+        // engineer lays a proximity mine at its feet (from its onboard stock)
+        const lays = UNITS[u.type]?.lays;
+        if (lays) {
+          if ((u.mineStock ?? 0) > 0) {
+            u.mineStock = (u.mineStock ?? 0) - 1;
+            const m = this.spawnUnit(u.owner, lays, u.x, u.z);
+            m.orders = []; m.stance = 1;
+            this.events.push({ e: 'mineset', x: u.x, z: u.z });
+          }
+          continue;
+        }
         const target = UNITS[u.type]?.deploys;
         if (!target) continue;
         const def = BUILDINGS[target];
@@ -643,6 +658,9 @@ export class Sim {
     this.dmgLog = [];
     for (const c of cmds) this.applyCmd(c);
 
+    // anti-missile shield: Iron Dome / Patriot shoot down incoming warheads
+    this.tickIntercept();
+
     // incoming missiles reach their targets
     if (this.pendingBlasts.length && this.pendingBlasts.some(p => this.tickN >= p.t)) {
       const due = this.pendingBlasts.filter(p => this.tickN >= p.t);
@@ -771,6 +789,7 @@ export class Sim {
     for (const u of this.nearbyUnits(e.x, e.z, range + 1)) {
       if (!this.foe(u.owner, e.owner) || u.hp <= 0 || !this.players[u.owner].alive) continue;
       const d = this.distToEnt(e.x, e.z, u);
+      if (UNITS[u.type]?.mine) continue;            // buried proximity mines aren't visible targets
       if (UNITS[u.type]?.cloak && d > 4) continue; // stealth: only seen up close
       // never auto-lock onto air targets the attacker cannot hurt (turret, MLRS)
       if (UNITS[u.type]?.fly && (skipAir || dmgMul(e.type, false, 'air', u.type) <= 0)) continue;
@@ -943,9 +962,17 @@ export class Sim {
       // turret acquires targets periodically; fires every tick via cd
     }
     if (def.attack) {
+      const ready = b.cd <= 0;                              // will this shot actually fire?
       b.cd -= TICK;
-      const tgt = this.findEnemy(b, def.attack.range + 0.8 * (b.lvl - 1), b.type === 'turret');
-      if (tgt) this.fire(b, tgt, def.attack.dmg * (1 + 0.25 * (b.lvl - 1)), def.attack.rof / pl.pf);
+      const tgt = this.findEnemy(b, def.attack.range + 0.8 * (b.lvl - 1), !!def.noAir);
+      if (tgt) {
+        this.fire(b, tgt, def.attack.dmg * (1 + 0.25 * (b.lvl - 1)), def.attack.rof / pl.pf);
+        // tesla coil: the bolt briefly EMP-freezes the struck unit
+        if (ready && def.emp && !tgt.b && tgt.hp > 0) {
+          tgt.stunT = Math.max(tgt.stunT || 0, def.emp);
+          this.events.push({ e: 'emp', x: tgt.x, z: tgt.z });
+        }
+      }
     }
 
     // missile silo with a standing strike order: bombard the zone (throttled)
@@ -957,6 +984,36 @@ export class Sim {
   private tickUnit(u: Entity) {
     const def = UNITS[u.type];
     u.cd -= TICK;
+
+    // proximity mine: lie dormant until an enemy ground unit steps within the
+    // trigger radius, then detonate in an area blast (aircraft fly safely over)
+    if (def.mine) {
+      const trig = def.trigger || 1.5;
+      let armed = false;
+      for (const o of this.nearbyUnits(u.x, u.z, trig + 1)) {
+        if (o.b || !this.foe(o.owner, u.owner) || o.hp <= 0 || UNITS[o.type]?.fly) continue;
+        if ((o.x - u.x) ** 2 + (o.z - u.z) ** 2 <= trig * trig) { armed = true; break; }
+      }
+      if (armed) {
+        const R = def.blastR || 2.4;
+        const fake: any = { id: u.id, owner: u.owner, type: 'mine', b: false };
+        for (const o of [...this.ents.values()]) {
+          if (!this.foe(o.owner, u.owner) || o.hp <= 0 || (!o.b && UNITS[o.type]?.fly)) continue;
+          const d = o.b ? this.distToEnt(u.x, u.z, o) : Math.hypot(o.x - u.x, o.z - u.z);
+          if (d <= R) this.dealDamage(fake, o, def.dmg * (1 - 0.4 * (d / R)));
+        }
+        u.hp = 0;
+        this.events.push({ e: 'boom', x: u.x, z: u.z, big: true });
+      }
+      return;
+    }
+
+    // EMP stun (tesla coil): frozen solid — can't move or fire — until it wears off
+    if (u.stunT && u.stunT > 0) {
+      u.stunT -= TICK;
+      if (this.tickN % 3 === u.id % 3) this.events.push({ e: 'empfx', x: u.x, z: u.z });
+      return;
+    }
 
     // self-destruct countdown → fireball (incinerates nearby enemies, like a
     // last stand) then the unit dies
@@ -1348,6 +1405,39 @@ export class Sim {
       }
     }
     if (b.missileStock?.length && target) this.launchMissile(b, target.x, target.z);
+  }
+
+  // anti-missile defence: each ready interceptor (Iron Dome building / Patriot
+  // vehicle) shoots down one in-flight silo warhead whose target sits inside its
+  // shield radius, then goes on cooldown — so a saturation salvo can still punch
+  // through a lone battery. Cooldowns tick here for every interceptor.
+  private tickIntercept() {
+    const ints: { e: Entity; r2: number; cd: number }[] = [];
+    for (const e of this.ents.values()) {
+      const def: any = e.b ? BUILDINGS[e.type] : UNITS[e.type];
+      if (!def?.intercept || e.hp <= 0) continue;
+      if (e.b && e.progress < e.total) continue;            // still under construction
+      if (e.icd && e.icd > 0) e.icd -= TICK;
+      ints.push({ e, r2: def.intercept.range * def.intercept.range, cd: def.intercept.cd });
+    }
+    if (!ints.length || !this.pendingBlasts.length) return;
+    const killed: typeof this.pendingBlasts = [];
+    for (const bl of this.pendingBlasts) {
+      let best: { e: Entity; r2: number; cd: number } | null = null, bd = 1e9;
+      for (const it of ints) {
+        if (it.e.icd && it.e.icd > 0) continue;             // reloading
+        if (!this.foe(it.e.owner, bl.owner)) continue;
+        const dx = it.e.x - bl.x, dz = it.e.z - bl.z, d2 = dx * dx + dz * dz;
+        if (d2 > it.r2 || d2 >= bd) continue;
+        bd = d2; best = it;
+      }
+      if (best) {
+        best.e.icd = best.cd;                               // spend the interceptor
+        killed.push(bl);
+        this.events.push({ e: 'intercept', x: best.e.x, z: best.e.z, tx: bl.x, tz: bl.z });
+      }
+    }
+    if (killed.length) this.pendingBlasts = this.pendingBlasts.filter(b => !killed.includes(b));
   }
 
   // missile impact: area damage with falloff; the warhead type drives dmgMul

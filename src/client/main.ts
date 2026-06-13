@@ -570,6 +570,9 @@ class GameClient {
         // F also deploys a Construction Vehicle into a forward construction yard
         const dep = sel.filter(id => UNITS[this.byId.get(id)?.t]?.deploys);
         if (dep.length) { this.game.issue({ k: 'deploy', p: this.game.me, ids: dep }); audio.play('confirm'); }
+        // F also has engineers drop a proximity mine from their onboard stock
+        const lay = sel.filter(id => UNITS[this.byId.get(id)?.t]?.lays);
+        if (lay.length) { this.game.issue({ k: 'deploy', p: this.game.me, ids: lay }); audio.play('confirm'); }
       }
       // B: selected engineers build a road toward the cursor (extends base reach)
       if (e.code === 'KeyB') {

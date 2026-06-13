@@ -38,6 +38,11 @@ export interface UnitDef {
   terra?: boolean;                               // bulldozer: can reshape terrain along a drawn path
   amphibious?: boolean;                          // can travel over BOTH land and water
   altBuiltAt?: string;                           // a second building that can also produce this unit
+  intercept?: { range: number; cd: number };     // shoots down silo missiles whose target is in range
+  lays?: string;                                 // engineer: F lays this entity (a proximity mine)
+  mines?: number;                                // how many mines this unit carries
+  mine?: boolean;                                // proximity mine: detonates when an enemy comes close
+  trigger?: number;                              // mine trigger radius (cells)
 }
 
 export const UNITS: Record<string, UnitDef> = {
@@ -49,13 +54,15 @@ export const UNITS: Record<string, UnitDef> = {
   recon:  { name: 'Recon Drone',  cost: 400,  hp: 70,  speed: 3.4, range: 4.0, dmg: 6,  rof: 0.6, builtAt: 'dronefac', buildTime: 7,  kind: 'air', fly: true },
   strike: { name: 'Strike Drone', cost: 1100, hp: 150, speed: 2.8, range: 5.0, dmg: 32, rof: 1.8, builtAt: 'dronefac', buildTime: 13, kind: 'air', fly: true },
   msldrone: { name: 'Missile Drone', cost: 1500, hp: 120, speed: 2.4, range: 7.0, dmg: 45, rof: 3.0, builtAt: 'dronefac', buildTime: 15, kind: 'air', fly: true },
-  mlrs:   { name: 'MLRS',         cost: 1600, hp: 220, speed: 1.6, range: 13.0, dmg: 74, rof: 3.6, builtAt: 'factory',  buildTime: 16, kind: 'veh' },
+  mlrs:   { name: 'MLRS',         cost: 1600, hp: 170, speed: 1.6, range: 10.0, dmg: 66, rof: 3.6, builtAt: 'factory',  buildTime: 16, kind: 'veh' },
   // the anti-infantry vehicle: autocannon IFV — shreds infantry, loses to tanks
   ifv:    { name: 'IFV',          cost: 700,  hp: 300, speed: 3.4, range: 5.0, dmg: 24, rof: 0.8, builtAt: 'factory',  buildTime: 9,  kind: 'veh' },
   // mobile anti-air pair: missile AA hunts airplanes, flak shreds drone swarms
   aatank: { name: 'AA Vehicle',   cost: 950,  hp: 280, speed: 3.0, range: 8.0, dmg: 42, rof: 1.6, builtAt: 'factory',  buildTime: 11, kind: 'veh' },
   flak:   { name: 'Flak Gun',     cost: 650,  hp: 240, speed: 2.6, range: 6.5, dmg: 16, rof: 0.45, builtAt: 'factory', buildTime: 9,  kind: 'veh' },
-  engineer: { name: 'Engineer',   cost: 600,  hp: 200, speed: 2.2, range: 0,   dmg: 0,  rof: 1,   builtAt: 'factory',  buildTime: 10, kind: 'veh', repair: true, road: true },
+  engineer: { name: 'Engineer',   cost: 600,  hp: 200, speed: 2.2, range: 0,   dmg: 0,  rof: 1,   builtAt: 'factory',  buildTime: 10, kind: 'veh', repair: true, road: true, lays: 'mine', mines: 4 },
+  patriot:  { name: 'Patriot SAM', cost: 1100, hp: 200, speed: 2.4, range: 0,  dmg: 0,  rof: 1,   builtAt: 'factory',  buildTime: 12, kind: 'veh', intercept: { range: 11, cd: 4 } },
+  mine:     { name: 'Land Mine',  cost: 0,    hp: 1,   speed: 0,   range: 0,   dmg: 150, rof: 1,  builtAt: '',         buildTime: 0,  kind: 'veh', internal: true, mine: true, trigger: 1.5, blastR: 2.4 },
   // Construction Vehicle: slow, defenceless; press F to deploy it into a forward
   // construction yard (enables building structures around the new spot)
   mcv:    { name: 'Construction Vehicle', cost: 2500, hp: 500, speed: 1.1, range: 0, dmg: 0, rof: 1, builtAt: 'factory', altBuiltAt: 'shipyard', buildTime: 20, kind: 'veh', deploys: 'conyard', amphibious: true },
@@ -77,7 +84,7 @@ export const UNITS: Record<string, UnitDef> = {
   biotank:     { name: 'Bio Tank',     cost: 1100, hp: 400, speed: 2.2, range: 5.2, dmg: 34, rof: 1.6, builtAt: 'factory',  buildTime: 14, kind: 'veh', tech: 'bio' },
   biodrone:    { name: 'Bio Drone',    cost: 950,  hp: 150, speed: 3.0, range: 4.5, dmg: 26, rof: 1.7, builtAt: 'dronefac', buildTime: 12, kind: 'air', fly: true, alt: 2.7, tech: 'bio' },
   stealthtank: { name: 'Stealth Tank', cost: 1300, hp: 300, speed: 3.0, range: 5.5, dmg: 46, rof: 1.8, builtAt: 'factory',  buildTime: 15, kind: 'veh', tech: 'stealth', cloak: true },
-  fighter:   { name: 'Fighter',      cost: 1200, hp: 180, speed: 4.2, range: 5.0, dmg: 30,  rof: 1.0, builtAt: 'airforce', buildTime: 12, kind: 'air', fly: true, alt: 3.4, pad: true },
+  fighter:   { name: 'Fighter',      cost: 1200, hp: 210, speed: 4.6, range: 6.5, dmg: 40,  rof: 0.9, builtAt: 'airforce', buildTime: 12, kind: 'air', fly: true, alt: 3.4, pad: true },
   bomber:    { name: 'Bomber',       cost: 2000, hp: 320, speed: 2.6, range: 3.0, dmg: 120, rof: 5.0, builtAt: 'airforce', buildTime: 18, kind: 'air', fly: true, alt: 3.4, pad: true, payload: 2 },
   dbomber:   { name: 'Drone Bomber', cost: 2600, hp: 280, speed: 3.0, range: 4.0, dmg: 90,  rof: 4.0, builtAt: 'airforce', buildTime: 20, kind: 'air', fly: true, alt: 3.4, pad: true, payload: 3 },
   heli:      { name: 'Helicopter',   cost: 1600, hp: 260, speed: 3.2, range: 5.5, dmg: 40,  rof: 1.4, builtAt: 'airforce', buildTime: 14, kind: 'air', fly: true, alt: 2.7, pad: true },
@@ -85,9 +92,9 @@ export const UNITS: Record<string, UnitDef> = {
   // suicide truck: fuel + explosives, huge fireball, sets buildings ablaze
   fueltruck: { name: 'Fuel Truck',   cost: 900,  hp: 220, speed: 3.6, range: 4.0, dmg: 280, rof: 1, builtAt: 'factory', buildTime: 10, kind: 'veh', bombTruck: true },
   // missiles: built AT the silo, stored there, launched at any map position
-  cmissile:   { name: 'Cruise Missile', cost: 1400, hp: 1, speed: 7, range: 0, dmg: 480, rof: 1, builtAt: 'silo', buildTime: 25, kind: 'air', missile: true, blastR: 3.0 },
-  bbmissile:  { name: 'Bunker Buster',  cost: 1800, hp: 1, speed: 7, range: 0, dmg: 650, rof: 1, builtAt: 'silo', buildTime: 30, kind: 'air', missile: true, blastR: 2.2 },
-  chemissile: { name: 'Chem Warhead',   cost: 2000, hp: 1, speed: 7, range: 0, dmg: 320, rof: 1, builtAt: 'silo', buildTime: 32, kind: 'air', missile: true, blastR: 3.6, tech: 'chem' },
+  cmissile:   { name: 'Cruise Missile', cost: 1400, hp: 1, speed: 7, range: 0, dmg: 360, rof: 1, builtAt: 'silo', buildTime: 28, kind: 'air', missile: true, blastR: 2.8 },
+  bbmissile:  { name: 'Bunker Buster',  cost: 1800, hp: 1, speed: 7, range: 0, dmg: 480, rof: 1, builtAt: 'silo', buildTime: 34, kind: 'air', missile: true, blastR: 2.1 },
+  chemissile: { name: 'Chem Warhead',   cost: 2000, hp: 1, speed: 7, range: 0, dmg: 250, rof: 1, builtAt: 'silo', buildTime: 36, kind: 'air', missile: true, blastR: 3.4, tech: 'chem' },
 };
 
 export const AIRFIELD_CAP = (lvl: number) => 2 + 2 * lvl; // capacity per airfield level
@@ -100,6 +107,9 @@ export interface BuildingDef {
   buildTime: number; size: number;                        // size in cells (square)
   attack?: { range: number; dmg: number; rof: number };
   prereq?: string;
+  intercept?: { range: number; cd: number };     // anti-missile shield: shoots down incoming silo missiles
+  emp?: number;                                   // tesla: stuns the struck unit for this many seconds
+  noAir?: boolean;                                // defensive gun that cannot elevate to hit aircraft
 }
 
 export const BUILDINGS: Record<string, BuildingDef> = {
@@ -113,6 +123,12 @@ export const BUILDINGS: Record<string, BuildingDef> = {
   dronefac: { name: 'Drone Works',       cost: 1500, hp: 850,  power: -35,  buildTime: 11, size: 2, prereq: 'factory' },
   sam:      { name: 'Missile Battery',   cost: 900,  hp: 700,  power: -30,  buildTime: 9,  size: 1, prereq: 'factory',
               attack: { range: 7, dmg: 50, rof: 2.5 } },
+  cannon:   { name: 'Heavy Cannon',      cost: 1200, hp: 760,  power: -30,  buildTime: 11, size: 1, prereq: 'factory',
+              attack: { range: 10, dmg: 95, rof: 2.6 }, noAir: true },   // long-range anti-armor emplacement
+  tesla:    { name: 'Tesla Coil',        cost: 1300, hp: 620,  power: -55,  buildTime: 12, size: 1, prereq: 'lab',
+              attack: { range: 6.5, dmg: 70, rof: 1.7 }, emp: 1.2, noAir: true }, // zaps + briefly stuns
+  irondome: { name: 'Iron Dome',         cost: 1500, hp: 780,  power: -45,  buildTime: 13, size: 2, prereq: 'radar',
+              intercept: { range: 15, cd: 3.5 } },                         // shoots down incoming silo missiles
   shipyard: { name: 'Ship Factory',      cost: 1700, hp: 1000, power: -35,  buildTime: 13, size: 3, prereq: 'refinery' },
   airforce: { name: 'Aircraft Plant',    cost: 2200, hp: 1000, power: -45,  buildTime: 15, size: 3, prereq: 'factory' },
   airfield: { name: 'Airfield',          cost: 800,  hp: 600,  power: -15,  buildTime: 8,  size: 2, prereq: 'airforce' },
@@ -201,15 +217,19 @@ export const DRONE_TYPES = new Set(['recon', 'strike', 'msldrone', 'helidrone', 
 // Damage matrix: attacker type vs target class (tgtType refines air targets).
 export function dmgMul(attType: string, tgtIsBuilding: boolean, tgtKind: string, tgtType?: string): number {
   if (tgtKind === 'air') {
-    if (attType === 'fighter') return 2.2;       // interceptor
+    // air superiority: fighters murder drones AND bombers (their whole job)
+    if (attType === 'fighter') return tgtType && (tgtType === 'bomber' || tgtType === 'dbomber') ? 3.2 : 2.8;
     if (attType === 'sam') return 2.2;
     if (attType === 'aatank') return 2.3;        // dedicated mobile AA
     if (attType === 'flak') return tgtType && DRONE_TYPES.has(tgtType) ? 2.4 : 0.5; // drone shredder
     if (attType === 'rocket') return 1.8;
-    if (attType === 'destroyer') return 1.5;
+    // warships carry VLS air-defence containers now — destroyers shrug off air
+    if (attType === 'destroyer') return 2.1;
+    if (attType === 'gunboat') return 1.4;
+    if (attType === 'navdrone') return 1.1;
     if (attType === 'rifle') return 1.2;
     if (attType === 'ifv') return 0.8;           // autocannon can pepper aircraft
-    if (attType === 'turret') return 0;          // gun turret can't elevate (defensive AA = SAM)
+    if (attType === 'turret' || attType === 'cannon' || attType === 'tesla') return 0; // defensive guns can't elevate (AA = SAM / Patriot)
     if (attType === 'mlrs') return 0;            // artillery cannot engage aircraft
     if (attType === 'tank' || attType === 'heavy') return 0.4;
     if (attType === 'bomber') return 0.1;
@@ -256,5 +276,8 @@ export function dmgMul(attType: string, tgtIsBuilding: boolean, tgtKind: string,
   if (attType === 'chemissile') return tgtIsBuilding ? 0.6 : (tgtKind === 'inf' ? 2.6 : 0.8);
   if (attType === 'tank' || attType === 'heavy') return tgtIsBuilding ? 1.3 : (tgtKind === 'inf' ? 0.5 : 1.35);
   if (attType === 'turret') return tgtIsBuilding ? 0.8 : (tgtKind === 'veh' ? 0.6 : 1.1); // armor shrugs off turret fire
+  if (attType === 'cannon') return tgtIsBuilding ? 1.1 : (tgtKind === 'veh' ? 1.7 : 0.7);  // heavy cannon: anti-armor
+  if (attType === 'tesla')  return tgtIsBuilding ? 0.9 : 1.5;                               // tesla: all-round zapper
+  if (attType === 'mine')   return tgtIsBuilding ? 0.5 : (tgtKind === 'veh' ? 1.7 : 1.3);   // mine blast
   return 1.0; // gunboat / destroyer guns
 }
