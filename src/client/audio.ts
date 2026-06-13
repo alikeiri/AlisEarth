@@ -310,7 +310,7 @@ class AudioMan {
   startMusic() {
     if (!this.ctx || this.musicTimer || this.musicStyle === 'off') return;
     const bpm = this.musicStyle === 'ambient' ? 60 : this.musicStyle === 'march' ? 104
-      : this.musicStyle === 'hellmarch' ? 126 : 124;
+      : this.musicStyle === 'hellmarch' ? 142 : 124;
     const spe = 60 / bpm / 2; // seconds per eighth note
     this.nextT = this.ctx.currentTime + 0.15;
     this.musicTimer = setInterval(() => {
@@ -346,22 +346,22 @@ class AudioMan {
   // hard-clip waveshaper (heavy overdrive) → bright tone → SUSTAINED envelope.
   // The detune + heavy clip + held sustain read as a buzzy guitar, not a piano.
   private guitarCurve: Float32Array | null = null;
-  private guitar(freq: number, t: number, dur: number, peak: number, palm = false, echo = false) {
+  private guitar(freq: number, t: number, dur: number, peak: number, palm = false, echo = false, hot = false) {
     if (!this.ctx) return;
     if (!this.guitarCurve) {
       const n = 1024, c = new Float32Array(n), amt = 22;       // hard clip = lots of grit
       for (let i = 0; i < n; i++) { const x = (i / n) * 2 - 1; c[i] = Math.tanh(amt * x); }
       this.guitarCurve = c;
     }
-    for (const det of [0.997, 1.003]) {                         // thick double-tracked tone
+    for (const det of [0.996, 1.004]) {                         // thick double-tracked tone
       const o = this.ctx.createOscillator(); o.type = 'sawtooth'; o.frequency.value = freq * det;
-      const pre = this.ctx.createGain(); pre.gain.value = 1.6;  // hot drive into the clipper
+      const pre = this.ctx.createGain(); pre.gain.value = hot ? 3.0 : 1.6;  // extra saturation when hot
       const sh = this.ctx.createWaveShaper(); sh.curve = this.guitarCurve; sh.oversample = '4x';
       const tone = this.ctx.createBiquadFilter(); tone.type = 'lowpass';
-      tone.frequency.value = palm ? 2000 : 4200; tone.Q.value = 1.1; // brighter = buzzier
+      tone.frequency.value = palm ? (hot ? 2600 : 2000) : (hot ? 5200 : 4200); tone.Q.value = 1.2;
       const g = this.ctx.createGain();
       g.gain.setValueAtTime(0.0001, t);
-      g.gain.exponentialRampToValueAtTime(peak * 0.5, t + 0.004);    // fast pick attack
+      g.gain.exponentialRampToValueAtTime(peak * 0.5, t + 0.003);    // fast pick attack
       g.gain.setValueAtTime(peak * 0.45, t + dur * 0.7);             // HOLD (ringing sustain)
       g.gain.exponentialRampToValueAtTime(0.0001, t + dur);          // release
       o.connect(pre); pre.connect(sh); sh.connect(tone); tone.connect(g); g.connect(this.musG);
@@ -436,46 +436,50 @@ class AudioMan {
       return;
     }
 
-    // ===== HELL MARCH: a relentless E-minor industrial war-march =====
-    // (an original homage to the C&C Red Alert vibe, not a copy): pounding
-    // palm-muted bass pulse, power-chord stabs, a descending minor lead motif,
-    // and a four-on-the-floor kick with a military snare cadence.
+    // ===== HELL MARCH: a brutal E-minor industrial war-march =====
+    // (an original homage to the C&C Red Alert vibe, not a copy): a relentless
+    // 16th-note palm-muted gallop with a sub-octave, savage power-chord stabs, a
+    // screaming octave-doubled lead, double-kick and a hammering snare cadence.
     if (style === 'hellmarch') {
       const noise = this.noiseBuf && this.ctx;
-      // 2-bar harmonic plan: Em Em C D — static, driving, with a lift at the end
-      const planRoot = [52, 52, 48, 50][bar];        // E3 E3 C3 D3
-      const bassRoot = planRoot - 12;
-      const drive = sect === 'b' ? 0.16 : 0.13;      // breakdown phrases hit harder
-      // the engine: a palm-muted bass note on EVERY eighth
-      this.guitar(this.midi(bassRoot), t, spe * 0.96, drive, true);
-      // power-chord stabs on beats 1 and 3
+      const planRoot = [52, 52, 48, 50][bar];        // Em Em C D
+      const bassRoot = planRoot - 12, sub = bassRoot - 12;
+      const half = spe / 2;                           // the 16th in between
+      // the engine: a chugging 16th-note gallop, hot-overdriven, with a sub-bass
+      this.guitar(this.midi(bassRoot), t, half * 0.92, 0.16, true, false, true);
+      this.guitar(this.midi(bassRoot), t + half, half * 0.92, 0.13, true, false, true);
+      if (pos % 2 === 0) this.guitar(this.midi(sub), t, spe * 0.9, 0.1, true);  // sub weight on the beat
+      // savage power-chord stabs (root+fifth+octave) on beats 1 and 3
       if (pos % 4 === 0) {
-        this.guitar(this.midi(planRoot), t, spe * 3.6, 0.1);
-        this.guitar(this.midi(planRoot + 7), t, spe * 3.6, 0.075);
+        this.guitar(this.midi(planRoot), t, spe * 3.6, 0.12, false, false, true);
+        this.guitar(this.midi(planRoot + 7), t, spe * 3.6, 0.09, false, false, true);
+        this.guitar(this.midi(planRoot + 12), t, spe * 3.6, 0.06, false, false, true);
       }
-      // the hook: a 2-bar descending minor lead motif, one note per eighth
+      // the hook: a 2-bar descending minor lead, doubled an octave up, screaming
       const MOTIF = [0, -2, -3, -2, -3, -5, -3, -2, 0, 3, 5, 3, 2, 0, -2, 0];
       const mi = (barAbs % 2) * 8 + pos;
       if (sect !== 'b' && MOTIF[mi] !== undefined) {
-        this.guitar(this.midi(planRoot + 12 + MOTIF[mi]), t, spe * 1.25, sect === 'c' ? 0.06 : 0.05, false, true);
+        const ln = this.midi(planRoot + 12 + MOTIF[mi]);
+        this.guitar(ln, t, spe * 1.2, 0.08, false, true, true);
+        this.guitar(ln * 2, t, spe * 1.2, 0.05, false, true, true);   // octave-up scream
       }
-      // marching drums
-      if (pos % 2 === 0) this.musTone('sine', 92, t, 0.003, 0.13, 0.22, 360);  // four-on-the-floor kick
-      const snareHit = (peak: number, dur: number) => {                        // military snare
+      // drums: DOUBLE kick (every eighth), hammering backbeat snare + ghost 16ths
+      this.musTone('sine', 88, t, 0.002, 0.12, 0.26, 380);
+      const snareHit = (peak: number, dur: number, at = t) => {
         if (!noise) return;
         const s = this.ctx!.createBufferSource(); s.buffer = this.noiseBuf!; s.loop = true;
-        const f = this.ctx!.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = 2000; f.Q.value = 0.8;
-        const g = this.ctx!.createGain(); g.gain.setValueAtTime(peak, t); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-        s.connect(f); f.connect(g); g.connect(this.musG); s.start(t); s.stop(t + dur + 0.02);
+        const f = this.ctx!.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = 2100; f.Q.value = 0.8;
+        const g = this.ctx!.createGain(); g.gain.setValueAtTime(peak, at); g.gain.exponentialRampToValueAtTime(0.0001, at + dur);
+        s.connect(f); f.connect(g); g.connect(this.musG); s.start(at); s.stop(at + dur + 0.02);
       };
-      if (pos === 4) snareHit(0.08, 0.15);             // backbeat
-      else if (pos % 2 === 1) snareHit(0.025, 0.05);   // off-beat march cadence (ghost rolls)
-      if (bar === 0 && pos === 0) noise && (() => {     // crash at the phrase top
+      if (pos === 4) { snareHit(0.11, 0.16); snareHit(0.05, 0.06, t + half); } // cracking backbeat + flam
+      else if (pos % 2 === 1) snareHit(0.03, 0.05);                            // driving ghost rolls
+      if (bar === 0 && pos === 0 && noise) {                                   // crash at phrase top
         const s = this.ctx!.createBufferSource(); s.buffer = this.noiseBuf!; s.loop = true;
-        const f = this.ctx!.createBiquadFilter(); f.type = 'highpass'; f.frequency.value = 5500;
-        const g = this.ctx!.createGain(); g.gain.setValueAtTime(0.05, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.6);
-        s.connect(f); f.connect(g); g.connect(this.musG); s.start(t); s.stop(t + 0.65);
-      })();
+        const f = this.ctx!.createBiquadFilter(); f.type = 'highpass'; f.frequency.value = 5000;
+        const g = this.ctx!.createGain(); g.gain.setValueAtTime(0.06, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.7);
+        s.connect(f); f.connect(g); g.connect(this.musG); s.start(t); s.stop(t + 0.75);
+      }
       return;
     }
 
