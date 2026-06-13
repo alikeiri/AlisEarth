@@ -135,6 +135,7 @@ class LocalGame implements GameLike {
         if (e.primary) v.pm = 1;
         if (e.research) { v.rs = e.research.tech; v.rsf = 1 - e.research.t / e.research.t0; }
         if (e.storedMissile) v.ms = e.storedMissile;
+        if (e.strikeR && e.strikeR > 0) { v.kx = e.strikeX; v.kz = e.strikeZ; v.kr = e.strikeR; }
         if (e.burnT && e.burnT > 0) v.bn = 1;
       } else {
         if (e.stance) v.st = e.stance;
@@ -350,7 +351,7 @@ class GameClient {
     mode: '' as '' | 'pan' | 'box' | 'pinch', sx: 0, sy: 0, downT: 0, moved: false,
     pinchD: 0, pinchA: 0, boxToggle: false, longTimer: 0 as any,
   };
-  private rMode: 'pan' | 'form' | 'aatk' = 'pan';
+  private rMode: 'pan' | 'form' | 'aatk' | 'silo' = 'pan';
   private formPath: { x: number; z: number }[] | null = null;
   private areaDrag: { cx: number; cz: number; r: number } | null = null;
   private patrolMode = false;
@@ -980,9 +981,15 @@ class GameClient {
       // circle — everything inside gets targeted on release
       const enemyUnder = this.myUnitIds().length
         ? this.pickView(e.clientX, e.clientY, v => v.o !== this.game.me) : null;
+      const siloSel = (this.selection.size === 1 && !this.myUnitIds().length) ? this.byId.get([...this.selection][0]) : null;
       if (enemyUnder) {
         const g = this.renderer.groundPoint(e.clientX / window.innerWidth, e.clientY / window.innerHeight);
         this.rMode = 'aatk';
+        this.areaDrag = g ? { cx: g.x, cz: g.z, r: 0 } : null;
+      } else if (siloSel && siloSel.b && siloSel.t === 'silo' && siloSel.o === this.game.me) {
+        // a selected silo: right-drag sizes a custom strike zone
+        const g = this.renderer.groundPoint(e.clientX / window.innerWidth, e.clientY / window.innerHeight);
+        this.rMode = 'silo';
         this.areaDrag = g ? { cx: g.x, cz: g.z, r: 0 } : null;
       } else {
         // 2+ units selected: right-drag draws a formation line; otherwise it pans
@@ -1016,6 +1023,15 @@ class GameClient {
           audio.play('confirm');
           audio.ack(this.dominantType(ids), 'attack');
           this.markCmd(ids, area.cx, area.cz, true);
+        }
+      }
+      else if (this.rMode === 'silo' && area && area.r >= 1) {
+        // designate a custom-radius strike zone for the selected silo
+        const silo = this.byId.get([...this.selection][0]);
+        if (silo && silo.t === 'silo') {
+          this.game.issue({ k: 'silostrike', p: this.game.me, bid: silo.i, x: Math.round(area.cx * 10) / 10, z: Math.round(area.cz * 10) / 10, r: Math.round(area.r * 10) / 10 });
+          audio.play('confirm');
+          this.markCmd([silo.i], area.cx, area.cz, true);
         }
       }
       else if (this.rMode === 'form' && path && path.length >= 2) this.issueFormation(path, e.shiftKey);
@@ -1161,10 +1177,15 @@ class GameClient {
     // single selected production building → rally point (armed silo → LAUNCH)
     const sel = [...this.selection].map(id => this.byId.get(id)).filter(Boolean);
     if (sel.length === 1 && sel[0].b && sel[0].o === me) {
-      if (sel[0].t === 'silo' && sel[0].ms) {
-        this.game.issue({ k: 'launch', p: me, bid: sel[0].i, x: Math.round(g.x * 10) / 10, z: Math.round(g.z * 10) / 10 });
+      if (sel[0].t === 'silo') {
+        // quick right-click on a silo: set a standing strike zone (radius 4) at
+        // the point — fires now if armed, keeps building + bombarding until the
+        // area is clear. Right-click the silo itself to cancel the order.
+        const onSilo = Math.abs(g.x - sel[0].x) < (sel[0].sz || 2) / 2 + 0.5 && Math.abs(g.z - sel[0].z) < (sel[0].sz || 2) / 2 + 0.5;
+        const r = onSilo ? 0 : 4;
+        this.game.issue({ k: 'silostrike', p: me, bid: sel[0].i, x: Math.round(g.x * 10) / 10, z: Math.round(g.z * 10) / 10, r });
         audio.play('confirm');
-        this.markCmd([sel[0].i], g.x, g.z, true);
+        if (r) this.markCmd([sel[0].i], g.x, g.z, true);
         return;
       }
       this.game.issue({ k: 'rally', p: me, bid: sel[0].i, x: g.x, z: g.z });
@@ -1314,10 +1335,10 @@ class GameClient {
           }
         }
         this.renderer.setFormationPath(this.formPath);
-      } else if (this.rMode === 'aatk' && this.areaDrag) {
-        // attack circle grows with the drag
+      } else if ((this.rMode === 'aatk' || this.rMode === 'silo') && this.areaDrag) {
+        // attack / strike circle grows with the drag
         const g = this.renderer.groundPoint(this.mouse.x / window.innerWidth, this.mouse.y / window.innerHeight);
-        if (g) this.areaDrag.r = Math.min(14, Math.hypot(g.x - this.areaDrag.cx, g.z - this.areaDrag.cz));
+        if (g) this.areaDrag.r = Math.min(this.rMode === 'silo' ? 20 : 14, Math.hypot(g.x - this.areaDrag.cx, g.z - this.areaDrag.cz));
       }
     }
 
@@ -1420,9 +1441,12 @@ class GameClient {
         if (r > 0) circles.push({ x: v.x, z: v.z, r, atk: true });
       }
     }
-    // live attack-circle while dragging an area target
-    if (this.mouse.rDragging && this.rMode === 'aatk' && this.areaDrag && this.areaDrag.r > 0.5)
+    // live attack/strike-circle while dragging
+    if (this.mouse.rDragging && (this.rMode === 'aatk' || this.rMode === 'silo') && this.areaDrag && this.areaDrag.r > 0.5)
       circles.push({ x: this.areaDrag.cx, z: this.areaDrag.cz, r: this.areaDrag.r, atk: true, fill: true } as any);
+    // standing missile-strike zones on my silos
+    for (const v of views) if (v.kr && v.o === this.game.me)
+      circles.push({ x: v.kx, z: v.kz, r: v.kr, atk: true, fill: true } as any);
     // age out command effects
     for (const f of this.cmdFx) f.t -= dt;
     this.cmdFx = this.cmdFx.filter(f => f.t > 0);

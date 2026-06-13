@@ -49,7 +49,7 @@ const TIP_NOTES: Record<string, string> = {
   cmissile: 'Silo weapon — select the silo, right-click anywhere to launch',
   bbmissile: 'Silo weapon vs structures — select the silo, right-click to launch',
   chemissile: 'Silo weapon vs infantry — select the silo, right-click to launch',
-  silo: 'Builds missiles; select with an armed missile and right-click a target to launch',
+  silo: 'Builds missiles. Select it, then right-click an area (or right-drag a circle) to bombard it — it keeps building & firing until the zone is clear. Right-click the silo to stop.',
   radar: 'Detects incoming enemy units near your base (through fog) and sounds an alert. Needs power.',
   wall: 'Cheap, tough wall that blocks movement. Click-drag on the map to lay a whole line at once.',
   barrier: 'Tank barrier: blocks vehicles and infantry. Click-drag to place a line of them.',

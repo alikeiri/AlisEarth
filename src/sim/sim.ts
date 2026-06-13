@@ -40,6 +40,8 @@ export interface Entity {
   rpt: boolean; // repeat production: finished units re-queue themselves
   primary: boolean; // primary building of its type (new units train here)
   storedMissile?: string | null; // silo: armed missile type awaiting launch
+  lastMissile?: string; // silo: missile type to auto-rebuild for a strike order
+  strikeX?: number; strikeZ?: number; strikeR?: number; // silo: persistent strike zone
   burnT?: number; burnPs?: number; // building on fire: seconds left, damage/s
 }
 
@@ -268,16 +270,24 @@ export class Sim {
       return;
     }
     if (c.k === 'launch') {
-      // fire the silo's stored missile at any map position
+      // fire the silo's stored missile once at a point
       const b = this.ents.get(c.bid);
-      if (!b || !b.b || b.owner !== c.p || b.type !== 'silo' || !b.storedMissile) return;
-      if (b.progress < b.total) return;
-      const mdef = UNITS[b.storedMissile];
-      const tx = Math.max(0, Math.min(W - 0.01, c.x)), tz = Math.max(0, Math.min(H - 0.01, c.z));
-      const ft = Math.max(12, Math.round((Math.hypot(tx - b.x, tz - b.z) / (mdef.speed || 7)) * 10));
-      this.pendingBlasts.push({ t: this.tickN + ft, x: tx, z: tz, type: b.storedMissile, owner: c.p });
-      this.events.push({ e: 'silo', x: b.x, z: b.z, tx, tz, ft });
-      b.storedMissile = null;
+      if (!b || !b.b || b.owner !== c.p || b.type !== 'silo' || b.progress < b.total) return;
+      this.launchMissile(b, c.x, c.z);
+      return;
+    }
+    if (c.k === 'silostrike') {
+      // designate a persistent strike zone: the silo auto-builds and bombards
+      // the densest enemy cluster inside it until cleared or out of credits.
+      // r <= 0 cancels the standing order.
+      const b = this.ents.get(c.bid);
+      if (!b || !b.b || b.owner !== c.p || b.type !== 'silo') return;
+      if ((c.r || 0) <= 0) { b.strikeR = 0; return; }
+      b.strikeX = Math.max(0, Math.min(W - 0.01, c.x));
+      b.strikeZ = Math.max(0, Math.min(H - 0.01, c.z));
+      b.strikeR = Math.min(20, c.r);
+      // fire immediately if armed, so the first missile flies now
+      this.siloAutoStrike(b);
       return;
     }
     if (c.k === 'aattack') {
@@ -661,8 +671,12 @@ export class Sim {
   private dealDamage(att: Entity, tgt: Entity, base: number) {
     let mul = dmgMul(att.type, tgt.b, tgt.b ? 'b' : UNITS[tgt.type].kind, tgt.b ? undefined : tgt.type);
     if (!tgt.b) {
-      if (tgt.fortT > 0) mul *= FORT_DEPLOY_VULN;       // exposed while digging in / packing up
-      else if (tgt.fortified) mul *= FORT_DEF_MUL;      // dug in behind sandbags: tough
+      if (tgt.fortT > 0) mul *= FORT_DEPLOY_VULN;        // exposed while digging in / packing up
+      else if (tgt.fortified) {
+        // sandbags stop bullets but not gas: chem/bio weapons devastate the
+        // dug-in instead of being soaked by the fortify armor
+        mul *= /^(chem|bio)/.test(att.type) ? 1.7 : FORT_DEF_MUL;
+      }
     }
     tgt.hp -= base * mul;
     // study material for the adaptive AI: what weapon classes the human leans
@@ -756,6 +770,7 @@ export class Sim {
       if (it.t <= 0 && UNITS[it.type].missile) {
         // missiles don't spawn — they arm the silo, ready to launch
         b.storedMissile = it.type;
+        b.lastMissile = it.type;
         b.queue.shift();
         this.events.push({ e: 'ready', p: b.owner });
       } else if (it.t <= 0) {
@@ -798,6 +813,10 @@ export class Sim {
       const tgt = this.findEnemy(b, def.attack.range + 0.8 * (b.lvl - 1), b.type === 'turret');
       if (tgt) this.fire(b, tgt, def.attack.dmg * (1 + 0.25 * (b.lvl - 1)), def.attack.rof / pl.pf);
     }
+
+    // missile silo with a standing strike order: bombard the zone (throttled)
+    if (b.type === 'silo' && b.strikeR && b.strikeR > 0 && this.tickN % 3 === b.id % 3)
+      this.siloAutoStrike(b);
   }
 
   // ---------- units ----------
@@ -1105,6 +1124,52 @@ export class Sim {
     } else if (ord.k === 'harvest') {
       this.tickHarvest(u, ord, def);
     }
+  }
+
+  // fire the silo's stored missile at a point (consumes the warhead)
+  private launchMissile(b: Entity, x: number, z: number) {
+    if (!b.storedMissile) return false;
+    const mdef = UNITS[b.storedMissile];
+    const tx = Math.max(0, Math.min(W - 0.01, x)), tz = Math.max(0, Math.min(H - 0.01, z));
+    const ft = Math.max(12, Math.round((Math.hypot(tx - b.x, tz - b.z) / (mdef.speed || 7)) * 10));
+    this.pendingBlasts.push({ t: this.tickN + ft, x: tx, z: tz, type: b.storedMissile, owner: b.owner });
+    this.events.push({ e: 'silo', x: b.x, z: b.z, tx, tz, ft });
+    b.lastMissile = b.storedMissile;
+    b.storedMissile = null;
+    return true;
+  }
+
+  // strike-zone autopilot: bombard the densest enemy cluster in the zone, auto-
+  // rebuild between shots, and stand down once the zone is clear of enemies
+  private siloAutoStrike(b: Entity) {
+    if (!b.strikeR || b.strikeR <= 0 || b.progress < b.total) return;
+    const pl = this.players[b.owner];
+    const R = b.strikeR, R2 = R * R;
+    // find the enemy in the zone with the most neighbors inside one blast radius
+    let target: Entity | null = null, best = -1;
+    const inZone: Entity[] = [];
+    for (const e of this.ents.values()) {
+      if (e.owner === b.owner || e.hp <= 0 || !this.players[e.owner].alive) continue;
+      const dx = e.x - b.strikeX!, dz = e.z - b.strikeZ!;
+      if (dx * dx + dz * dz <= R2) inZone.push(e);
+    }
+    if (!inZone.length) { b.strikeR = 0; return; } // zone cleared — order complete
+    for (const e of inZone) {
+      let n = 0;
+      for (const o of inZone) if ((o.x - e.x) ** 2 + (o.z - e.z) ** 2 <= 9) n++;
+      if (e.b) n += 1; // bias slightly toward structures
+      if (n > best) { best = n; target = e; }
+    }
+    // keep a missile cooking for the next salvo
+    if (!b.storedMissile && !b.queue.length) {
+      const type = b.lastMissile || 'cmissile';
+      const def = UNITS[type];
+      if (def && (!def.tech || pl.tech[def.tech])) {
+        const cost = Math.round(def.cost * pl.fac.costMul * pl.bonusCost);
+        if (pl.credits >= cost) { pl.credits -= cost; b.queue.push({ type, t: def.buildTime, t0: def.buildTime }); }
+      }
+    }
+    if (b.storedMissile && target) this.launchMissile(b, target.x, target.z);
   }
 
   // missile impact: area damage with falloff; the warhead type drives dmgMul
@@ -1438,6 +1503,7 @@ export class Sim {
         if (e.primary) v.pm = 1;
         if (e.research) { v.rs = e.research.tech; v.rsf = 1 - e.research.t / e.research.t0; }
         if (e.storedMissile) v.ms = e.storedMissile;
+        if (e.strikeR && e.strikeR > 0) { v.kx = e.strikeX; v.kz = e.strikeZ; v.kr = e.strikeR; }
         if (e.burnT && e.burnT > 0) v.bn = 1;
       } else {
         if (e.stance) v.st = e.stance;
