@@ -1630,7 +1630,11 @@ export class Renderer {
           this.scene.add(rec.g);
           this.buildings.set(v.i, rec);
         }
-        const y = this.map.heightAt(v.x, v.z);
+        // the shipyard straddles the coast — float it at the water surface so it
+        // sits on the water (on stilts), not sunk to the ocean floor
+        const y = v.t === 'shipyard'
+          ? Math.max(this.map.heightAt(v.x, v.z), SEA - 0.05)
+          : this.map.heightAt(v.x, v.z);
         rec.g.position.set(v.x, y, v.z);
         const sc = 0.15 + 0.85 * Math.min(1, v.pr);
         const lvS = 1 + 0.06 * ((v.lv || 1) - 1); // upgraded buildings grow slightly

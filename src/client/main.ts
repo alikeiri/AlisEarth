@@ -1538,18 +1538,24 @@ class GameClient {
       ? { x0: this.mouse.downX, y0: this.mouse.downY, x1: this.mouse.x, y1: this.mouse.y }
       : null;
 
-    // hovering an enemy with combat units selected → attack indicator
-    let hover: { x: number; y: number } | null = null;
+    // hovering an enemy with combat units selected → attack indicator. Persist
+    // the last result between the throttled recomputes, but CLEAR it the moment
+    // hovering no longer applies (no selection, dragging, placing) — otherwise a
+    // stale value flickered the reticle/cursor every other frame.
     const canvas3 = document.getElementById('three') as HTMLCanvasElement;
-    if (!this.ui.placing && !this.patrolMode && !this.mouse.dragging && !this.mouse.rDragging
-      && this.myUnitIds().length && this.frame % 2 === 0) {
+    const canHover = !this.ui.placing && !this.patrolMode && !this.mouse.dragging
+      && !this.mouse.rDragging && this.myUnitIds().length > 0;
+    let hover = this.lastHover;
+    if (!canHover) { hover = null; this.lastHover = null; }
+    else if (this.frame % 2 === 0) {
+      hover = null;
       const enemy = this.pickView(this.mouse.x, this.mouse.y, v => !this.allies.has(v.o));
       if (enemy) {
         const p = this.renderer.project(enemy.x, enemy.z, enemy.b ? 1 : 0.5);
         if (p.ok) hover = { x: p.x, y: p.y };
       }
       this.lastHover = hover;
-    } else if (this.frame % 2 === 1) hover = this.lastHover;
+    }
     // a selected missile silo turns the whole map into a strike-target reticle
     const siloAiming = this.selection.size === 1 && this.byId.get([...this.selection][0])?.t === 'silo'
       && this.byId.get([...this.selection][0])?.o === this.game.me;
