@@ -781,6 +781,11 @@ export class Sim {
     // target (harvester, power plant), and among equals the nearest wins. So a
     // unit clears the turret/tank threatening it before pecking at a refinery.
     let best: Entity | null = null, bestScore = -1e9;
+    const attDef = UNITS[e.type];
+    // a submarine torpedoes only ships and cruise-missiles only buildings — it
+    // never engages land units or aircraft, and reaches buildings from afar
+    const subAtt = !e.b && !!attDef?.cloak && attDef?.move === 'sea';
+    const siege = subAtt && attDef?.siegeRange ? Math.max(range, attDef.siegeRange) : range;
     const consider = (u: Entity, d: number) => {
       const dangerous = (u.b ? (BUILDINGS[u.type]?.attack?.dmg || 0) : (UNITS[u.type]?.dmg || 0)) > 0;
       const score = (dangerous ? 1000 : 0) - d; // dangerous first, then closest
@@ -791,6 +796,7 @@ export class Sim {
       const d = this.distToEnt(e.x, e.z, u);
       const tdef = UNITS[u.type];
       if (tdef?.mine) continue;                     // buried proximity mines aren't visible targets
+      if (subAtt && tdef?.kind !== 'sea') continue; // subs only torpedo other ships
       if (tdef?.cloak) {
         if (tdef.move === 'sea') {
           // submarine: only a sonar ship (Destroyer / Sub Hunter) holds the
@@ -809,7 +815,7 @@ export class Sim {
       if (!u.b || !this.foe(u.owner, e.owner) || u.hp <= 0 || !this.players[u.owner].alive) continue;
       if (u.type === 'wall' || u.type === 'barrier') continue;
       const d = this.distToEnt(e.x, e.z, u);
-      if (d <= range) consider(u, d);
+      if (d <= siege) consider(u, d); // subs reach buildings at cruise-missile range
     }
     return best;
   }
@@ -819,6 +825,9 @@ export class Sim {
     // submarines are immune to everything but dedicated anti-submarine warfare:
     // only a sonar-equipped ship (Destroyer / Sub Hunter) can actually hurt one
     if (!tgt.b && UNITS[tgt.type]?.cloak && UNITS[tgt.type]?.move === 'sea' && !UNITS[att.type]?.sonar) return;
+    // ...and a submarine itself only hits ships (torpedoes) and buildings (cruise
+    // missiles) — never land units or aircraft
+    if (UNITS[att.type]?.cloak && UNITS[att.type]?.move === 'sea' && !tgt.b && UNITS[tgt.type]?.kind !== 'sea') return;
     let mul = dmgMul(att.type, tgt.b, tgt.b ? 'b' : UNITS[tgt.type].kind, tgt.b ? undefined : tgt.type);
     if (!tgt.b) {
       if (tgt.fortT > 0) mul *= FORT_DEPLOY_VULN;        // exposed while digging in / packing up
@@ -867,7 +876,7 @@ export class Sim {
     // weapon class: 0 mg, 1 rocket, 2 cannon, 3 drone zap, 4 missile salvo
     const tgtInf = !tgt.b && UNITS[tgt.type]?.kind === 'inf';
     const w = att.type === 'rifle' || att.type === 'ifv' ? 0
-      : att.type === 'sub' ? 7                                               // submarine torpedo
+      : att.type === 'sub' ? (tgt.b ? 8 : 7)                                 // sub: cruise missile vs buildings, torpedo vs ships
       : att.type === 'flak' ? 5                                              // pom-pom flak
       : att.type === 'rocket' || att.type === 'sam' || att.type === 'aatank' ? 1
       : att.type === 'mlrs' || att.type === 'msldrone' ? 4
@@ -1336,7 +1345,9 @@ export class Sim {
         this.stepPath(u, speed, 1);
         return;
       }
-      if (d <= def.range) {
+      // subs (and any siege unit) reach buildings at their longer cruise range
+      const atkRange = (tgt.b && def.siegeRange) ? def.siegeRange : def.range;
+      if (d <= atkRange) {
         u.path = null;
         if (def.payload && u.ammo <= 0) { u.orders.unshift({ k: 'rtb' }); return; }
         if (this.fire(u, tgt, def.dmg, def.rof) && def.payload) {

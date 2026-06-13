@@ -44,6 +44,7 @@ export interface UnitDef {
   mine?: boolean;                                // proximity mine: detonates when an enemy comes close
   trigger?: number;                              // mine trigger radius (cells)
   sonar?: number;                                // reveals cloaked enemies (subs) within this radius
+  siegeRange?: number;                           // longer reach against BUILDINGS only (sub cruise missiles)
 }
 
 export const UNITS: Record<string, UnitDef> = {
@@ -78,8 +79,10 @@ export const UNITS: Record<string, UnitDef> = {
   // out-sticks it; depth charges barely scratch a sub. Bring a Sub Hunter.
   destroyer: { name: 'Destroyer',   cost: 1500, hp: 550, speed: 2.2, range: 9.0, dmg: 45, rof: 2.2, builtAt: 'shipyard', buildTime: 16, kind: 'sea', move: 'sea', sonar: 5.5 },
   // stays submerged and unseen until a sonar ship pings it or you get very
-  // close — then it's a glass dagger: one devastating torpedo, thin hull
-  sub:       { name: 'Submarine',   cost: 1400, hp: 300, speed: 2.0, range: 6.5, dmg: 115, rof: 3.0, builtAt: 'shipyard', buildTime: 15, kind: 'sea', move: 'sea', cloak: true },
+  // close — then it's a glass dagger: one devastating torpedo, thin hull.
+  // torpedoes ships at range 6.5; lobs cruise missiles at shore BUILDINGS from
+  // a standoff 13 (it cannot attack land units at all)
+  sub:       { name: 'Submarine',   cost: 1400, hp: 300, speed: 2.0, range: 6.5, dmg: 115, rof: 3.0, builtAt: 'shipyard', buildTime: 15, kind: 'sea', move: 'sea', cloak: true, siegeRange: 13 },
   // fast, sturdy sub-killer: long sonar sweep + heavy depth charges; the only
   // hard counter to submarines, but weak at everything else
   subhunter: { name: 'Sub Hunter',  cost: 800,  hp: 360, speed: 3.6, range: 5.0, dmg: 26, rof: 1.0, builtAt: 'shipyard', buildTime: 9,  kind: 'sea', move: 'sea', sonar: 11 },

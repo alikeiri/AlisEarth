@@ -1621,6 +1621,16 @@ export class Renderer {
             });
           }
           this.spawnParts(ev.x, y1 + 0.3, ev.z, 3, false); // launch flash
+        } else if (ev.w === 8) {
+          // submarine cruise missile: a lofted missile arcing onto a shore target
+          const dist = Math.hypot(ev.tx - ev.x, ev.tz - ev.z);
+          const y1s = Math.max(this.map.heightAt(ev.x, ev.z), SEA) + 0.6;
+          const y2s = Math.max(this.map.heightAt(ev.tx, ev.tz), SEA) + 0.2;
+          if (this.rockets.length < 64) this.rockets.push({
+            x0: ev.x, y0: y1s, z0: ev.z, x1: ev.tx, y1: y2s, z1: ev.tz,
+            t: 0, delay: 0, dur: Math.max(0.7, dist * 0.05), arc: 3 + dist * 0.2,
+          });
+          this.spawnParts(ev.x, y1s, ev.z, 5, true); // surface launch plume
         } else if (ev.w === 7) {
           // submarine torpedo: a low projectile skimming the surface with a wake
           const wy = SEA + 0.12;
