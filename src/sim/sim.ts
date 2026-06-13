@@ -483,7 +483,7 @@ export class Sim {
       const dozer = (c.ids || []).map((i: number) => this.ents.get(i))
         .find((u: Entity | undefined): u is Entity => !!u && !u.b && u.owner === c.p && UNITS[u.type]?.terra);
       if (!dozer || !Array.isArray(c.path) || !c.path.length) return;
-      dozer.terraPath = c.path.slice(0, 400).map((p: any) => ({ x: Math.floor(p.x), z: Math.floor(p.z) }));
+      dozer.terraPath = c.path.slice(0, 2500).map((p: any) => ({ x: Math.floor(p.x), z: Math.floor(p.z) }));
       dozer.terraI = 0;
       dozer.terraH = Math.max(-1.0, Math.min(8, c.h ?? (SEA + 1.5)));
       dozer.orders = []; dozer.path = null;
@@ -967,21 +967,30 @@ export class Sim {
       if (u.ephLife >= def.ephemeral) { u.hp = 0; return; }
     }
 
-    // bulldozer terraform job: roll to each cell on the drawn path and reshape
-    // it toward the target height — costs credits and takes time per cell
-    if (def.terra && u.terraPath && (u.terraI ?? 0) < u.terraPath.length) {
+    // bulldozer terraform job: crawl toward the nearest cell still off-target and
+    // reshape a brush of cells around it toward the target height. The dozer is a
+    // crawler (drives over anything) so it can never strand itself; the job costs
+    // credits per cell and finishes when every cell reaches the target.
+    if (def.terra && u.terraPath && u.terraPath.length) {
       const pl = this.players[u.owner];
-      const cell = u.terraPath[u.terraI!];
-      const tx = cell.x + 0.5, tz = cell.z + 0.5;
-      const d = Math.hypot(u.x - tx, u.z - tz);
-      if (d > 1.6) { this.moveToward(u, tx, tz, def); return; } // drive up to the cell
-      if (this.tickN % 2 === 0) {
-        const TERRA_COST = 4; // credits per reshape pulse
-        if (pl.credits < TERRA_COST) return; // broke — stall the job
-        pl.credits -= TERRA_COST;
-        const settled = this.map.terraform(cell.x, cell.z, u.terraH!, 0.22);
-        this.events.push({ e: 'terra', x: tx, z: tz });
-        if (settled) u.terraI!++;
+      const target = u.terraH!;
+      const settled = (c: { x: number; z: number }) => Math.abs(this.map.cellH(c.x, c.z) - target) < 0.2;
+      let near: { x: number; z: number } | null = null, nd = 1e9;
+      for (const c of u.terraPath) {
+        if (settled(c)) continue;
+        const dd = (u.x - (c.x + 0.5)) ** 2 + (u.z - (c.z + 0.5)) ** 2;
+        if (dd < nd) { nd = dd; near = c; }
+      }
+      if (!near) { u.terraPath = undefined; this.events.push({ e: 'done', x: u.x, z: u.z }); return; }
+      if (nd > 4) this.moveToward(u, near.x + 0.5, near.z + 0.5, def); // crawl to the work
+      if (this.tickN % 2 === 0 && pl.credits >= 1) {
+        for (const c of u.terraPath) {                       // reshape a 5x5-ish brush
+          if ((u.x - (c.x + 0.5)) ** 2 + (u.z - (c.z + 0.5)) ** 2 > 7 || settled(c)) continue;
+          if (pl.credits < 1) break;
+          pl.credits -= 1;                                   // cost per cell pulse
+          this.map.terraform(c.x, c.z, target, 0.25);
+          this.events.push({ e: 'terra', x: c.x + 0.5, z: c.z + 0.5 });
+        }
       }
       return;
     }
@@ -1035,13 +1044,14 @@ export class Sim {
         u.stuckT = 0;
         u.path = null; // force a replan
         const a0 = this.rng.int(8);
-        const sea = def.move === 'sea', amphi = !!def.amphibious;
+        const sea = def.move === 'sea', crawl = !!def.terra, amphi = !!def.amphibious;
         for (let k = 0; k < 8; k++) {
           const a = ((a0 + k) & 7) * 0.7854;
           const nx = u.x + Math.cos(a) * 0.7, nz = u.z + Math.sin(a) * 0.7;
-          const okC = amphi ? this.map.passableAmphi(Math.floor(nx), Math.floor(nz))
-            : sea ? this.map.passableSea(Math.floor(nx), Math.floor(nz))
-              : this.map.passable(Math.floor(nx), Math.floor(nz));
+          const okC = crawl ? this.map.passableCrawler(Math.floor(nx), Math.floor(nz))
+            : amphi ? this.map.passableAmphi(Math.floor(nx), Math.floor(nz))
+              : sea ? this.map.passableSea(Math.floor(nx), Math.floor(nz))
+                : this.map.passable(Math.floor(nx), Math.floor(nz));
           if (okC) { u.x = nx; u.z = nz; break; }
         }
       }
@@ -1507,19 +1517,20 @@ export class Sim {
       return this.stepPath(u, speed, 1);
     }
     const sea = def.move === 'sea';
-    const amphi = !!def.amphibious;
+    const crawl = !!def.terra;          // bulldozer: drives over anything
+    const amphi = !!def.amphibious && !crawl;
     if (!u.path || u.pi >= u.path.length) {
       const end = u.path?.[u.path.length - 1];
       if (!end || (end.x - x) ** 2 + (end.z - z) ** 2 > 1) {
-        u.path = findPath(this.map, u.x, u.z, x, z, 9000, sea, amphi);
+        u.path = findPath(this.map, u.x, u.z, x, z, 9000, sea, amphi, crawl);
         u.pi = 0;
         if (!u.path) return true; // unreachable — give up
       } else if (u.pi >= u.path.length) return true;
     }
-    return this.stepPath(u, speed, amphi ? 3 : sea ? 2 : 0);
+    return this.stepPath(u, speed, crawl ? 4 : amphi ? 3 : sea ? 2 : 0);
   }
 
-  // mode: 0 ground, 1 air, 2 sea, 3 amphibious (land + water)
+  // mode: 0 ground, 1 air, 2 sea, 3 amphibious (land + water), 4 crawler (anywhere)
   private stepPath(u: Entity, speed: number, mode = 0): boolean {
     if (!u.path || u.pi >= u.path.length) return true;
     const wp = u.path[u.pi];
@@ -1538,11 +1549,13 @@ export class Sim {
       u.x = Math.max(0.5, Math.min(W - 0.5, nx));
       u.z = Math.max(0.5, Math.min(H - 0.5, nz));
     } else {
-      const okCell = mode === 3
-        ? this.map.passableAmphi(Math.floor(nx), Math.floor(nz))
-        : mode === 2
-          ? this.map.passableSea(Math.floor(nx), Math.floor(nz))
-          : this.map.passable(Math.floor(nx), Math.floor(nz));
+      const okCell = mode === 4
+        ? this.map.passableCrawler(Math.floor(nx), Math.floor(nz))
+        : mode === 3
+          ? this.map.passableAmphi(Math.floor(nx), Math.floor(nz))
+          : mode === 2
+            ? this.map.passableSea(Math.floor(nx), Math.floor(nz))
+            : this.map.passable(Math.floor(nx), Math.floor(nz));
       if (okCell) { u.x = nx; u.z = nz; }
       else { u.path = null; } // blocked — replan next tick
     }

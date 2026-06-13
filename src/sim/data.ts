@@ -60,7 +60,7 @@ export const UNITS: Record<string, UnitDef> = {
   // construction yard (enables building structures around the new spot)
   mcv:    { name: 'Construction Vehicle', cost: 2500, hp: 500, speed: 1.1, range: 0, dmg: 0, rof: 1, builtAt: 'factory', altBuiltAt: 'shipyard', buildTime: 20, kind: 'veh', deploys: 'conyard', amphibious: true },
   // Bulldozer: slow, defenceless terraformer — reshapes the ground along a drawn path
-  dozer:  { name: 'Bulldozer',    cost: 1400, hp: 420, speed: 1.3, range: 0,   dmg: 0,  rof: 1,   builtAt: 'factory',  buildTime: 12, kind: 'veh', terra: true },
+  dozer:  { name: 'Bulldozer',    cost: 1400, hp: 420, speed: 1.3, range: 0,   dmg: 0,  rof: 1,   builtAt: 'factory',  buildTime: 12, kind: 'veh', terra: true, amphibious: true },
   hive:    { name: 'Drone Hive',  cost: 1500, hp: 900, speed: 1.1, range: 13,  dmg: 0,  rof: 1,   builtAt: 'barracks', buildTime: 16, kind: 'inf', fortify: true, emits: 'minidrone' },
   minidrone: { name: 'Mini Drone', cost: 0,   hp: 40,  speed: 4.2, range: 4.0, dmg: 200, rof: 1, builtAt: '',         buildTime: 0,  kind: 'air', fly: true, alt: 1.6, ephemeral: 26, internal: true, kamikaze: true },
   // naval (Ship Factory, water only)

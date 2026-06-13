@@ -48,13 +48,15 @@ function heapPop(): number {
 }
 
 export function findPath(
-  m: GameMap, sx: number, sz: number, tx: number, tz: number, maxExpand = 9000, sea = false, amphi = false
+  m: GameMap, sx: number, sz: number, tx: number, tz: number, maxExpand = 9000, sea = false, amphi = false, crawl = false
 ): { x: number; z: number }[] | null {
-  const ok = amphi
-    ? (cx: number, cz: number) => m.passableAmphi(cx, cz)
-    : sea
-      ? (cx: number, cz: number) => m.passableSea(cx, cz)
-      : (cx: number, cz: number) => m.passable(cx, cz);
+  const ok = crawl
+    ? (cx: number, cz: number) => m.passableCrawler(cx, cz)
+    : amphi
+      ? (cx: number, cz: number) => m.passableAmphi(cx, cz)
+      : sea
+        ? (cx: number, cz: number) => m.passableSea(cx, cz)
+        : (cx: number, cz: number) => m.passable(cx, cz);
   const lineClear = (x0: number, z0: number, x1: number, z1: number): boolean => {
     const d = Math.sqrt((x1 - x0) ** 2 + (z1 - z0) ** 2);
     const steps = Math.max(1, Math.ceil(d / 0.3));

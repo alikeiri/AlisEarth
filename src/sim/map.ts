@@ -63,6 +63,11 @@ export class GameMap {
     const i = cz * W + cx;
     return this.tBlocked[i] === 0 || this.water[i] === 1;
   }
+  // crawler (bulldozer): drives over ANY terrain — cliffs, water, freshly-dug
+  // holes — only stopped by buildings, so a terraformer can never strand itself
+  passableCrawler(cx: number, cz: number): boolean {
+    return this.inB(cx, cz) && this.occ[cz * W + cx] === 0;
+  }
   heightAt(x: number, z: number): number {
     const cx = Math.min(W - 0.001, Math.max(0, x)), cz = Math.min(H - 0.001, Math.max(0, z));
     const xi = Math.floor(cx), zi = Math.floor(cz);
@@ -334,23 +339,25 @@ export function genMap(seed: number, nPlayers: number): GameMap {
   }
   for (let p = 0; p < need; p++) m.spawns.push({ ...starts[p] });
 
-  // -- spawn plateaus (guaranteed buildable land)
+  // -- spawn plateaus (guaranteed buildable land). A flat core with a GENTLE
+  // coastal skirt out to the edge, so the shore slopes softly into the water
+  // (buildable beach, no cliff ring that blocks construction / shipyards).
   const raisePad = (s: { x: number; z: number }, R: number) => {
-    const target = Math.max(SEA + 1.0, m.heightAt(s.x, s.z));
+    const target = Math.max(SEA + 0.9, m.heightAt(s.x, s.z));
     for (let z = s.z - R; z <= s.z + R; z++) {
       for (let x = s.x - R; x <= s.x + R; x++) {
         if (x < 0 || z < 0 || x > W || z > H) continue;
         const d = Math.sqrt((x - s.x) * (x - s.x) + (z - s.z) * (z - s.z));
         if (d > R) continue;
-        const t = Math.min(1, (1 - d / R) * 2.2);
+        const u = d / R;
+        const t = u < 0.55 ? 1 : smoothstep(1.0, 0.55, u); // flat inside, smooth skirt
         const i = z * (W + 1) + x;
-        // flatten toward the target (target >= SEA+1, so this never digs sea)
         m.hN[i] = m.hN[i] + (target - m.hN[i]) * t;
       }
     }
     recomputeBlocked(s.x - R - 1, s.z - R - 1, s.x + R + 2, s.z + R + 2);
   };
-  for (const s of starts) raisePad(s, 9);
+  for (const s of starts) raisePad(s, 12);
 
   // -- contiguous-land guarantee: every start needs room for a real base.
   // Flood-fill the buildable area around each spawn; widen the plateau until
@@ -360,11 +367,11 @@ export function genMap(seed: number, nPlayers: number): GameMap {
     const q = [s.z * W + s.x];
     seen.add(q[0]);
     let count = 0;
-    while (q.length && count < 1000) {
+    while (q.length && count < 1400) {
       const i = q.pop()!;
       const cx = i % W, cz = (i / W) | 0;
       if (m.tBlocked[i]) continue;
-      if (Math.abs(cx - s.x) > 18 || Math.abs(cz - s.z) > 18) continue;
+      if (Math.abs(cx - s.x) > 22 || Math.abs(cz - s.z) > 22) continue;
       count++;
       for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
         const nx = cx + dx, nz = cz + dz;
@@ -376,8 +383,8 @@ export function genMap(seed: number, nPlayers: number): GameMap {
     return count;
   };
   for (const s of m.spawns) {
-    for (const R of [11, 13, 15, 17]) {
-      if (floodArea(s) >= 300) break;
+    for (const R of [14, 16, 18, 20, 22]) {
+      if (floodArea(s) >= 420) break;
       raisePad(s, R);
     }
   }

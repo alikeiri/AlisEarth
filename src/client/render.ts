@@ -748,6 +748,7 @@ export class Renderer {
   private smokeMesh!: THREE.InstancedMesh;
   private smokeParts: FxPart[] = [];
   private terrain: THREE.Mesh;
+  private terraPrev!: THREE.Mesh;
   private waterMat: THREE.MeshPhongMaterial;
   private rallyFlag!: THREE.Group;
   private rallyPennant!: THREE.Mesh;
@@ -857,6 +858,14 @@ export class Renderer {
     water.rotation.x = -Math.PI / 2;
     water.position.set(W / 2, SEA, H / 2);
     this.scene.add(water);
+
+    // translucent box that previews a pending terraform area + its target height
+    this.terraPrev = new THREE.Mesh(
+      new THREE.BoxGeometry(1, 1, 1),
+      new THREE.MeshBasicMaterial({ color: 0x57d977, transparent: true, opacity: 0.34, depthWrite: false }),
+    );
+    this.terraPrev.visible = false;
+    this.scene.add(this.terraPrev);
 
     // ore
     const oreGeo = new THREE.OctahedronGeometry(0.34);
@@ -1096,6 +1105,19 @@ export class Renderer {
     const mesh = new THREE.Mesh(geo, mat);
     mesh.receiveShadow = true;
     return mesh;
+  }
+
+  // show/hide the terraform preview box over a rectangle, filling from the area's
+  // base level up (or down) to the chosen target height
+  setTerraPreview(r: { x0: number; z0: number; x1: number; z1: number; h: number; base: number } | null) {
+    if (!r) { this.terraPrev.visible = false; return; }
+    const minX = Math.min(r.x0, r.x1), maxX = Math.max(r.x0, r.x1);
+    const minZ = Math.min(r.z0, r.z1), maxZ = Math.max(r.z0, r.z1);
+    const lo = Math.min(r.base, r.h), hi = Math.max(r.base, r.h);
+    this.terraPrev.position.set((minX + maxX) / 2, (lo + hi) / 2, (minZ + maxZ) / 2);
+    this.terraPrev.scale.set(Math.max(1, maxX - minX), Math.max(0.3, hi - lo), Math.max(1, maxZ - minZ));
+    (this.terraPrev.material as THREE.MeshBasicMaterial).color.setHex(r.h >= r.base ? 0x57d977 : 0x3da5ff);
+    this.terraPrev.visible = true;
   }
 
   // re-read the heightfield into the terrain mesh after terraforming edits it

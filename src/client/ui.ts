@@ -317,7 +317,7 @@ export class UI {
         if (units.some(u => u.t === 'engineer')) parts.push(kbd('RMB', 'repair') + ' · ' + kbd('B', 'build road'));
         if (units.some(u => u.t === 'hive')) parts.push(kbd('F', 'fortify / deploy'));
         if (units.some(u => u.t === 'mcv')) parts.push(kbd('F', 'deploy forward base'));
-        if (units.some(u => u.t === 'dozer')) parts.push(kbd('T', 'terraform (drag a path; T cycles raise/lower/water)'));
+        if (units.some(u => u.t === 'dozer')) parts.push(kbd('T', 'terraform (drag an area, then mouse up/down sets height, click to build)'));
         parts.push(kbd('P', 'patrol'));
         const holding = units.some(u => u.st);
         parts.push(kbd('G', holding ? 'hold: ON' : 'hold position'));

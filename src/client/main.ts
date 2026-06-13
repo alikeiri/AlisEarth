@@ -369,9 +369,14 @@ class GameClient {
   private areaDrag: { cx: number; cz: number; r: number } | null = null;
   private patrolMode = false;
   private patrolDraw: { x: number; z: number }[] | null = null;
-  // bulldozer terraforming: draw a path, reshape the ground toward a target height
-  private terraMode = false;
-  private terraTarget: 'raise' | 'lower' | 'water' = 'raise';
+  // bulldozer terraforming: draw a rectangle area, then move the mouse up/down to
+  // set the target height and click to lock it in. '' off, 'draw' picking the
+  // area, 'height' adjusting the level.
+  private terraMode: '' | 'draw' | 'height' = '';
+  private terraRect: { x0: number; z0: number; x1: number; z1: number } | null = null;
+  private terraBaseH = 0;   // ground height of the drawn area (anchor)
+  private terraTargetH = 0; // chosen target height
+  private terraAnchorY = 0; // mouse Y when height-picking began
   // drag-line placement for walls/barriers
   private lineStart: { cx: number; cz: number } | null = null;
   private lineCells: { cx: number; cz: number; ok: boolean }[] = [];
@@ -482,7 +487,7 @@ class GameClient {
       if (e.code === 'Escape') {
         this.ui.setPlacing(null); this.selection.clear();
         this.patrolMode = false; this.patrolDraw = null;
-        this.terraMode = false;
+        this.terraMode = ''; this.terraRect = null; this.renderer.setTerraPreview(null);
         this.renderer.setFormationPath(null);
       }
       if (e.code === 'KeyH') this.issueToUnits({ k: 'stop' });
@@ -524,12 +529,13 @@ class GameClient {
         this.patrolDraw = null;
         audio.play('click');
       }
-      // T: with a bulldozer selected, enter terraform-draw mode and cycle the
-      // target height (raise land / lower land / dig to water) on repeat presses
+      // T: with a bulldozer selected, start terraforming — drag a rectangle area,
+      // then move the mouse up/down to set the height and click to lock it in
       if (e.code === 'KeyT' && this.myUnitIds().some(id => UNITS[this.byId.get(id)?.t]?.terra)) {
-        if (!this.terraMode) { this.terraMode = true; this.terraTarget = 'raise'; }
-        else this.terraTarget = this.terraTarget === 'raise' ? 'lower' : this.terraTarget === 'lower' ? 'water' : 'raise';
+        this.terraMode = this.terraMode ? '' : 'draw';
+        this.terraRect = null;
         this.patrolMode = false; this.patrolDraw = null;
+        this.renderer.setTerraPreview(null);
         audio.play('click');
       }
       // G: toggle Hold Position stance for selected units
@@ -780,37 +786,36 @@ class GameClient {
     }
   }
 
-  // finish a bulldozer terraform draw: expand the drawn polyline into a strip of
-  // cells and send the job (with the chosen target height) to the sim
-  private finishTerra(sx: number, sy: number) {
-    const me = this.game.me;
-    this.mouse.dragging = false;
-    const pts = this.patrolDraw || [];
-    this.patrolDraw = null;
-    this.terraMode = false;
-    this.renderer.setFormationPath(null);
-    const g = this.renderer.groundPoint(sx / window.innerWidth, sy / window.innerHeight);
-    if (g && (!pts.length || Math.hypot(g.x - pts[pts.length - 1].x, g.z - pts[pts.length - 1].z) > 0.4)) pts.push(g);
-    if (!pts.length) return;
-    // rasterize the polyline into unique cells, widened to a 3-cell brush
-    const seen = new Set<number>(); const cells: { x: number; z: number }[] = [];
-    const addCell = (x: number, z: number) => {
-      const cx = Math.floor(x), cz = Math.floor(z); const k = cz * W + cx;
-      if (cx < 0 || cz < 0 || cx >= W || cz >= H || seen.has(k)) return;
-      seen.add(k); cells.push({ x: cx, z: cz });
-    };
-    for (let s = 0; s < pts.length; s++) {
-      const a = pts[s], b = pts[Math.min(s + 1, pts.length - 1)];
-      const steps = Math.max(1, Math.ceil(Math.hypot(b.x - a.x, b.z - a.z) * 2));
-      for (let t = 0; t <= steps; t++) {
-        const x = a.x + (b.x - a.x) * (t / steps), z = a.z + (b.z - a.z) * (t / steps);
-        for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) addCell(x + dx, z + dz);
-      }
-    }
-    const h = this.terraTarget === 'water' ? SEA - 0.9 : this.terraTarget === 'lower' ? SEA + 0.3 : SEA + 2.2;
+  // the terraform rectangle is drawn — anchor the height picker at the area's
+  // current average ground level and switch to the height-adjust phase
+  private beginTerraHeight() {
+    const r = this.terraRect!;
+    const x0 = Math.min(r.x0, r.x1), x1 = Math.max(r.x0, r.x1);
+    const z0 = Math.min(r.z0, r.z1), z1 = Math.max(r.z0, r.z1);
+    let sum = 0, n = 0;
+    for (let z = Math.floor(z0); z <= Math.floor(z1); z++)
+      for (let x = Math.floor(x0); x <= Math.floor(x1); x++) { sum += this.map.heightAt(x + 0.5, z + 0.5); n++; }
+    this.terraBaseH = n ? sum / n : SEA + 1;
+    this.terraTargetH = this.terraBaseH;
+    this.terraAnchorY = this.mouse.y;
+    this.terraMode = 'height';
+  }
+
+  // lock in the chosen height and dispatch the terraform job over every cell of
+  // the rectangle (raising a span across water builds a land bridge)
+  private commitTerra() {
+    const r = this.terraRect; const me = this.game.me;
+    this.terraMode = ''; this.terraRect = null;
+    this.renderer.setTerraPreview(null);
+    if (!r) return;
+    const x0 = Math.floor(Math.min(r.x0, r.x1)), x1 = Math.floor(Math.max(r.x0, r.x1));
+    const z0 = Math.floor(Math.min(r.z0, r.z1)), z1 = Math.floor(Math.max(r.z0, r.z1));
+    const cells: { x: number; z: number }[] = [];
+    for (let z = z0; z <= z1; z++) for (let x = x0; x <= x1; x++)
+      if (x >= 0 && z >= 0 && x < W && z < H) cells.push({ x, z });
     const dozers = this.myUnitIds().filter(id => UNITS[this.byId.get(id)?.t]?.terra);
     if (dozers.length && cells.length) {
-      this.game.issue({ k: 'terraform', p: me, ids: [dozers[0]], path: cells, h });
+      this.game.issue({ k: 'terraform', p: me, ids: [dozers[0]], path: cells, h: this.terraTargetH });
       audio.play('confirm');
     }
   }
@@ -1030,7 +1035,13 @@ class GameClient {
         }
         return;
       }
-      if (this.patrolMode || this.terraMode) {
+      if (this.terraMode === 'height') { this.commitTerra(); return; } // click locks the height
+      if (this.terraMode === 'draw') {
+        const g = this.renderer.groundPoint(e.clientX / window.innerWidth, e.clientY / window.innerHeight);
+        if (g) { this.terraRect = { x0: g.x, z0: g.z, x1: g.x, z1: g.z }; this.mouse.lDown = true; this.mouse.dragging = true; }
+        return;
+      }
+      if (this.patrolMode) {
         this.mouse.lDown = true;
         this.mouse.downX = e.clientX; this.mouse.downY = e.clientY;
         this.mouse.dragging = false;
@@ -1115,7 +1126,12 @@ class GameClient {
     if (this.lineStart) { this.mouse.dragging = false; this.commitLine(e.shiftKey); return; }
 
     if (this.patrolMode) { this.finishPatrol(e.clientX, e.clientY); return; }
-    if (this.terraMode) { this.finishTerra(e.clientX, e.clientY); return; }
+    // finished dragging the terraform rectangle → switch to height-picking
+    if (this.terraMode === 'draw' && this.terraRect) {
+      this.mouse.lDown = false; this.mouse.dragging = false;
+      this.beginTerraHeight();
+      return;
+    }
 
     if (this.mouse.dragging) {
       this.mouse.dragging = false;
@@ -1369,7 +1385,7 @@ class GameClient {
     if (this.keys.has('KeyE')) this.renderer.rotate(-1.6 * dt);
 
     // a selected building's stored patrol route shows as a standing yellow line
-    const drawingNow = ((this.patrolMode || this.terraMode) && this.patrolDraw && this.mouse.lDown) ||
+    const drawingNow = (this.patrolMode && this.patrolDraw && this.mouse.lDown) ||
       (this.mouse.rDragging && this.rMode === 'form');
     if (!drawingNow) {
       const pb = this.selectedProdBuilding();
@@ -1377,19 +1393,39 @@ class GameClient {
       else this.renderer.setFormationPath(null);
     }
 
-    // patrol route / terraform path drawing (P or T, then left-drag)
-    if ((this.patrolMode || this.terraMode) && this.patrolDraw && this.mouse.lDown && this.mouse.dragging) {
+    // patrol route drawing (P + left-drag)
+    if (this.patrolMode && this.patrolDraw && this.mouse.lDown && this.mouse.dragging) {
       const g = this.renderer.groundPoint(this.mouse.x / window.innerWidth, this.mouse.y / window.innerHeight);
       if (g) {
         const last = this.patrolDraw[this.patrolDraw.length - 1];
-        const minStep = this.terraMode ? 0.6 : 0.75;
-        if (!last || Math.hypot(g.x - last.x, g.z - last.z) >= minStep) {
-          if (this.patrolDraw.length < 200) this.patrolDraw.push(g);
+        if (!last || Math.hypot(g.x - last.x, g.z - last.z) >= 0.75) {
+          if (this.patrolDraw.length < 120) this.patrolDraw.push(g);
         }
       }
-      // terraform paths render in the target's colour (raise=green, lower=tan, water=blue)
-      const col = !this.terraMode ? 0xffd24a : this.terraTarget === 'water' ? 0x3da5ff : this.terraTarget === 'lower' ? 0xd2a86a : 0x57d977;
-      this.renderer.setFormationPath(this.patrolDraw, col);
+      this.renderer.setFormationPath(this.patrolDraw, 0xffd24a);
+    }
+
+    // --- terraform: rectangle draw, then mouse-up/down height pick ---
+    const terraHint = document.getElementById('terraHint');
+    if (this.terraMode === 'draw' && this.terraRect && this.mouse.lDown) {
+      const g = this.renderer.groundPoint(this.mouse.x / window.innerWidth, this.mouse.y / window.innerHeight);
+      if (g) { this.terraRect.x1 = g.x; this.terraRect.z1 = g.z; }
+      const r = this.terraRect;
+      this.renderer.setTerraPreview({ x0: r.x0, z0: r.z0, x1: r.x1, z1: r.z1, h: this.map.heightAt((r.x0 + r.x1) / 2, (r.z0 + r.z1) / 2), base: 0 });
+      if (terraHint) { terraHint.textContent = 'TERRAFORM — drag the area, release to set its height'; terraHint.classList.remove('hidden'); }
+    } else if (this.terraMode === 'height' && this.terraRect) {
+      // moving the mouse UP raises the target, DOWN lowers it
+      this.terraTargetH = Math.max(-1.2, Math.min(8, this.terraBaseH + (this.terraAnchorY - this.mouse.y) * 0.03));
+      const r = this.terraRect;
+      this.renderer.setTerraPreview({ x0: r.x0, z0: r.z0, x1: r.x1, z1: r.z1, h: this.terraTargetH, base: this.terraBaseH });
+      if (terraHint) {
+        const rel = (this.terraTargetH - this.terraBaseH).toFixed(1);
+        const tag = this.terraTargetH < SEA ? ' (underwater)' : '';
+        terraHint.textContent = `TERRAFORM height ${rel >= '0' ? '+' : ''}${rel}${tag} — move mouse up/down, click to build · Esc cancels`;
+        terraHint.classList.remove('hidden');
+      }
+    } else if (terraHint && !terraHint.classList.contains('hidden')) {
+      terraHint.classList.add('hidden');
     }
 
     // right-drag: grab-the-world pan, or formation line drawing
