@@ -13,6 +13,7 @@ interface AiMem {
   nextWave: number; waveSize: number; tog: number; defCd: number;
   peaceUntil: number; peaceBroken: boolean; nextRaid: number;
   landOk?: boolean; landCheckT?: number; // island detection (cached pathfind)
+  waterRel?: boolean; // navy worth building (island or water-heavy map)
   threatX?: number; threatZ?: number; threatN?: number; // where attacks come from
   hiveCd?: number; // pace hive production
   seenAir?: number; // decaying count of enemy air spotted (reactive AA)
@@ -128,6 +129,16 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
   const island = mem.landOk === false;
   if (island) refs = Math.min(refs, 2); // a small island can't feed 3+ refineries
 
+  // is a navy worth the investment? always on islands, and on any map with a
+  // sizable navigable sea (sampled once) — so the AI contests the water instead
+  // of ignoring it on mixed land/sea maps
+  if (mem.waterRel === undefined) {
+    let sea = 0, tot = 0;
+    for (let z = 2; z < H - 2; z += 4) for (let x = 2; x < W - 2; x += 4) { tot++; if (sim.map.passableSea(x, z)) sea++; }
+    mem.waterRel = tot > 0 && sea / tot >= 0.12;
+  }
+  const waterRel = island || !!mem.waterRel;
+
   // optional LLM strategist (Claude API, set by the host): a high-level stance
   // that bends the scripted knobs — the script stays the tactical layer
   const dirStance: string | null = sim.aiDirective?.stance || null;
@@ -211,6 +222,8 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
   else if (island && !nB('airforce') && nB('factory') && pl.credits > 2000) want = 'airforce';
   else if (island && nB('airforce') && nB('airfield') < 3 && pl.credits > 1100) want = 'airfield';
   else if (island && !nB('shipyard') && pl.credits > 2000) want = 'shipyard';
+  // contest the water on mixed maps too: a shipyard once the land economy stands
+  else if (!island && waterRel && !nB('shipyard') && nB('factory') && nB('refinery') >= 2 && pl.credits > 2600) want = 'shipyard';
   else if (!nB('dronefac') && nB('factory') && pl.credits > 2400) want = 'dronefac';
   else if (nB('sam') < sams && nB('factory') && pl.credits > (antiAir ? 1400 : 2200)) want = 'sam';
   else if (goAir && !nB('airforce') && nB('factory') && pl.credits > (dirAir || prefAir ? 2400 : 3000)) want = 'airforce';
@@ -334,13 +347,23 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
       : r < 0.4 ? 'fighter' : r < 0.7 ? 'heli' : 'helidrone';
     cmds.push({ k: 'train', p, bid: af.id, type: t });
   }
-  // island navy: gunboats and destroyers shell the enemy coast
+  // navy: a balanced fleet — gun destroyers to fight ships and shell the coast,
+  // a missile cruiser for bombardment, a flak cruiser if the enemy flies, a sub
+  // for ambushes, and a sub hunter once enemy subs are about
   const sy = (myB['shipyard'] || []).find(b => b.progress >= b.total && b.queue.length < 2);
-  if (sy && island) {
-    const seaN = nU('gunboat') + nU('destroyer') + nU('sub') + nU('navdrone');
-    if (seaN < 6 && pl.credits > (ecoShort ? 2600 : 1500)) {
-      const r = sim.rng.next();
-      cmds.push({ k: 'train', p, bid: sy.id, type: r < 0.5 ? 'gunboat' : r < 0.85 ? 'destroyer' : 'sub' });
+  if (sy && waterRel) {
+    const seaN = nU('gunboat') + nU('destroyer') + nU('sub') + nU('navdrone') + nU('mslcruiser') + nU('flakship') + nU('subhunter');
+    const fleetCap = island ? 6 : 4;
+    if (seaN < fleetCap && pl.credits > (ecoShort ? 2600 : 1500)) {
+      const enemySubs = countEnemyType(sim, p, 'sub');
+      let t: string;
+      if (enemySubs > 0 && nU('subhunter') < 2 && sim.rng.next() < 0.5) t = 'subhunter';
+      else if (antiAir && nU('flakship') < 2 && sim.rng.next() < 0.4) t = 'flakship'; // screen the fleet from air
+      else {
+        const r = sim.rng.next();
+        t = r < 0.4 ? 'destroyer' : r < 0.6 ? 'mslcruiser' : r < 0.78 ? 'gunboat' : r < 0.92 ? 'sub' : 'flakship';
+      }
+      cmds.push({ k: 'train', p, bid: sy.id, type: t });
     }
   }
 
@@ -453,6 +476,14 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
   }
 
   return cmds;
+}
+
+// how many enemy units of a given type are on the field (gates reactive builds)
+function countEnemyType(sim: Sim, p: number, type: string): number {
+  let n = 0;
+  for (const e of sim.ents.values())
+    if (!e.b && e.type === type && e.hp > 0 && sim.foe(e.owner, p) && sim.players[e.owner].alive) n++;
+  return n;
 }
 
 // does any foe field a finished missile silo? (gates the Iron Dome investment)

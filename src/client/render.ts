@@ -42,6 +42,9 @@ const MODEL_DEFS: Record<string, { file: string; size: number; axis: 'l' | 'h'; 
   navdrone:  { file: 'gunboat',   size: 1.20, axis: 'l', ry: 0 },
   destroyer: { file: 'destroyer', size: 2.70, axis: 'l', ry: 0 },
   sub:       { file: 'sub',       size: 2.30, axis: 'l', ry: 0, y: -0.15 },
+  subhunter: { file: 'gunboat',   size: 1.65, axis: 'l', ry: 0, tint: 0x5a6e7a }, // small gray sonar escort
+  mslcruiser:{ file: 'destroyer', size: 2.55, axis: 'l', ry: 0, tint: 0x6f7a58 }, // olive bombardment cruiser
+  flakship:  { file: 'destroyer', size: 2.35, axis: 'l', ry: 0, tint: 0x8a8f70 }, // pale AA cruiser
   // new units reuse existing models (themed by team tint / emissive)
   hive:        { file: 'engineer', size: 1.20, axis: 'l', ry: Math.PI },
   minidrone:   { file: 'drone',    size: 0.55, axis: 'l', ry: 0 },

@@ -43,6 +43,7 @@ export interface UnitDef {
   mines?: number;                                // how many mines this unit carries
   mine?: boolean;                                // proximity mine: detonates when an enemy comes close
   trigger?: number;                              // mine trigger radius (cells)
+  sonar?: number;                                // reveals cloaked enemies (subs) within this radius
 }
 
 export const UNITS: Record<string, UnitDef> = {
@@ -72,8 +73,18 @@ export const UNITS: Record<string, UnitDef> = {
   minidrone: { name: 'Mini Drone', cost: 0,   hp: 40,  speed: 4.2, range: 4.0, dmg: 200, rof: 1, builtAt: '',         buildTime: 0,  kind: 'air', fly: true, alt: 1.6, ephemeral: 26, internal: true, kamikaze: true },
   // naval (Ship Factory, water only)
   gunboat:   { name: 'Gunboat',     cost: 700,  hp: 300, speed: 2.8, range: 5.5, dmg: 22, rof: 1.2, builtAt: 'shipyard', buildTime: 10, kind: 'sea', move: 'sea' },
-  destroyer: { name: 'Destroyer',   cost: 1500, hp: 550, speed: 2.2, range: 7.0, dmg: 45, rof: 2.2, builtAt: 'shipyard', buildTime: 16, kind: 'sea', move: 'sea' },
-  sub:       { name: 'Submarine',   cost: 1400, hp: 320, speed: 2.0, range: 6.0, dmg: 70, rof: 3.0, builtAt: 'shipyard', buildTime: 15, kind: 'sea', move: 'sea' },
+  // armored gun ship: duels other warships, bombards the coast, and pings for
+  // subs with its sonar (depth charges shred anything it detects)
+  destroyer: { name: 'Destroyer',   cost: 1500, hp: 550, speed: 2.2, range: 7.0, dmg: 45, rof: 2.2, builtAt: 'shipyard', buildTime: 16, kind: 'sea', move: 'sea', sonar: 9 },
+  // stays submerged and unseen until a sonar ship pings it or you get very
+  // close — then it's a glass dagger: huge ambush torpedoes, thin hull
+  sub:       { name: 'Submarine',   cost: 1400, hp: 300, speed: 2.0, range: 6.5, dmg: 78, rof: 3.0, builtAt: 'shipyard', buildTime: 15, kind: 'sea', move: 'sea', cloak: true },
+  // fast cheap sub-killer: sonar sweep + depth charges, weak at everything else
+  subhunter: { name: 'Sub Hunter',  cost: 800,  hp: 240, speed: 3.6, range: 5.0, dmg: 26, rof: 1.0, builtAt: 'shipyard', buildTime: 9,  kind: 'sea', move: 'sea', sonar: 11 },
+  // long-range bombardment cruiser: flattens shore bases, but a fragile hull
+  mslcruiser:{ name: 'Missile Cruiser', cost: 1600, hp: 280, speed: 2.0, range: 11.0, dmg: 55, rof: 2.6, builtAt: 'shipyard', buildTime: 16, kind: 'sea', move: 'sea' },
+  // dedicated fleet air-defence: murders aircraft, useless against hulls
+  flakship:  { name: 'Flak Cruiser', cost: 1200, hp: 360, speed: 2.6, range: 8.0, dmg: 30, rof: 0.7, builtAt: 'shipyard', buildTime: 13, kind: 'sea', move: 'sea' },
   navdrone:  { name: 'Naval Drone', cost: 500,  hp: 90,  speed: 3.6, range: 4.0, dmg: 18, rof: 1.0, builtAt: 'shipyard', buildTime: 7,  kind: 'sea', move: 'sea' },
   // aircraft (Aircraft Plant; require Airfield capacity)
   // ---- tech-gated units (require a Research Lab + the named research) ----
@@ -224,9 +235,12 @@ export function dmgMul(attType: string, tgtIsBuilding: boolean, tgtKind: string,
     if (attType === 'flak') return tgtType && DRONE_TYPES.has(tgtType) ? 2.4 : 0.5; // drone shredder
     if (attType === 'rocket') return 1.8;
     // warships carry VLS air-defence containers now — destroyers shrug off air
+    if (attType === 'flakship') return 2.7;      // dedicated fleet AA
     if (attType === 'destroyer') return 2.1;
     if (attType === 'gunboat') return 1.4;
     if (attType === 'navdrone') return 1.1;
+    if (attType === 'subhunter') return 0.3;     // sub-killer, not an AA platform
+    if (attType === 'mslcruiser') return 0.4;
     if (attType === 'rifle') return 1.2;
     if (attType === 'ifv') return 0.8;           // autocannon can pepper aircraft
     if (attType === 'turret' || attType === 'cannon' || attType === 'tesla') return 0; // defensive guns can't elevate (AA = SAM / Patriot)
@@ -237,9 +251,13 @@ export function dmgMul(attType: string, tgtIsBuilding: boolean, tgtKind: string,
     return 1.0;
   }
   if (tgtKind === 'sea') {
+    if (attType === 'subhunter') return tgtType === 'sub' ? 2.6 : 1.4; // depth charges hunt subs
+    if (attType === 'destroyer') return tgtType === 'sub' ? 1.6 : 1.2; // sonar + depth charges
     if (attType === 'sub') return 1.8;           // torpedoes
     if (attType === 'rocket') return 1.4;
     if (attType === 'strike' || attType === 'heli' || attType === 'msldrone') return 1.3;
+    if (attType === 'mslcruiser') return 0.6;    // its missiles are wasted on nimble hulls
+    if (attType === 'flakship') return 0.5;      // AA guns barely scratch ships
     if (attType === 'rifle') return 0.5;
     return 1.0;
   }
@@ -279,5 +297,8 @@ export function dmgMul(attType: string, tgtIsBuilding: boolean, tgtKind: string,
   if (attType === 'cannon') return tgtIsBuilding ? 1.1 : (tgtKind === 'veh' ? 1.7 : 0.7);  // heavy cannon: anti-armor
   if (attType === 'tesla')  return tgtIsBuilding ? 0.9 : 1.5;                               // tesla: all-round zapper
   if (attType === 'mine')   return tgtIsBuilding ? 0.5 : (tgtKind === 'veh' ? 1.7 : 1.3);   // mine blast
+  if (attType === 'mslcruiser') return tgtIsBuilding ? 2.2 : (tgtKind === 'veh' ? 0.8 : 0.6); // shore bombardment
+  if (attType === 'flakship')   return tgtIsBuilding ? 0.4 : (tgtKind === 'inf' ? 0.9 : 0.3); // AA guns, poor vs ground
+  if (attType === 'subhunter')  return tgtIsBuilding ? 0.4 : 0.5;                              // not a land attacker
   return 1.0; // gunboat / destroyer guns
 }

@@ -16,6 +16,7 @@ const U_ICONS: Record<string, string> = {
   chemtrooper: '\u{2623}️', chemtank: '\u{2623}️', chemdrone: '\u{2623}️',
   biotrooper: '\u{2622}️', biotank: '\u{2622}️', biodrone: '\u{2622}️', stealthtank: '\u{1F977}',
   gunboat: '\u{1F6A4}', destroyer: '\u{1F6F3}️', sub: '\u{1F93F}', navdrone: '\u{1F6F6}',
+  subhunter: '\u{1F42C}', mslcruiser: '\u{1F6A2}', flakship: '\u{1F387}',
   fighter: '\u{1F6E9}️', bomber: '\u{1F4A3}', dbomber: '\u{1F916}', heli: '\u{1F681}', helidrone: '\u{1FA81}',
   mcv: '\u{1F3D7}️', dozer: '\u{1F69C}', patriot: '\u{1F6F0}️',
 };
@@ -36,7 +37,7 @@ const UPG_INFO: Record<string, string> = {
 };
 export const U_LIST = ['rifle', 'rocket', 'hive', 'tank', 'heavy', 'ifv', 'aatank', 'flak', 'patriot', 'fueltruck', 'harv', 'engineer', 'mcv', 'dozer', 'mlrs', 'recon', 'strike', 'msldrone',
   'chemtrooper', 'chemtank', 'chemdrone', 'biotrooper', 'biotank', 'biodrone', 'stealthtank',
-  'gunboat', 'destroyer', 'sub', 'navdrone', 'fighter', 'bomber', 'dbomber', 'heli', 'helidrone',
+  'gunboat', 'destroyer', 'sub', 'subhunter', 'mslcruiser', 'flakship', 'navdrone', 'fighter', 'bomber', 'dbomber', 'heli', 'helidrone',
   'cmissile', 'bbmissile', 'chemissile'];
 
 // strengths/weaknesses tooltip, derived from the live damage matrix so it can
@@ -60,6 +61,11 @@ const TIP_NOTES: Record<string, string> = {
   irondome: 'Iron Dome: shoots down incoming silo missiles aimed inside its shield. One kill per reload — a heavy salvo can still overwhelm a single dome. Needs a Radar Dome.',
   patriot: 'Patriot SAM: mobile missile interceptor. Park it over what you want protected — it downs incoming silo missiles. No offensive weapon.',
   engineer: 'Repairs units, builds roads, and lays proximity mines (press F to lay one from its stock of 4).',
+  destroyer: 'Armored gun ship: duels other warships and bombards the coast. Its sonar also detects and depth-charges submarines.',
+  sub: 'Submarine: cloaked until a sonar ship (Destroyer / Sub Hunter) pings it or you get very close. Devastating ambush torpedoes, but a thin hull.',
+  subhunter: 'Sub Hunter: fast sonar escort that reveals and depth-charges submarines. Weak against everything else.',
+  mslcruiser: 'Missile Cruiser: long-range shore bombardment — flattens coastal bases. Fragile hull; keep it screened.',
+  flakship: 'Flak Cruiser: dedicated fleet air-defence. Shreds aircraft and drones, useless against ships.',
 };
 export function counterTip(t: string): string {
   const d = UNITS[t] || BUILDINGS[t];

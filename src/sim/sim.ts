@@ -776,6 +776,18 @@ export class Sim {
     return best;
   }
 
+  // a cloaked unit (submarine) is exposed if any enemy sonar platform (Destroyer
+  // / Sub Hunter) is sweeping within its detection radius — then everyone can
+  // fire on it, not just the ship holding the contact
+  private isDetected(u: Entity): boolean {
+    for (const e of this.ents.values()) {
+      const s = UNITS[e.type]?.sonar;
+      if (!s || e.b || e.hp <= 0 || !this.foe(e.owner, u.owner)) continue;
+      if ((e.x - u.x) ** 2 + (e.z - u.z) ** 2 <= s * s) return true;
+    }
+    return false;
+  }
+
   private findEnemy(e: Entity, range: number, skipAir = false): Entity | null {
     // threat-first acquisition: anything that can shoot back outranks a harmless
     // target (harvester, power plant), and among equals the nearest wins. So a
@@ -790,7 +802,7 @@ export class Sim {
       if (!this.foe(u.owner, e.owner) || u.hp <= 0 || !this.players[u.owner].alive) continue;
       const d = this.distToEnt(e.x, e.z, u);
       if (UNITS[u.type]?.mine) continue;            // buried proximity mines aren't visible targets
-      if (UNITS[u.type]?.cloak && d > 4) continue; // stealth: only seen up close
+      if (UNITS[u.type]?.cloak && d > 4 && !this.isDetected(u)) continue; // stealth: seen up close OR by sonar
       // never auto-lock onto air targets the attacker cannot hurt (turret, MLRS)
       if (UNITS[u.type]?.fly && (skipAir || dmgMul(e.type, false, 'air', u.type) <= 0)) continue;
       if (d <= range) consider(u, d);
