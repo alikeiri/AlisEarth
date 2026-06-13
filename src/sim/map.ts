@@ -41,6 +41,7 @@ export class GameMap {
   road = new Int8Array(W * H);                // 0 none, else owner+1 (extends build reach)
   roadDirty = true;
   heightDirty = false;                        // terraforming edited the heightfield → rebuild mesh
+  terraMask = new Uint8Array(W * H);          // 1 = cell was terraformed to land (render as concrete)
   spawns: { x: number; z: number }[] = [];
   oreDirty = true;
 
@@ -105,6 +106,9 @@ export class GameMap {
       else { this.hN[i] += Math.sign(dlt) * step; done = false; }
     }
     this.reblock(cx - 1, cz - 1, cx + 2, cz + 2);
+    // mark cells raised/leveled to land as terraformed (concrete); cells dug to
+    // water are cleared so a flooded channel doesn't show concrete
+    this.terraMask[cz * W + cx] = target > SEA ? 1 : 0;
     this.heightDirty = true;
     return done;
   }

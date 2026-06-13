@@ -1057,6 +1057,7 @@ export class Renderer {
     geo.translate(W / 2, 0, H / 2);
     const pos = geo.getAttribute('position') as THREE.BufferAttribute;
     const splat = new Float32Array(pos.count * 4); // grass, rock, sand, dirt
+    const terra = new Float32Array(pos.count);     // 1 = terraformed → concrete
     for (let i = 0; i < pos.count; i++) {
       const x = pos.getX(i), z = pos.getZ(i);
       const h = this.map.heightAt(x, z);
@@ -1072,8 +1073,10 @@ export class Renderer {
       const sum = sand + rock + dirt + grass;
       splat[i * 4] = grass / sum; splat[i * 4 + 1] = rock / sum;
       splat[i * 4 + 2] = sand / sum; splat[i * 4 + 3] = dirt / sum;
+      terra[i] = this.terraAt(x, z);
     }
     geo.setAttribute('splat', new THREE.BufferAttribute(splat, 4));
+    geo.setAttribute('terra', new THREE.BufferAttribute(terra, 1));
     geo.computeVertexNormals();
 
     const mat = new THREE.MeshLambertMaterial({ color: 0xffffff });
@@ -1086,10 +1089,10 @@ export class Renderer {
       shader.uniforms.tDirt = { value: this.extTex.dirt || tD };
       this.terrainShader = shader;
       shader.vertexShader = shader.vertexShader
-        .replace('#include <common>', '#include <common>\nattribute vec4 splat;\nvarying vec4 vSplat;\nvarying vec3 vPosW;')
-        .replace('#include <begin_vertex>', '#include <begin_vertex>\nvSplat = splat;\nvPosW = position;');
+        .replace('#include <common>', '#include <common>\nattribute vec4 splat;\nattribute float terra;\nvarying vec4 vSplat;\nvarying float vTerra;\nvarying vec3 vPosW;')
+        .replace('#include <begin_vertex>', '#include <begin_vertex>\nvSplat = splat;\nvTerra = terra;\nvPosW = position;');
       shader.fragmentShader = shader.fragmentShader
-        .replace('#include <common>', '#include <common>\nuniform sampler2D tGrass, tRock, tSand, tDirt;\nvarying vec4 vSplat;\nvarying vec3 vPosW;')
+        .replace('#include <common>', '#include <common>\nuniform sampler2D tGrass, tRock, tSand, tDirt;\nvarying vec4 vSplat;\nvarying float vTerra;\nvarying vec3 vPosW;')
         .replace('#include <map_fragment>', `
           vec2 uvT = vPosW.xz * 0.42;
           // two sample scales per layer break up visible tiling
@@ -1099,6 +1102,9 @@ export class Renderer {
           vec3 s = mix(texture2D(tSand, uvT).rgb, texture2D(tSand, uvT * 0.31 + 0.21).rgb, 0.45);
           vec3 d = mix(texture2D(tDirt, uvT * 0.8).rgb, texture2D(tDirt, uvT * 0.27 + 0.11).rgb, 0.45);
           vec3 tex = g * vSplat.x + r * vSplat.y + s * vSplat.z + d * vSplat.w;
+          // terraformed ground reads as poured concrete: flat grey with fine grain
+          vec3 concrete = vec3(0.56, 0.56, 0.54) * (0.82 + 0.32 * texture2D(tRock, uvT * 0.7).g);
+          tex = mix(tex, concrete, clamp(vTerra, 0.0, 1.0));
           diffuseColor.rgb *= pow(tex, vec3(2.2));
         `);
     };
@@ -1121,15 +1127,23 @@ export class Renderer {
     this.terraPrev.visible = true;
   }
 
+  // 1 if this world position sits on a terraformed (concrete) cell
+  private terraAt(x: number, z: number): number {
+    const cx = Math.floor(x), cz = Math.floor(z);
+    return (cx >= 0 && cz >= 0 && cx < W && cz < H && this.map.terraMask[cz * W + cx]) ? 1 : 0;
+  }
+
   // re-read the heightfield into the terrain mesh after terraforming edits it
   refreshTerrain() {
     const geo = this.terrain.geometry;
     const pos = geo.getAttribute('position') as THREE.BufferAttribute;
     const splat = geo.getAttribute('splat') as THREE.BufferAttribute;
+    const terra = geo.getAttribute('terra') as THREE.BufferAttribute;
     for (let i = 0; i < pos.count; i++) {
       const x = pos.getX(i), z = pos.getZ(i);
       const h = this.map.heightAt(x, z);
       pos.setY(i, h);
+      terra.setX(i, this.terraAt(x, z));
       const e = 0.5;
       const gx = this.map.heightAt(x + e, z) - this.map.heightAt(x - e, z);
       const gz = this.map.heightAt(x, z + e) - this.map.heightAt(x, z - e);
@@ -1141,7 +1155,7 @@ export class Renderer {
       const sum = sand + rock + dirt + grass || 1;
       splat.setXYZW(i, grass / sum, rock / sum, sand / sum, dirt / sum);
     }
-    pos.needsUpdate = true; splat.needsUpdate = true;
+    pos.needsUpdate = true; splat.needsUpdate = true; terra.needsUpdate = true;
     geo.computeVertexNormals();
   }
 
