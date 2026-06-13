@@ -742,10 +742,11 @@ class GameClient {
   private train(type: string) {
     const def = UNITS[type];
     if (!def) return;
-    // a primary building (set via double-click) always wins; else shortest queue
+    // a primary building (set via double-click) always wins; else shortest queue.
+    // some units (MCV) can come from a second building type too (altBuiltAt)
     let primary: any = null, best: any = null;
     for (const v of this.lastViews) {
-      if (!v.b || v.o !== this.game.me || v.t !== def.builtAt || v.pr < 1) continue;
+      if (!v.b || v.o !== this.game.me || (v.t !== def.builtAt && v.t !== def.altBuiltAt) || v.pr < 1) continue;
       if (v.pm) primary = v;
       if (!best || (v.qn || 0) < (best.qn || 0)) best = v;
     }

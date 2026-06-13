@@ -36,6 +36,8 @@ export interface UnitDef {
   blastR?: number;                               // missile blast radius
   deploys?: string;                              // MCV: F deploys it into this building (forward base)
   terra?: boolean;                               // bulldozer: can reshape terrain along a drawn path
+  amphibious?: boolean;                          // can travel over BOTH land and water
+  altBuiltAt?: string;                           // a second building that can also produce this unit
 }
 
 export const UNITS: Record<string, UnitDef> = {
@@ -56,7 +58,7 @@ export const UNITS: Record<string, UnitDef> = {
   engineer: { name: 'Engineer',   cost: 600,  hp: 200, speed: 2.2, range: 0,   dmg: 0,  rof: 1,   builtAt: 'factory',  buildTime: 10, kind: 'veh', repair: true, road: true },
   // Construction Vehicle: slow, defenceless; press F to deploy it into a forward
   // construction yard (enables building structures around the new spot)
-  mcv:    { name: 'Construction Vehicle', cost: 2500, hp: 500, speed: 1.1, range: 0, dmg: 0, rof: 1, builtAt: 'factory', buildTime: 20, kind: 'veh', deploys: 'conyard' },
+  mcv:    { name: 'Construction Vehicle', cost: 2500, hp: 500, speed: 1.1, range: 0, dmg: 0, rof: 1, builtAt: 'factory', altBuiltAt: 'shipyard', buildTime: 20, kind: 'veh', deploys: 'conyard', amphibious: true },
   // Bulldozer: slow, defenceless terraformer — reshapes the ground along a drawn path
   dozer:  { name: 'Bulldozer',    cost: 1400, hp: 420, speed: 1.3, range: 0,   dmg: 0,  rof: 1,   builtAt: 'factory',  buildTime: 12, kind: 'veh', terra: true },
   hive:    { name: 'Drone Hive',  cost: 1500, hp: 900, speed: 1.1, range: 13,  dmg: 0,  rof: 1,   builtAt: 'barracks', buildTime: 16, kind: 'inf', fortify: true, emits: 'minidrone' },

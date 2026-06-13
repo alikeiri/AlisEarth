@@ -277,7 +277,7 @@ export class Sim {
     }
     if (c.k === 'train') {
       const b = this.ents.get(c.bid); const def = UNITS[c.type];
-      if (!b || !b.b || b.owner !== c.p || !def || def.builtAt !== b.type) return;
+      if (!b || !b.b || b.owner !== c.p || !def || (def.builtAt !== b.type && def.altBuiltAt !== b.type)) return;
       if (def.tech && !pl.tech[def.tech]) return; // not yet researched
       if (def.internal) return;
       // silo stockpiles up to MISSILE_CAP armed missiles (stock + in-build)
@@ -1035,12 +1035,13 @@ export class Sim {
         u.stuckT = 0;
         u.path = null; // force a replan
         const a0 = this.rng.int(8);
-        const sea = def.move === 'sea';
+        const sea = def.move === 'sea', amphi = !!def.amphibious;
         for (let k = 0; k < 8; k++) {
           const a = ((a0 + k) & 7) * 0.7854;
           const nx = u.x + Math.cos(a) * 0.7, nz = u.z + Math.sin(a) * 0.7;
-          const okC = sea ? this.map.passableSea(Math.floor(nx), Math.floor(nz))
-            : this.map.passable(Math.floor(nx), Math.floor(nz));
+          const okC = amphi ? this.map.passableAmphi(Math.floor(nx), Math.floor(nz))
+            : sea ? this.map.passableSea(Math.floor(nx), Math.floor(nz))
+              : this.map.passable(Math.floor(nx), Math.floor(nz));
           if (okC) { u.x = nx; u.z = nz; break; }
         }
       }
@@ -1506,18 +1507,19 @@ export class Sim {
       return this.stepPath(u, speed, 1);
     }
     const sea = def.move === 'sea';
+    const amphi = !!def.amphibious;
     if (!u.path || u.pi >= u.path.length) {
       const end = u.path?.[u.path.length - 1];
       if (!end || (end.x - x) ** 2 + (end.z - z) ** 2 > 1) {
-        u.path = findPath(this.map, u.x, u.z, x, z, 9000, sea);
+        u.path = findPath(this.map, u.x, u.z, x, z, 9000, sea, amphi);
         u.pi = 0;
         if (!u.path) return true; // unreachable — give up
       } else if (u.pi >= u.path.length) return true;
     }
-    return this.stepPath(u, speed, sea ? 2 : 0);
+    return this.stepPath(u, speed, amphi ? 3 : sea ? 2 : 0);
   }
 
-  // mode: 0 ground, 1 air, 2 sea
+  // mode: 0 ground, 1 air, 2 sea, 3 amphibious (land + water)
   private stepPath(u: Entity, speed: number, mode = 0): boolean {
     if (!u.path || u.pi >= u.path.length) return true;
     const wp = u.path[u.pi];
@@ -1536,9 +1538,11 @@ export class Sim {
       u.x = Math.max(0.5, Math.min(W - 0.5, nx));
       u.z = Math.max(0.5, Math.min(H - 0.5, nz));
     } else {
-      const okCell = mode === 2
-        ? this.map.passableSea(Math.floor(nx), Math.floor(nz))
-        : this.map.passable(Math.floor(nx), Math.floor(nz));
+      const okCell = mode === 3
+        ? this.map.passableAmphi(Math.floor(nx), Math.floor(nz))
+        : mode === 2
+          ? this.map.passableSea(Math.floor(nx), Math.floor(nz))
+          : this.map.passable(Math.floor(nx), Math.floor(nz));
       if (okCell) { u.x = nx; u.z = nz; }
       else { u.path = null; } // blocked — replan next tick
     }

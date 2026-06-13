@@ -390,7 +390,7 @@ export class UI {
     for (const t of U_LIST) {
       const def = UNITS[t];
       const cost = Math.round(def.cost * fac.costMul);
-      let ok = (myDone[def.builtAt] || 0) > 0;
+      let ok = (myDone[def.builtAt] || 0) > 0 || (def.altBuiltAt ? (myDone[def.altBuiltAt] || 0) > 0 : false);
       if (ok && def.pad && padHave >= padCap) ok = false; // airfields full
       if (def.tech && !myTech[def.tech]) ok = false;      // not yet researched
       // hide tech-gated buttons entirely until the tech exists

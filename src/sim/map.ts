@@ -57,6 +57,12 @@ export class GameMap {
   passableSea(cx: number, cz: number): boolean {
     return this.inB(cx, cz) && this.water[cz * W + cx] === 1 && this.occ[cz * W + cx] === 0;
   }
+  // amphibious: travels over open ground AND water, but not cliffs/forest
+  passableAmphi(cx: number, cz: number): boolean {
+    if (!this.inB(cx, cz) || this.occ[cz * W + cx] !== 0) return false;
+    const i = cz * W + cx;
+    return this.tBlocked[i] === 0 || this.water[i] === 1;
+  }
   heightAt(x: number, z: number): number {
     const cx = Math.min(W - 0.001, Math.max(0, x)), cz = Math.min(H - 0.001, Math.max(0, z));
     const xi = Math.floor(cx), zi = Math.floor(cz);

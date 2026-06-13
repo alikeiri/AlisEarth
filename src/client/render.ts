@@ -1686,6 +1686,10 @@ export class Renderer {
       else if (md?.move === 'sea') {
         y = SEA + (v.t === 'sub' ? -0.08 : 0.02) + Math.sin(this.time * 1.6 + v.i) * 0.03;
         gy = SEA; // selection ring floats on the water
+      } else if (md?.amphibious && gy < SEA + 0.1) {
+        // amphibious unit out over water — float on the surface like a barge
+        y = SEA + 0.05 + Math.sin(this.time * 1.6 + v.i) * 0.03;
+        gy = SEA;
       } else y = gy;
       // infantry walk bob: hop + slight sway while moving (subtle when real
       // run-cycle frames carry the motion)
