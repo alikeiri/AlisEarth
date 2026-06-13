@@ -1621,6 +1621,16 @@ export class Renderer {
             });
           }
           this.spawnParts(ev.x, y1 + 0.3, ev.z, 3, false); // launch flash
+        } else if (ev.w === 7) {
+          // submarine torpedo: a low projectile skimming the surface with a wake
+          const wy = SEA + 0.12;
+          const distT = Math.hypot(ev.tx - ev.x, ev.tz - ev.z);
+          if (this.rockets.length < 64) this.rockets.push({
+            x0: ev.x, y0: wy, z0: ev.z, x1: ev.tx, y1: wy, z1: ev.tz,
+            t: 0, delay: 0, dur: Math.max(0.4, distT * 0.07), arc: 0.18,
+          });
+          this.spawnParts(ev.x, wy, ev.z, 3, false);   // launch bubbles
+          this.spawnParts(ev.tx, wy, ev.tz, 4, false); // impact splash
         } else {
           if (this.tracers.length < MAX_TRACER) this.tracers.push({ x1: ev.x, y1, z1: ev.z, x2: ev.tx, y2, z2: ev.tz, t: 0.1 });
           this.spawnParts(ev.tx, y2, ev.tz, 2, false);

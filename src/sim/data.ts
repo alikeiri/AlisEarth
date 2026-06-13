@@ -73,16 +73,18 @@ export const UNITS: Record<string, UnitDef> = {
   minidrone: { name: 'Mini Drone', cost: 0,   hp: 40,  speed: 4.2, range: 4.0, dmg: 200, rof: 1, builtAt: '',         buildTime: 0,  kind: 'air', fly: true, alt: 1.6, ephemeral: 26, internal: true, kamikaze: true },
   // naval (Ship Factory, water only)
   gunboat:   { name: 'Gunboat',     cost: 700,  hp: 300, speed: 2.8, range: 5.5, dmg: 22, rof: 1.2, builtAt: 'shipyard', buildTime: 10, kind: 'sea', move: 'sea' },
-  // armored gun ship: duels other warships, bombards the coast, and pings for
-  // subs with its sonar (depth charges shred anything it detects)
-  destroyer: { name: 'Destroyer',   cost: 1500, hp: 550, speed: 2.2, range: 7.0, dmg: 45, rof: 2.2, builtAt: 'shipyard', buildTime: 16, kind: 'sea', move: 'sea', sonar: 9 },
+  // armored gun ship: duels other warships and bombards the coast (long reach).
+  // its sonar is SHORT — shorter than a sub's torpedo range — so a lone sub
+  // out-sticks it; depth charges barely scratch a sub. Bring a Sub Hunter.
+  destroyer: { name: 'Destroyer',   cost: 1500, hp: 550, speed: 2.2, range: 9.0, dmg: 45, rof: 2.2, builtAt: 'shipyard', buildTime: 16, kind: 'sea', move: 'sea', sonar: 5.5 },
   // stays submerged and unseen until a sonar ship pings it or you get very
-  // close — then it's a glass dagger: huge ambush torpedoes, thin hull
-  sub:       { name: 'Submarine',   cost: 1400, hp: 300, speed: 2.0, range: 6.5, dmg: 78, rof: 3.0, builtAt: 'shipyard', buildTime: 15, kind: 'sea', move: 'sea', cloak: true },
-  // fast cheap sub-killer: sonar sweep + depth charges, weak at everything else
-  subhunter: { name: 'Sub Hunter',  cost: 800,  hp: 240, speed: 3.6, range: 5.0, dmg: 26, rof: 1.0, builtAt: 'shipyard', buildTime: 9,  kind: 'sea', move: 'sea', sonar: 11 },
-  // long-range bombardment cruiser: flattens shore bases, but a fragile hull
-  mslcruiser:{ name: 'Missile Cruiser', cost: 1600, hp: 280, speed: 2.0, range: 11.0, dmg: 55, rof: 2.6, builtAt: 'shipyard', buildTime: 16, kind: 'sea', move: 'sea' },
+  // close — then it's a glass dagger: one devastating torpedo, thin hull
+  sub:       { name: 'Submarine',   cost: 1400, hp: 300, speed: 2.0, range: 6.5, dmg: 115, rof: 3.0, builtAt: 'shipyard', buildTime: 15, kind: 'sea', move: 'sea', cloak: true },
+  // fast, sturdy sub-killer: long sonar sweep + heavy depth charges; the only
+  // hard counter to submarines, but weak at everything else
+  subhunter: { name: 'Sub Hunter',  cost: 800,  hp: 360, speed: 3.6, range: 5.0, dmg: 26, rof: 1.0, builtAt: 'shipyard', buildTime: 9,  kind: 'sea', move: 'sea', sonar: 11 },
+  // long-range bombardment cruiser: flattens shore bases from afar, fragile hull
+  mslcruiser:{ name: 'Missile Cruiser', cost: 1600, hp: 280, speed: 2.0, range: 14.0, dmg: 55, rof: 2.6, builtAt: 'shipyard', buildTime: 16, kind: 'sea', move: 'sea' },
   // dedicated fleet air-defence: murders aircraft, useless against hulls
   flakship:  { name: 'Flak Cruiser', cost: 1200, hp: 360, speed: 2.6, range: 8.0, dmg: 30, rof: 0.7, builtAt: 'shipyard', buildTime: 13, kind: 'sea', move: 'sea' },
   navdrone:  { name: 'Naval Drone', cost: 500,  hp: 90,  speed: 3.6, range: 4.0, dmg: 18, rof: 1.0, builtAt: 'shipyard', buildTime: 7,  kind: 'sea', move: 'sea' },
@@ -252,7 +254,7 @@ export function dmgMul(attType: string, tgtIsBuilding: boolean, tgtKind: string,
   }
   if (tgtKind === 'sea') {
     if (attType === 'subhunter') return tgtType === 'sub' ? 2.6 : 1.4; // depth charges hunt subs
-    if (attType === 'destroyer') return tgtType === 'sub' ? 1.6 : 1.2; // sonar + depth charges
+    if (attType === 'destroyer') return tgtType === 'sub' ? 0.6 : 1.2; // light depth charges only — needs a hunter
     if (attType === 'sub') return 1.8;           // torpedoes
     if (attType === 'rocket') return 1.4;
     if (attType === 'strike' || attType === 'heli' || attType === 'msldrone') return 1.3;

@@ -776,18 +776,6 @@ export class Sim {
     return best;
   }
 
-  // a cloaked unit (submarine) is exposed if any enemy sonar platform (Destroyer
-  // / Sub Hunter) is sweeping within its detection radius — then everyone can
-  // fire on it, not just the ship holding the contact
-  private isDetected(u: Entity): boolean {
-    for (const e of this.ents.values()) {
-      const s = UNITS[e.type]?.sonar;
-      if (!s || e.b || e.hp <= 0 || !this.foe(e.owner, u.owner)) continue;
-      if ((e.x - u.x) ** 2 + (e.z - u.z) ** 2 <= s * s) return true;
-    }
-    return false;
-  }
-
   private findEnemy(e: Entity, range: number, skipAir = false): Entity | null {
     // threat-first acquisition: anything that can shoot back outranks a harmless
     // target (harvester, power plant), and among equals the nearest wins. So a
@@ -801,8 +789,16 @@ export class Sim {
     for (const u of this.nearbyUnits(e.x, e.z, range + 1)) {
       if (!this.foe(u.owner, e.owner) || u.hp <= 0 || !this.players[u.owner].alive) continue;
       const d = this.distToEnt(e.x, e.z, u);
-      if (UNITS[u.type]?.mine) continue;            // buried proximity mines aren't visible targets
-      if (UNITS[u.type]?.cloak && d > 4 && !this.isDetected(u)) continue; // stealth: seen up close OR by sonar
+      const tdef = UNITS[u.type];
+      if (tdef?.mine) continue;                     // buried proximity mines aren't visible targets
+      if (tdef?.cloak) {
+        if (tdef.move === 'sea') {
+          // submarine: only a sonar ship (Destroyer / Sub Hunter) holds the
+          // contact, and only inside its sonar reach (the destroyer's is short)
+          const sonar = UNITS[e.type]?.sonar || 0;
+          if (!sonar || d > sonar) continue;
+        } else if (d > 4) continue;                 // stealth land unit: seen only up close
+      }
       // never auto-lock onto air targets the attacker cannot hurt (turret, MLRS)
       if (UNITS[u.type]?.fly && (skipAir || dmgMul(e.type, false, 'air', u.type) <= 0)) continue;
       if (d <= range) consider(u, d);
@@ -820,6 +816,9 @@ export class Sim {
 
   private dealDamage(att: Entity, tgt: Entity, base: number) {
     if (!this.foe(att.owner, tgt.owner)) return; // no friendly fire between allies / self
+    // submarines are immune to everything but dedicated anti-submarine warfare:
+    // only a sonar-equipped ship (Destroyer / Sub Hunter) can actually hurt one
+    if (!tgt.b && UNITS[tgt.type]?.cloak && UNITS[tgt.type]?.move === 'sea' && !UNITS[att.type]?.sonar) return;
     let mul = dmgMul(att.type, tgt.b, tgt.b ? 'b' : UNITS[tgt.type].kind, tgt.b ? undefined : tgt.type);
     if (!tgt.b) {
       if (tgt.fortT > 0) mul *= FORT_DEPLOY_VULN;        // exposed while digging in / packing up
@@ -868,6 +867,7 @@ export class Sim {
     // weapon class: 0 mg, 1 rocket, 2 cannon, 3 drone zap, 4 missile salvo
     const tgtInf = !tgt.b && UNITS[tgt.type]?.kind === 'inf';
     const w = att.type === 'rifle' || att.type === 'ifv' ? 0
+      : att.type === 'sub' ? 7                                               // submarine torpedo
       : att.type === 'flak' ? 5                                              // pom-pom flak
       : att.type === 'rocket' || att.type === 'sam' || att.type === 'aatank' ? 1
       : att.type === 'mlrs' || att.type === 'msldrone' ? 4
