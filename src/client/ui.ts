@@ -51,8 +51,8 @@ const TIP_NOTES: Record<string, string> = {
   chemissile: 'Silo weapon vs infantry — select the silo, right-click to launch',
   silo: 'Builds missiles; select with an armed missile and right-click a target to launch',
   radar: 'Detects incoming enemy units near your base (through fog) and sounds an alert. Needs power.',
-  wall: 'Cheap, tough wall segment that blocks all movement. Chain them into defensive lines.',
-  barrier: 'Tank barrier: blocks ground vehicles and infantry, cheaper than a wall.',
+  wall: 'Cheap, tough wall that blocks movement. Click-drag on the map to lay a whole line at once.',
+  barrier: 'Tank barrier: blocks vehicles and infantry. Click-drag to place a line of them.',
 };
 export function counterTip(t: string): string {
   const d = UNITS[t] || BUILDINGS[t];

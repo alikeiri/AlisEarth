@@ -309,10 +309,17 @@ class NetGame implements GameLike {
 
 // ---------------- Game client (render + input loop) ----------------
 function canPlaceClient(map: GameMap, views: any[], me: number, type: string, cx: number, cz: number): boolean {
-  const s = BUILDINGS[type].size;
+  const def = BUILDINGS[type];
+  const s = def.size;
+  const onWater = type === 'shipyard';
   for (let z = cz; z < cz + s; z++)
-    for (let x = cx; x < cx + s; x++)
-      if (!map.inB(x, z) || map.tBlocked[z * W + x]) return false;
+    for (let x = cx; x < cx + s; x++) {
+      const i = z * W + x;
+      if (!map.inB(x, z)) return false;
+      if (map.tBlocked[i] && !(onWater && map.water[i])) return false; // shipyards sit on water
+    }
+  // prerequisite building must exist and be finished (else placement fails server-side)
+  if (def.prereq && !views.some(v => v.b && v.o === me && v.t === def.prereq && (v.pr ?? 1) >= 1)) return false;
   let near = false;
   for (const v of views) {
     if (!v.b) continue;
@@ -347,6 +354,9 @@ class GameClient {
   private areaDrag: { cx: number; cz: number; r: number } | null = null;
   private patrolMode = false;
   private patrolDraw: { x: number; z: number }[] | null = null;
+  // drag-line placement for walls/barriers
+  private lineStart: { cx: number; cz: number } | null = null;
+  private lineCells: { cx: number; cz: number; ok: boolean }[] = [];
   private cheatBuf = '';
   private groups: Record<number, number[]> = {};
   private lastGroupTap = { n: 0, t: 0 };
@@ -749,6 +759,49 @@ class GameClient {
     for (const v of (combat.length ? combat : boxed)) this.selection.add(v.i);
   }
 
+  // walls/barriers can be dragged into a line of segments
+  private isLineBuild(t: string | null): boolean { return t === 'wall' || t === 'barrier'; }
+
+  // cells along a straight line from a→b, each validated. Segments chain: the
+  // line must start near a building/road, then later cells stay valid if they
+  // touch an earlier valid cell (classic wall extension). Capped by credits.
+  private computeLine(type: string, a: { cx: number; cz: number }, b: { cx: number; cz: number }): { cx: number; cz: number; ok: boolean }[] {
+    const dx = b.cx - a.cx, dz = b.cz - a.cz;
+    const steps = Math.max(Math.abs(dx), Math.abs(dz));
+    const cost = BUILDINGS[type].cost;
+    const me = this.game.me;
+    let credits = this.game.players?.()[me]?.c ?? 1e9;
+    const placed: { cx: number; cz: number }[] = [];
+    const out: { cx: number; cz: number; ok: boolean }[] = [];
+    const seen = new Set<number>();
+    for (let i = 0; i <= steps && out.length < 48; i++) {
+      const cx = Math.round(a.cx + (dx * i) / (steps || 1));
+      const cz = Math.round(a.cz + (dz * i) / (steps || 1));
+      const key = cz * W + cx;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      let ok = canPlaceClient(this.game.map, this.lastViews, me, type, cx, cz);
+      if (!ok) // chain off an earlier segment in this line
+        ok = placed.some(p => Math.max(Math.abs(p.cx - cx), Math.abs(p.cz - cz)) <= 1)
+          && this.game.map.inB(cx, cz) && !this.game.map.tBlocked[key]
+          && !this.lastViews.some(v => v.b && v.cx <= cx && v.cx + (v.sz || 1) > cx && v.cz <= cz && v.cz + (v.sz || 1) > cz);
+      if (ok && credits < cost) ok = false; // can't afford more
+      if (ok) { credits -= cost; placed.push({ cx, cz }); }
+      out.push({ cx, cz, ok });
+    }
+    return out;
+  }
+
+  // place every valid cell of the current drag-line; keep placing mode active
+  // (walls come in lines — exit with Esc / right-click) unless Shift is held
+  private commitLine(_shift: boolean) {
+    let n = 0;
+    for (const c of this.lineCells) if (c.ok) { this.game.issue({ k: 'place', p: this.game.me, type: this.ui.placing!, cx: c.cx, cz: c.cz }); n++; }
+    if (n) audio.play('place'); else audio.play('cancel');
+    this.lineStart = null; this.lineCells = [];
+    // walls stay armed so you can keep drawing; Esc / right-click exits
+  }
+
   // compute the building-ghost cell + validity at a screen point
   private ghostAt(sx: number, sy: number): { cx: number; cz: number; ok: boolean } | null {
     if (!this.ui.placing) return null;
@@ -815,8 +868,9 @@ class GameClient {
       this.touch.downT = performance.now(); this.touch.moved = false;
       this.mouse.x = t.clientX; this.mouse.y = t.clientY;
       if (this.ui.placing) {
-        // placing a building: the finger moves the ghost preview, lift to place
+        // placing: finger moves the ghost; walls/barriers start a drag-line
         this.touch.mode = '';
+        if (this.isLineBuild(this.ui.placing)) { const gh = this.ghostAt(t.clientX, t.clientY); this.lineStart = gh ? { cx: gh.cx, cz: gh.cz } : null; }
         return;
       }
       if (this.touch.boxToggle || this.patrolMode) {
@@ -871,7 +925,11 @@ class GameClient {
     if (e.touches.length > 0) return; // still fingers down (end of a pinch)
     const mode = this.touch.mode; this.touch.mode = '';
     this.grab = null;
-    if (this.ui.placing) { this.tapAt(this.mouse.x, this.mouse.y); return; } // lift = place at the ghost
+    if (this.ui.placing) {
+      if (this.lineStart) this.commitLine(false); // wall/barrier line
+      else this.tapAt(this.mouse.x, this.mouse.y); // single building at the ghost
+      return;
+    }
     if (this.patrolMode) { this.finishPatrol(this.touch.sx, this.touch.sy); return; }
     if (mode === 'box' && this.touch.moved) {
       this.mouse.dragging = false;
@@ -883,6 +941,13 @@ class GameClient {
 
   private onDown(e: MouseEvent) {
     if (e.button === 0) {
+      // walls/barriers: press starts a drag-line, committed on release
+      if (this.ui.placing && this.isLineBuild(this.ui.placing)) {
+        const gh = this.ghostAt(e.clientX, e.clientY);
+        this.lineStart = gh ? { cx: gh.cx, cz: gh.cz } : null;
+        this.mouse.lDown = true; this.mouse.downX = e.clientX; this.mouse.downY = e.clientY; this.mouse.dragging = false;
+        return;
+      }
       if (this.ui.placing && this.lastGhost) {
         if (this.lastGhost.ok) {
           this.game.issue({ k: 'place', p: this.game.me, type: this.ui.placing, cx: this.lastGhost.cx, cz: this.lastGhost.cz });
@@ -903,7 +968,7 @@ class GameClient {
       this.mouse.downX = e.clientX; this.mouse.downY = e.clientY;
       this.mouse.dragging = false;
     } else if (e.button === 2) {
-      if (this.ui.placing) { this.ui.setPlacing(null); return; }
+      if (this.ui.placing) { this.ui.setPlacing(null); this.lineStart = null; this.lineCells = []; return; }
       this.mouse.rDown = true;
       this.mouse.rDragging = false;
       this.mouse.rDownX = e.clientX; this.mouse.rDownY = e.clientY;
@@ -955,6 +1020,9 @@ class GameClient {
     if (e.button !== 0 || !this.mouse.lDown) return;
     this.mouse.lDown = false;
     const me = this.game.me;
+
+    // commit a wall/barrier drag-line
+    if (this.lineStart) { this.commitLine(e.shiftKey); return; }
 
     if (this.patrolMode) { this.finishPatrol(e.clientX, e.clientY); return; }
 
@@ -1291,11 +1359,19 @@ class GameClient {
         log.removeChild(log.firstChild);
     }
 
-    // building ghost
-    if (this.ui.placing) {
+    // building ghost (single) or wall/barrier drag-line preview
+    if (this.ui.placing && this.lineStart) {
+      const gh = this.ghostAt(this.mouse.x, this.mouse.y);
+      const end = gh ? { cx: gh.cx, cz: gh.cz } : this.lineStart;
+      this.lineCells = this.computeLine(this.ui.placing, this.lineStart, end);
+      this.renderer.setGhost(false, this.ui.placing, 0, 0, false); // hide the single ghost
+      this.lastGhost = null;
+    } else if (this.ui.placing) {
       const gh = this.ghostAt(this.mouse.x, this.mouse.y);
       if (gh) { this.lastGhost = gh; this.renderer.setGhost(true, this.ui.placing, gh.cx, gh.cz, gh.ok); }
     } else {
+      this.lineCells = [];
+      this.lineStart = null;
       this.lastGhost = null;
       this.renderer.setGhost(false);
     }
@@ -1348,6 +1424,20 @@ class GameClient {
     this.cmdFx = this.cmdFx.filter(f => f.t > 0);
 
     this.ui.overlay(this.overlayCtx, this.renderer.project.bind(this.renderer), views, this.game.me, this.selection, dragRect, hover, circles, this.cmdFx);
+
+    // wall/barrier drag-line preview (drawn over the overlay)
+    if (this.lineStart && this.lineCells.length) {
+      const ctx = this.overlayCtx;
+      for (const c of this.lineCells) {
+        const p = this.renderer.project(c.cx + 0.5, c.cz + 0.5, 0.2);
+        if (!p.ok) continue;
+        ctx.fillStyle = c.ok ? 'rgba(90,220,120,0.5)' : 'rgba(220,70,60,0.5)';
+        ctx.strokeStyle = c.ok ? 'rgba(150,255,170,0.9)' : 'rgba(255,120,110,0.9)';
+        ctx.lineWidth = 1.5;
+        ctx.fillRect(p.x - 9, p.y - 9, 18, 18);
+        ctx.strokeRect(p.x - 9, p.y - 9, 18, 18);
+      }
+    }
 
     const st = this.game.status();
     // with multiple AIs the sim runs until ONE side remains; if the human is
