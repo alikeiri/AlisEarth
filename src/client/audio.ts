@@ -309,7 +309,8 @@ class AudioMan {
 
   startMusic() {
     if (!this.ctx || this.musicTimer || this.musicStyle === 'off') return;
-    const bpm = this.musicStyle === 'ambient' ? 60 : this.musicStyle === 'march' ? 104 : 124;
+    const bpm = this.musicStyle === 'ambient' ? 60 : this.musicStyle === 'march' ? 104
+      : this.musicStyle === 'hellmarch' ? 126 : 124;
     const spe = 60 / bpm / 2; // seconds per eighth note
     this.nextT = this.ctx.currentTime + 0.15;
     this.musicTimer = setInterval(() => {
@@ -432,6 +433,49 @@ class AudioMan {
         const g = this.ctx!.createGain(); g.gain.setValueAtTime(0.02, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.04);
         s.connect(f); f.connect(g); g.connect(this.musG); s.start(t); s.stop(t + 0.06);
       }
+      return;
+    }
+
+    // ===== HELL MARCH: a relentless E-minor industrial war-march =====
+    // (an original homage to the C&C Red Alert vibe, not a copy): pounding
+    // palm-muted bass pulse, power-chord stabs, a descending minor lead motif,
+    // and a four-on-the-floor kick with a military snare cadence.
+    if (style === 'hellmarch') {
+      const noise = this.noiseBuf && this.ctx;
+      // 2-bar harmonic plan: Em Em C D — static, driving, with a lift at the end
+      const planRoot = [52, 52, 48, 50][bar];        // E3 E3 C3 D3
+      const bassRoot = planRoot - 12;
+      const drive = sect === 'b' ? 0.16 : 0.13;      // breakdown phrases hit harder
+      // the engine: a palm-muted bass note on EVERY eighth
+      this.guitar(this.midi(bassRoot), t, spe * 0.96, drive, true);
+      // power-chord stabs on beats 1 and 3
+      if (pos % 4 === 0) {
+        this.guitar(this.midi(planRoot), t, spe * 3.6, 0.1);
+        this.guitar(this.midi(planRoot + 7), t, spe * 3.6, 0.075);
+      }
+      // the hook: a 2-bar descending minor lead motif, one note per eighth
+      const MOTIF = [0, -2, -3, -2, -3, -5, -3, -2, 0, 3, 5, 3, 2, 0, -2, 0];
+      const mi = (barAbs % 2) * 8 + pos;
+      if (sect !== 'b' && MOTIF[mi] !== undefined) {
+        this.guitar(this.midi(planRoot + 12 + MOTIF[mi]), t, spe * 1.25, sect === 'c' ? 0.06 : 0.05, false, true);
+      }
+      // marching drums
+      if (pos % 2 === 0) this.musTone('sine', 92, t, 0.003, 0.13, 0.22, 360);  // four-on-the-floor kick
+      const snareHit = (peak: number, dur: number) => {                        // military snare
+        if (!noise) return;
+        const s = this.ctx!.createBufferSource(); s.buffer = this.noiseBuf!; s.loop = true;
+        const f = this.ctx!.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = 2000; f.Q.value = 0.8;
+        const g = this.ctx!.createGain(); g.gain.setValueAtTime(peak, t); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+        s.connect(f); f.connect(g); g.connect(this.musG); s.start(t); s.stop(t + dur + 0.02);
+      };
+      if (pos === 4) snareHit(0.08, 0.15);             // backbeat
+      else if (pos % 2 === 1) snareHit(0.025, 0.05);   // off-beat march cadence (ghost rolls)
+      if (bar === 0 && pos === 0) noise && (() => {     // crash at the phrase top
+        const s = this.ctx!.createBufferSource(); s.buffer = this.noiseBuf!; s.loop = true;
+        const f = this.ctx!.createBiquadFilter(); f.type = 'highpass'; f.frequency.value = 5500;
+        const g = this.ctx!.createGain(); g.gain.setValueAtTime(0.05, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.6);
+        s.connect(f); f.connect(g); g.connect(this.musG); s.start(t); s.stop(t + 0.65);
+      })();
       return;
     }
 

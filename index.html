@@ -32,8 +32,9 @@
   #powerbar { height: 100%; width: 50%; background: var(--good); transition: width .3s; }
   #facName { font-weight: 600; color: #eceff1; }
   #gameClock { margin-left: auto; color: #78909c; font-variant-numeric: tabular-nums; }
-  #muteBtn { cursor: pointer; font-size: 16px; padding: 0 6px; user-select: none; }
-  #muteBtn:hover { transform: scale(1.15); }
+  #muteBtn, #musBtn { cursor: pointer; font-size: 16px; padding: 0 6px; user-select: none; }
+  #muteBtn:hover, #musBtn:hover { transform: scale(1.15); }
+  #musLabel { font-size: 11px; color: #ffc940; opacity: 0; transition: opacity .25s; white-space: nowrap; }
   #exitBtn { cursor: pointer; font-size: 15px; padding: 0 8px; color: #ff8a7a; user-select: none; font-weight: 700; }
   #exitBtn:hover { color: var(--bad); transform: scale(1.15); }
 
@@ -194,6 +195,8 @@
       <div class="stat"><span id="facFlag"></span><span id="facName"></span></div>
       <div id="speedInd" class="hidden" style="color:#ffc940;font-weight:700;font-size:13px"></div>
       <div id="gameClock">00:00</div>
+      <div id="musBtn" title="Change music track">🎵</div>
+      <span id="musLabel"></span>
       <div id="muteBtn" title="Toggle sound">🔊</div>
       <div id="exitBtn" title="Exit to menu">✕</div>
     </div>
@@ -242,7 +245,8 @@
       <div class="optrow"><span class="optlabel">Map Size</span><div id="sizeRow" style="display:flex;gap:8px;flex:1"></div></div>
       <div class="optrow"><span class="optlabel">Music</span>
         <select id="musStyle" style="flex:1;background:#1a2430;color:#cfe0ee;border:1px solid #2c3e50;border-radius:4px;padding:5px">
-          <option value="battle">Battle</option><option value="march">Military March</option>
+          <option value="battle">Battle</option><option value="hellmarch">Hell March</option>
+          <option value="march">Military March</option>
           <option value="ambient">Ambient</option><option value="off">Off</option>
         </select></div>
       <div class="optrow"><span class="optlabel">Music Vol</span><input type="range" id="musVol" min="0" max="100" value="40" style="flex:1;accent-color:#ffc940"></div>

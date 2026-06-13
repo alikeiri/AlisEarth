@@ -10,3 +10,6 @@ replays/
 *.log
 .DS_Store
 deploy/secrets.local.json
+
+# rendered music previews (use tools/render-music.mjs)
+*.wav

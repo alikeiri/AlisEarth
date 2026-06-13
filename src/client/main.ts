@@ -2172,6 +2172,25 @@ function initMenus() {
   const muteIcon = () => { muteBtn.textContent = audio.muted ? '\u{1F507}' : '\u{1F50A}'; };
   muteIcon();
   muteBtn.addEventListener('click', () => { audio.init(); audio.setMuted(!audio.muted); muteIcon(); });
+  // in-game music swap: cycle the track on click and flash the name
+  const musBtn = $('musBtn'), musLabel = $('musLabel');
+  const MUS_STYLES = ['battle', 'hellmarch', 'march', 'ambient', 'off'];
+  const MUS_NAMES: Record<string, string> = { battle: 'Battle', hellmarch: 'Hell March', march: 'Military March', ambient: 'Ambient', off: 'Off' };
+  let musLabelTimer: any;
+  const flashMus = () => {
+    musBtn.title = 'Music: ' + (MUS_NAMES[audio.musicStyle] || audio.musicStyle) + ' — click to change';
+    musLabel.textContent = MUS_NAMES[audio.musicStyle] || audio.musicStyle;
+    musLabel.style.opacity = '1';
+    clearTimeout(musLabelTimer);
+    musLabelTimer = setTimeout(() => { musLabel.style.opacity = '0'; }, 1800);
+  };
+  musBtn.addEventListener('click', () => {
+    audio.init();
+    const i = MUS_STYLES.indexOf(audio.musicStyle);
+    audio.setMusicStyle(MUS_STYLES[(i + 1) % MUS_STYLES.length]);
+    try { ($('musStyle') as HTMLSelectElement).value = audio.musicStyle; } catch { /* menu not present */ }
+    flashMus();
+  });
   buildOptionRow('diffRow',
     [{ label: 'Easy', v: 0 }, { label: 'Normal', v: 1 }, { label: 'Hard', v: 2 }, { label: 'Brutal', v: 3 }],
     () => selDiff, v => { selDiff = v; });
