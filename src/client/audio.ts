@@ -284,14 +284,27 @@ class AudioMan {
   }
 
   // ---------- generative music ----------
-  // Slow minor progression: Am — F — C — G, with a bass drone, soft pad,
-  // echoing pentatonic arpeggio, and sparse kick/hat.
-  private chords = [
-    [57, 60, 64], // A3 C4 E4
-    [53, 57, 60], // F3 A3 C4
-    [48, 52, 55], // C3 E3 G3
-    [55, 59, 62], // G3 B3 D4
+  // a pool of minor-key 4-bar progressions; the SONG sequences them into a
+  // longer non-repeating structure so the track actually develops over time
+  private PROGS = [
+    [[57, 60, 64], [53, 57, 60], [48, 52, 55], [55, 59, 62]], // Am F C G
+    [[57, 60, 64], [55, 59, 62], [53, 57, 60], [55, 59, 62]], // Am G F G
+    [[48, 52, 55], [55, 59, 62], [57, 60, 64], [53, 57, 60]], // C G Am F
+    [[50, 53, 57], [48, 52, 55], [55, 59, 62], [57, 60, 64]], // Dm C G Am
+    [[53, 57, 60], [55, 59, 62], [57, 60, 64], [52, 56, 59]], // F G Am E
   ];
+  // phrase order (each entry = one 4-bar progression) and its section feel
+  private SONG = [0, 0, 1, 2, 0, 3, 4, 2, 1, 3];
+  private SECT = ['v', 'v', 'c', 'c', 'v', 'b', 'c', 'c', 'v', 'c'];
+  // a few lead riffs (minor-pentatonic offsets) rotated per bar for variety
+  private RIFFS = [
+    [0, 7, 5, 7, 3, 5, 7, 12],
+    [12, 10, 7, 5, 7, 5, 3, 0],
+    [0, 3, 5, 7, 5, 3, 0, -2],
+    [7, 7, 5, 3, 0, 3, 5, 7],
+    [12, 12, 10, 7, 5, 7, 10, 12],
+  ];
+  private chords = this.PROGS[0]; // fallback used by the march/ambient styles
   private midi(n: number) { return 440 * Math.pow(2, (n - 69) / 12); }
 
   startMusic() {
@@ -357,45 +370,66 @@ class AudioMan {
   }
 
   private scheduleEighth(t: number, e: number, spe: number) {
-    const bar = Math.floor(e / 8) % 4;
     const pos = e % 8;
-    const ch = this.chords[bar];
+    const barAbs = Math.floor(e / 8);
+    const bar = barAbs % 4;
     const style = this.musicStyle;
+    // walk the song: each phrase is 4 bars; the chord + feel come from it
+    const phrase = Math.floor(barAbs / 4);
+    const si = phrase % this.SONG.length;
+    const ch = this.PROGS[this.SONG[si]][bar]; // all styles walk the song for variety
+    const sect = this.SECT[si];           // 'v' verse, 'c' chorus, 'b' breakdown
+    const lastBar = bar === 3;            // last bar of the phrase → fill
 
-    // ===== BATTLE: a driving electric-guitar rock track =====
+    // ===== BATTLE: a developing electric-guitar rock track =====
     if (style === 'battle') {
       const root = this.midi(ch[0]);
       const fifth = this.midi(ch[0] + 7);
+      const noise = this.noiseBuf && this.ctx;
       if (pos === 0) {
         // ringing power chord (root + fifth + octave) held most of the bar
         this.guitar(root, t, spe * 8 * 0.92, 0.11);
         this.guitar(fifth, t, spe * 8 * 0.92, 0.085);
         this.guitar(root * 2, t, spe * 8 * 0.92, 0.06);
-        // distorted bass guitar drone
-        this.guitar(this.midi(ch[0] - 12), t, spe * 8 * 0.9, 0.12, true);
+        this.guitar(this.midi(ch[0] - 12), t, spe * 8 * 0.9, 0.12, true); // bass
+        // crash cymbal at the top of each phrase to mark the section change
+        if (bar === 0 && noise) {
+          const s = this.ctx!.createBufferSource(); s.buffer = this.noiseBuf!; s.loop = true;
+          const f = this.ctx!.createBiquadFilter(); f.type = 'highpass'; f.frequency.value = 6000;
+          const g = this.ctx!.createGain(); g.gain.setValueAtTime(0.05, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.5);
+          s.connect(f); f.connect(g); g.connect(this.musG); s.start(t); s.stop(t + 0.55);
+        }
       } else if (pos % 2 === 0) {
         // palm-muted offbeat chugs to keep the momentum
         this.guitar(root, t, spe * 0.8, 0.09, true);
         this.guitar(fifth, t, spe * 0.8, 0.07, true);
       }
-      // lead: a FIXED minor-pentatonic riff (one note per eighth) so it reads as
-      // a melody, not random noodling — the pattern repeats each bar
-      const RIFF = [0, 7, 5, 7, 3, 5, 7, 12];
-      if (pos % 1 === 0 && RIFF[pos] !== undefined) {
-        this.guitar(this.midi(ch[0] + 12 + RIFF[pos]), t, spe * 1.4, 0.055, false, true);
+      // lead riff: rotate the pattern per bar; verse plays it sparse, chorus
+      // doubles it up an octave, breakdown drops the lead for chugging tension
+      if (sect !== 'b') {
+        const riff = this.RIFFS[(phrase + bar) % this.RIFFS.length];
+        const oct = sect === 'c' ? 24 : 12;
+        const play = sect === 'c' ? true : pos % 2 === 0; // chorus dense, verse sparse
+        if (play && riff[pos] !== undefined) {
+          this.guitar(this.midi(ch[0] + oct + riff[pos]), t, spe * 1.4, sect === 'c' ? 0.06 : 0.05, false, true);
+        }
       }
-      // hard rock drums: four-on-the-floor kick, snare backbeat, busy hats
+      // drums: four-on-the-floor kick, snare backbeat, hats; a tom fill closes
+      // the phrase so the loop point doesn't feel mechanical
       if (pos % 2 === 0) this.musTone('sine', 100, t, 0.003, 0.13, 0.2, 380); // kick
-      if (pos === 4 && this.noiseBuf && this.ctx) {                            // snare on 3
-        const s = this.ctx.createBufferSource(); s.buffer = this.noiseBuf; s.loop = true;
-        const f = this.ctx.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = 1800; f.Q.value = 0.7;
-        const g = this.ctx.createGain(); g.gain.setValueAtTime(0.07, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.14);
+      if (pos === 4 && noise) {                                               // snare on 3
+        const s = this.ctx!.createBufferSource(); s.buffer = this.noiseBuf!; s.loop = true;
+        const f = this.ctx!.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = 1800; f.Q.value = 0.7;
+        const g = this.ctx!.createGain(); g.gain.setValueAtTime(0.07, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.14);
         s.connect(f); f.connect(g); g.connect(this.musG); s.start(t); s.stop(t + 0.16);
       }
-      if (pos % 2 === 1 && this.noiseBuf && this.ctx) {                        // hats
-        const s = this.ctx.createBufferSource(); s.buffer = this.noiseBuf; s.loop = true;
-        const f = this.ctx.createBiquadFilter(); f.type = 'highpass'; f.frequency.value = 8000;
-        const g = this.ctx.createGain(); g.gain.setValueAtTime(0.02, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.04);
+      if (lastBar && pos >= 4) {                                              // tom fill
+        this.musTone('sine', 220 - (pos - 4) * 26, t, 0.004, 0.14, 0.16, 600);
+      }
+      if (pos % 2 === 1 && !(lastBar && pos >= 5) && noise) {                 // hats
+        const s = this.ctx!.createBufferSource(); s.buffer = this.noiseBuf!; s.loop = true;
+        const f = this.ctx!.createBiquadFilter(); f.type = 'highpass'; f.frequency.value = 8000;
+        const g = this.ctx!.createGain(); g.gain.setValueAtTime(0.02, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.04);
         s.connect(f); f.connect(g); g.connect(this.musG); s.start(t); s.stop(t + 0.06);
       }
       return;
