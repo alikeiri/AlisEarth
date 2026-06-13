@@ -252,17 +252,47 @@ export function genMap(seed: number, nPlayers: number): GameMap {
         }
     return { ...c }; // no land anywhere near — the plateau pass will make some
   };
-  // randomized battle axis: player 1 and player 2 spawn on OPPOSITE ends of a
-  // seed-derived diagonal; players 3/4 sit perpendicular to it
-  const ang = (((seed >>> 7) % 1000) / 1000) * Math.PI * 2;
-  const ringR = 0.36 * Math.min(W, H);
-  const pos = (a: number) => ({
-    x: Math.max(14, Math.min(W - 14, Math.round(W / 2 + Math.cos(a) * ringR))),
-    z: Math.max(14, Math.min(H - 14, Math.round(H / 2 + Math.sin(a) * ringR))),
-  });
-  const corners = [pos(ang), pos(ang + Math.PI), pos(ang + Math.PI / 2), pos(ang - Math.PI / 2)];
-  const starts = corners.map(snap);
-  for (let p = 0; p < Math.max(2, nPlayers); p++) m.spawns.push({ ...starts[p] });
+  // start positions: maximize the minimum pairwise distance so players never
+  // begin crammed together (snapping a ring to land used to collapse spawns
+  // onto the same shore). Farthest-point sampling over solid-land candidates.
+  const need = Math.max(2, nPlayers);
+  const cand: { x: number; z: number }[] = [];
+  for (let z = 14; z < H - 14; z += 4)
+    for (let x = 14; x < W - 14; x += 4)
+      if (landFrac(x, z) >= 0.82) cand.push({ x, z });
+  let starts: { x: number; z: number }[];
+  if (cand.length >= need) {
+    // seed with the two farthest-apart candidates (the land's "diameter"), then
+    // greedily add the point farthest from every spawn chosen so far. This
+    // maximizes the minimum separation so players never start crammed together.
+    let a = cand[0], b = cand[0], far = -1;
+    for (let i = 0; i < cand.length; i++)
+      for (let j = i + 1; j < cand.length; j++) {
+        const d = (cand[i].x - cand[j].x) ** 2 + (cand[i].z - cand[j].z) ** 2;
+        if (d > far) { far = d; a = cand[i]; b = cand[j]; }
+      }
+    starts = need >= 2 ? [a, b] : [a];
+    while (starts.length < need) {
+      let best = cand[0], bestMin = -1;
+      for (const c of cand) {
+        let mn = Infinity;
+        for (const s of starts) { const d = (c.x - s.x) ** 2 + (c.z - s.z) ** 2; if (d < mn) mn = d; }
+        if (mn > bestMin) { bestMin = mn; best = c; }
+      }
+      starts.push(best);
+    }
+  } else {
+    // sparse-land fallback: an evenly spread ring snapped onto the continent
+    const ang = (((seed >>> 7) % 1000) / 1000) * Math.PI * 2;
+    const ringR = 0.4 * Math.min(W, H);
+    const pos = (a: number) => snap({
+      x: Math.max(14, Math.min(W - 14, Math.round(W / 2 + Math.cos(a) * ringR))),
+      z: Math.max(14, Math.min(H - 14, Math.round(H / 2 + Math.sin(a) * ringR))),
+    });
+    starts = [];
+    for (let p = 0; p < need; p++) starts.push(pos(ang + (p * 2 * Math.PI) / need));
+  }
+  for (let p = 0; p < need; p++) m.spawns.push({ ...starts[p] });
 
   // -- spawn plateaus (guaranteed buildable land)
   const raisePad = (s: { x: number; z: number }, R: number) => {

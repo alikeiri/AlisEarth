@@ -16,6 +16,9 @@ interface AiMem {
   threatX?: number; threatZ?: number; threatN?: number; // where attacks come from
   hiveCd?: number; // pace hive production
   seenAir?: number; // decaying count of enemy air spotted (reactive AA)
+  enemyAA?: number; // live count of enemy anti-air (units + batteries)
+  enemyCombat?: number; // live count of enemy fighting units
+  enemyBuildings?: number; // live count of enemy structures (walls excluded)
   lastHurtT?: number; // last tick a building of ours took damage (posture)
   defenders?: number[]; // infantry designated to the fortified defense line
 }
@@ -152,14 +155,23 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
 
   // --- live recon: react to the army the enemy is actually fielding now ---
   // (a brief sighting biases production for a while via a decaying counter)
-  let eAir = 0;
+  let eAir = 0, eAA = 0, eCombat = 0, eBuildings = 0;
   for (const e of sim.ents.values()) {
-    if (e.b || e.owner === p || e.hp <= 0) continue;
-    if (!sim.players[e.owner]?.alive) continue;
+    if (e.owner === p || e.hp <= 0 || !sim.players[e.owner]?.alive) continue;
     const ed = UNITS[e.type];
-    if (ed && ed.kind === 'air' && ed.fly && !ed.missile && !ed.internal) eAir++;
+    if (e.b) {
+      if (e.type !== 'wall' && e.type !== 'barrier') eBuildings++;
+      if (e.type === 'sam') eAA++; // anti-air structure
+    } else if (ed && !ed.internal) {
+      if (ed.kind === 'air' && ed.fly && !ed.missile) eAir++;
+      if (ed.dmg > 0) eCombat++;
+      if (e.type === 'aatank' || e.type === 'flak' || e.type === 'sam') eAA++; // mobile AA
+    }
   }
   mem.seenAir = Math.max((mem.seenAir || 0) * 0.96, eAir);
+  mem.enemyAA = eAA;                 // live anti-air the enemy can bring to bear
+  mem.enemyCombat = eCombat;         // standing enemy army (for the bomber-rush call)
+  mem.enemyBuildings = eBuildings;
   if ((mem.seenAir || 0) >= 1) { antiAir = true; sams = Math.max(sams, (mem.seenAir || 0) >= 4 ? 3 : 2); }
 
   // --- dynamic posture: turtle when poor or pressured, press when rich/safe ---
@@ -167,6 +179,13 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
   if (underAttack) turrets += 1;                                  // shore up the line under fire
   if (pl.credits > 6000) { cap = Math.min(90, cap + 8); waveEvery = Math.max(18, waveEvery - 6); } // flush: attack
   if (pl.credits < 1200 && underAttack) mem.nextWave = Math.max(mem.nextWave, sim.tickN + 10 * TICKS_PER_SEC); // hold
+
+  // once a solid ground force and a defensive line stand, every AI graduates to
+  // drones and aircraft (not just the top difficulties) — air is the follow-up
+  // punch, so it comes AFTER the ground core, not instead of it
+  const groundForce = nU('tank') + nU('heavy') + nU('ifv') + nU('mlrs') + nU('rocket') + nU('rifle') + nU('aatank') + nU('flak');
+  const groundCore = nB('factory') >= 1 && nB('barracks') >= 1 && groundForce >= 12 && nB('turret') >= 2;
+  const goAir = L.air || island || dirAir || prefAir || groundCore;
 
   // build order — economy, production breadth, then defense depth
   let want: string | null = null;
@@ -194,8 +213,8 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
   else if (island && !nB('shipyard') && pl.credits > 2000) want = 'shipyard';
   else if (!nB('dronefac') && nB('factory') && pl.credits > 2400) want = 'dronefac';
   else if (nB('sam') < sams && nB('factory') && pl.credits > (antiAir ? 1400 : 2200)) want = 'sam';
-  else if ((L.air || island || dirAir || prefAir) && !nB('airforce') && nB('factory') && pl.credits > (dirAir || prefAir ? 2400 : 3000)) want = 'airforce';
-  else if ((L.air || island || dirAir || prefAir) && nB('airforce') && nB('airfield') < 2 && pl.credits > 1600) want = 'airfield';
+  else if (goAir && !nB('airforce') && nB('factory') && pl.credits > (dirAir || prefAir ? 2400 : 3000)) want = 'airforce';
+  else if (goAir && nB('airforce') && nB('airfield') < 2 && pl.credits > 1600) want = 'airfield';
   else if ((pl.aiLvl >= 2 || dirTech) && !nB('lab') && nB('factory') && pl.credits > (dirTech ? 2400 : 3000)) want = 'lab';
   else if (pl.aiLvl >= 2 && nB('lab') && !nB('silo') && pl.credits > 3200) want = 'silo';
   else if (nB('turret') < turrets + 1 && pl.credits > 2600) want = 'turret';
@@ -298,11 +317,15 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
     cmds.push({ k: 'train', p, bid: dro.id, type: t });
   }
   const af = (myB['airforce'] || []).find(b => b.progress >= b.total && b.queue.length < 2);
-  if (af && armyCount < cap && pl.credits > (island || dirAir || prefAir ? 1800 : 2200)) {
+  if (af && armyCount < cap && pl.credits > (island || dirAir || prefAir ? 1800 : 2000)) {
     const r = sim.rng.next();
-    // vs an air-heavy player, prioritize interceptors; islanders love bombers
-    const t = island && r < 0.35 ? 'bomber'
-      : r < (antiAir ? 0.7 : 0.4) ? 'fighter' : r < 0.7 ? 'heli' : 'helidrone';
+    // once the enemy army is broken (but buildings remain), switch to bombers to
+    // level the base; vs an air-heavy enemy build interceptors; else a mix
+    const enemyCrippled = (mem.enemyCombat ?? 99) <= 3 && (mem.enemyBuildings ?? 0) > 0;
+    const t = (enemyCrippled && pl.credits > 2000) ? (r < 0.6 ? 'bomber' : r < 0.85 ? 'dbomber' : 'heli')
+      : antiAir ? (r < 0.6 ? 'fighter' : r < 0.85 ? 'heli' : 'helidrone')
+      : island && r < 0.35 ? 'bomber'
+      : r < 0.4 ? 'fighter' : r < 0.7 ? 'heli' : 'helidrone';
     cmds.push({ k: 'train', p, bid: af.id, type: t });
   }
   // island navy: gunboats and destroyers shell the enemy coast
@@ -404,9 +427,18 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
       // if only siege is missing, hold position but let the 30s fallback clock
       // run (don't reset nextWave, or the fallback never fires)
       if (L.siege === 0 || siege >= 1 || sim.tickN > mem.nextWave + 30 * TICKS_PER_SEC) {
-        const tgt = bestStrikeTarget(sim, p);
+        // air doctrine: never feed aircraft into live SAM/flak coverage. While
+        // the enemy keeps meaningful AA, the GROUND force goes in first and
+        // makes the air defences its target; aircraft only commit once the AA
+        // is broken (or when we have overwhelming air numbers).
+        const airUnits = army.filter(u => UNITS[u.type].fly);
+        const ground = army.filter(u => !UNITS[u.type].fly);
+        const enemyAA = mem.enemyAA || 0;
+        const airSafe = enemyAA === 0 || airUnits.length >= enemyAA * 3;
+        const tgt = (enemyAA > 0 && !airSafe ? airDefenseTarget(sim, p) : null) || bestStrikeTarget(sim, p);
         if (tgt) {
-          cmds.push({ k: 'attack', p, ids: army.map(u => u.id), tgt: tgt.id, x: tgt.x, z: tgt.z });
+          const strikers = airSafe ? army : ground; // hold air back until AA falls
+          if (strikers.length) cmds.push({ k: 'attack', p, ids: strikers.map(u => u.id), tgt: tgt.id, x: tgt.x, z: tgt.z });
           mem.nextWave = sim.tickN + waveEvery * TICKS_PER_SEC;
           mem.waveSize = Math.min(cap - 6, mem.waveSize + L.wInc);
         } else mem.nextWave = sim.tickN + 8 * TICKS_PER_SEC;
@@ -558,6 +590,20 @@ function bestStrikeTarget(sim: Sim, p: number): Entity | null {
     const priority = e.type === 'refinery' || e.type === 'power' || e.type === 'conyard' ? -1.2 : 0;
     const score = near * 1.2 + dHome * 0.1 + priority;
     if (score < bestScore) { bestScore = score; best = e; }
+  }
+  return best;
+}
+
+// nearest enemy anti-air (battery or mobile AA) — the ground force clears these
+// before the AI commits aircraft, so planes never fly into a SAM net
+function airDefenseTarget(sim: Sim, p: number): Entity | null {
+  const s = sim.players[p].spawn;
+  let best: Entity | null = null, bd = 1e9;
+  for (const e of sim.ents.values()) {
+    if (e.owner === p || e.hp <= 0 || !sim.players[e.owner].alive) continue;
+    if (e.type !== 'sam' && e.type !== 'aatank' && e.type !== 'flak') continue;
+    const d = (e.x - s.x) ** 2 + (e.z - s.z) ** 2;
+    if (d < bd) { bd = d; best = e; }
   }
   return best;
 }

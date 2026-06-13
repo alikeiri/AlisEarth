@@ -1298,9 +1298,10 @@ export class Sim {
       return;
     }
 
-    // ensure ore at target
+    // ensure ore at target — when the field is mined out, re-pick a fresh one
+    // with the spread-aware chooser so the fleet fans out across fields
     if (this.map.ore[ord.oz! * W + ord.ox!] <= 0) {
-      const n = this.findOreNear(ord);
+      const n = this.chooseOre(u, ord.ban && ord.ban.length ? new Set(ord.ban) : undefined);
       if (!n) { if (u.cargo > 0) { /* deliver branch next tick */ } else u.orders.shift(); return; }
       ord.ox = n.x; ord.oz = n.z;
       u.path = null;
@@ -1319,7 +1320,7 @@ export class Sim {
         ord.pD = 1e9; ord.pT = 0;
         ord.ban = ord.ban || [];
         ord.ban.push(ord.oz! * W + ord.ox!);
-        const n = ord.ban.length <= 6 ? this.findOreNear(ord) : null;
+        const n = ord.ban.length <= 6 ? this.chooseOre(u, new Set(ord.ban)) : null;
         if (n) { ord.ox = n.x; ord.oz = n.z; u.path = null; }
         else { u.orders.shift(); u.path = null; u.oreCd = 200; } // nothing reachable — rest 20s
       }
@@ -1359,9 +1360,45 @@ export class Sim {
     return this.scanOre(ord.ox!, ord.oz!, 22, ban) || this.scanOre(ord.ox!, ord.oz!, Math.max(W, H), ban);
   }
 
+  // Pick an ore cell for this harvester so the fleet SPREADS instead of blobbing
+  // onto the single nearest field. Scores candidates by richness, travel
+  // distance and how many friendly harvesters already work/head there. A
+  // dedicated fraction of the AI's harvesters "prospect" the high-value gem
+  // fields even when they sit in farther, riskier ground.
+  private chooseOre(u: Entity, ban?: Set<number>): { x: number; z: number } | null {
+    const ox = Math.floor(u.x), oz = Math.floor(u.z);
+    // tally where friendly harvesters are already working / heading (crowding)
+    const targets: { x: number; z: number }[] = [];
+    for (const e of this.ents.values()) {
+      if (e.b || e.owner !== u.owner || e.id === u.id || !UNITS[e.type]?.cargo) continue;
+      const o = e.orders[0];
+      if (o && o.k === 'harvest' && o.ox !== undefined) targets.push({ x: o.ox, z: o.oz! });
+      else targets.push({ x: e.x, z: e.z });
+    }
+    const prospector = !!this.players[u.owner]?.isAI && (u.id % 10) < 3; // ~30% chase value
+    let best: { x: number; z: number } | null = null, bestScore = -1e9;
+    const R = 48;
+    for (let z = Math.max(0, oz - R); z < Math.min(H, oz + R); z++) {
+      for (let x = Math.max(0, ox - R); x < Math.min(W, ox + R); x++) {
+        const i = z * W + x;
+        const ore = this.map.ore[i];
+        if (ore <= 0 || (ban && ban.has(i))) continue;
+        const value = ore * (this.map.gem[i] === 1 ? 3 : 1);
+        const dist = Math.hypot(x - ox, z - oz);
+        let crowd = 0;
+        for (const t of targets) if ((t.x - x) ** 2 + (t.z - z) ** 2 < 49) crowd++; // within ~7 cells
+        const score = prospector
+          ? value * 0.04 - dist * 0.25 - crowd * 1.5   // value first, distance/risk shrugged off
+          : value * 0.012 - dist * 0.7 - crowd * 3.0;  // nearest + least-crowded field
+        if (score > bestScore) { bestScore = score; best = { x, z }; }
+      }
+    }
+    return best || this.findOreNear({ k: 'harvest', ox, oz, ban: ban ? [...ban] : undefined });
+  }
+
   autoHarvest(u: Entity) {
     const ord: Order = { k: 'harvest', ox: Math.floor(u.x), oz: Math.floor(u.z) };
-    const n = this.findOreNear(ord);
+    const n = this.chooseOre(u);
     if (n) { ord.ox = n.x; ord.oz = n.z; u.orders = [ord]; }
   }
 
