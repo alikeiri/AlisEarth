@@ -742,6 +742,22 @@ export class Sim {
     return a !== b && this.players[a]?.team !== this.players[b]?.team;
   }
 
+  // nearest enemy wall/barrier within reach that sits toward the target — the
+  // thing to blast through when a unit is walled off from its objective
+  private nearestWallToward(u: Entity, tgt: Entity): Entity | null {
+    const dxT = tgt.x - u.x, dzT = tgt.z - u.z, dl = Math.hypot(dxT, dzT) || 1;
+    let best: Entity | null = null, bd = 1e9;
+    for (const e of this.ents.values()) {
+      if (!e.b || e.hp <= 0 || (e.type !== 'wall' && e.type !== 'barrier')) continue;
+      if (!this.foe(e.owner, u.owner) || !this.players[e.owner].alive) continue;
+      const dx = e.x - u.x, dz = e.z - u.z, d2 = dx * dx + dz * dz;
+      if (d2 > 18 * 18) continue;                        // only nearby walls
+      if ((dx * dxT + dz * dzT) / dl < -1) continue;     // not the ones behind us
+      if (d2 < bd) { bd = d2; best = e; }
+    }
+    return best;
+  }
+
   private findEnemy(e: Entity, range: number, skipAir = false): Entity | null {
     // threat-first acquisition: anything that can shoot back outranks a harmless
     // target (harvester, power plant), and among equals the nearest wins. So a
@@ -1264,10 +1280,18 @@ export class Sim {
           u.path = def.fly ? [{ x: tgt.x, z: tgt.z }]
             : findPath(this.map, u.x, u.z, tgt.x, tgt.z, 9000, def.move === 'sea');
           u.pi = 0; u.repath = 12;
-          // unreachable target (across water / walled in): abandon instead of
-          // thrashing a failed 9000-node A* search every few ticks
+          // can't reach the target. If a wall/barrier is blocking the way, BREACH
+          // it (attack the nearest one toward the target) instead of giving up;
+          // only abandon when the target is genuinely unreachable (e.g. across
+          // water). Air just flies over, so this is ground-only.
           if (!u.path && !def.fly) {
-            if (++u.pathFail >= 3) { u.orders.shift(); u.path = null; u.pathFail = 0; return; }
+            if (++u.pathFail >= 3) {
+              u.pathFail = 0; u.path = null;
+              const tgtIsWall = tgt.b && (tgt.type === 'wall' || tgt.type === 'barrier');
+              const wall = tgtIsWall ? null : this.nearestWallToward(u, tgt);
+              if (wall) { u.orders.unshift({ k: 'attack', tgt: wall.id, keep: true }); return; }
+              u.orders.shift(); return;
+            }
             u.repath = 40;
           } else u.pathFail = 0;
         }
@@ -1626,18 +1650,36 @@ export class Sim {
   private checkEnd() {
     let lastAlive = -1;
     const aliveTeams = new Set<number>();
+    const PROD = ['barracks', 'factory', 'dronefac', 'airforce', 'shipyard'];
     this.players.forEach((pl, i) => {
       if (!pl.alive) return;
-      // defeated once you hold no CONSTRUCTION building (construction yard) and
-      // have no Construction Vehicle left to redeploy one — losing the conyard
-      // is now decisive (build a backup MCV or defend it). Their remaining
-      // forces disband on defeat.
-      let canBuild = false;
+      // inventory this player's surviving assets
+      let anyEnt = false, builder = false, producer = false, harv = false, refinery = false;
       for (const e of this.ents.values()) {
         if (e.owner !== i || e.hp <= 0) continue;
-        if ((e.b && e.type === 'conyard') || (!e.b && UNITS[e.type]?.deploys)) { canBuild = true; break; }
+        anyEnt = true;
+        if (e.b) {
+          if (e.type === 'conyard') builder = true;           // can place new buildings
+          if (e.type === 'refinery') refinery = true;
+          if (e.progress >= e.total && PROD.includes(e.type)) producer = true; // can make units
+        } else {
+          if (UNITS[e.type]?.deploys) builder = true;         // an MCV can redeploy a conyard
+          if (e.type === 'harv') harv = true;
+        }
       }
-      if (!canBuild) {
+      let defeated: boolean;
+      if (!anyEnt) {
+        defeated = true;                                      // wiped out (humans only lose here)
+      } else if (pl.isAI) {
+        // the AI gives up only when it genuinely can't recover: it can neither
+        // build units nor build buildings, OR it has no economy at all (no
+        // harvester, no refinery, no money) to ever fund anything again
+        const income = harv || refinery || pl.credits >= 500;
+        defeated = !((builder || producer) && income);
+      } else {
+        defeated = false;                                     // human: never auto-surrender while anything stands
+      }
+      if (defeated) {
         pl.alive = false;
         this.events.push({ e: 'elim', p: i });
         for (const e of this.ents.values()) if (e.owner === i && e.hp > 0) e.hp = 0; // disband
