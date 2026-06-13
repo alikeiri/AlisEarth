@@ -50,6 +50,7 @@ export interface PlayerState {
   credits: number; alive: boolean;
   powerMade: number; powerUsed: number; pf: number;
   bonusCost: number; bonusIncome: number; // brutal-AI handicaps
+  godmode?: boolean;                       // cheat: instant builds (taints the game)
   tech: Record<string, boolean>;          // researched technologies
   spawn: { x: number; z: number };
 }
@@ -84,6 +85,7 @@ export class Sim {
   winner = -2;
   aiProfile: any = null; // host-provided study of past human-vs-AI games (adaptive AI)
   aiDirective: any = null; // optional LLM strategist (Claude API) high-level orders
+  cheated = false; // godmode was used — don't feed this game into the AI's learning
   private aiDmg = { inf: 0, veh: 0, air: 0, sea: 0 }; // human damage to the AI, by weapon class
   private aiDealt = { inf: 0, veh: 0, air: 0, sea: 0 }; // AI damage to the human, by its own weapon class
   private aiLost = { inf: 0, veh: 0, air: 0, sea: 0 }; // AI units lost, by kind
@@ -246,7 +248,7 @@ export class Sim {
       const cost = Math.round(def.cost * pl.fac.costMul * pl.bonusCost);
       if (pl.credits < cost || !this.canPlace(c.p, c.type, c.cx, c.cz)) return;
       pl.credits -= cost;
-      this.addBuilding(c.p, c.type, c.cx, c.cz, false);
+      this.addBuilding(c.p, c.type, c.cx, c.cz, !!pl.godmode); // godmode: finished instantly
       return;
     }
     if (c.k === 'train') {
@@ -265,6 +267,10 @@ export class Sim {
       return;
     }
     if (c.k === 'godmode') {
+      // no cheating in human-vs-human matches
+      if (this.players.filter(p => !p.isAI).length > 1) return;
+      pl.godmode = true;     // instant builds from now on
+      this.cheated = true;   // taint the game so it never trains the AI
       pl.credits += 50000;
       this.events.push({ e: 'cash', x: pl.spawn.x, z: pl.spawn.z });
       return;
@@ -766,7 +772,8 @@ export class Sim {
         if (pl.credits >= uc) { pl.credits -= uc; it.paid = true; }
         else return;
       }
-      it.t -= TICK * rate * (1 + 0.25 * (b.lvl - 1)); // upgrades speed up production
+      if (pl.godmode) it.t = 0;                       // cheat: instant production
+      else it.t -= TICK * rate * (1 + 0.25 * (b.lvl - 1)); // upgrades speed up production
       if (it.t <= 0 && UNITS[it.type].missile) {
         // missiles don't spawn — they arm the silo, ready to launch
         b.storedMissile = it.type;
@@ -1473,6 +1480,7 @@ export class Sim {
             lost: { ...this.aiLost },
             harvLost: this.aiHarvLost,
             len: Math.round(this.tickN / 10),
+            cheated: this.cheated,
           },
         });
       }

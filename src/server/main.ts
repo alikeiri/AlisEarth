@@ -302,13 +302,13 @@ function startRoom(room: Room) {
     for (const slot of room.aiSlots) cmds.push(...aiTick(sim, slot));
     if (cmds.length && room.rec) room.rec.cmds.push({ k: sim.tickN, c: cmds }); // replay: full cmd stream incl. AI
     sim.tick(cmds);
-    for (const ev of sim.events) if (ev.e === 'aiReport') { room.lastReport = ev.r; saveAiReport(ev.r); }
+    for (const ev of sim.events) if (ev.e === 'aiReport') { room.lastReport = ev.r; if (!ev.r.cheated) saveAiReport(ev.r); }
     broadcast(room, { t: 'snap', ...sim.snapshot() });
     if (sim.done) {
       broadcast(room, { t: 'end', winner: sim.winner });
       clearInterval(room.timer!);
       room.timer = null;
-      saveReplay(room);
+      if (!sim.cheated) saveReplay(room);
       // room stays so players can read the result; it dies when they disconnect
     }
   }, 100);
@@ -374,7 +374,7 @@ wss.on('connection', ws => {
     if (!room.clients.length) {
       if (room.timer) clearInterval(room.timer);
       // abandoned mid-game: still keep the replay if it ran long enough
-      if (room.started && room.sim && room.sim.tickN > 600) saveReplay(room);
+      if (room.started && room.sim && room.sim.tickN > 600 && !room.sim.cheated) saveReplay(room);
       rooms.delete(room.code);
     } else if (!room.started) {
       room.clients.forEach((c, i) => { c.slot = i; });

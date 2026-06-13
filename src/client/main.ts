@@ -103,11 +103,14 @@ class LocalGame implements GameLike {
       for (const ev of this.sim.events) {
         if (ev.e === 'aiReport' && !this.reportSaved) {
           this.reportSaved = true;
-          saveAiReport(ev.r);
-          requestLesson(ev.r); // fire-and-forget post-mortem
+          if (!ev.r.cheated) { // godmode games never train the AI
+            saveAiReport(ev.r);
+            requestLesson(ev.r); // fire-and-forget post-mortem
+          }
         }
       }
-      if (this.sim.done && !this.recSaved && !this.isSim) { this.recSaved = true; this.uploadReplay(); }
+      // skip the replay too for cheated games (it would feed match analysis)
+      if (this.sim.done && !this.recSaved && !this.isSim) { this.recSaved = true; if (!this.sim.cheated) this.uploadReplay(); }
       this.evQ.push(...this.sim.events);
     }
     if (guard >= gMax) this.acc = 0; // tab was backgrounded — drop the backlog
