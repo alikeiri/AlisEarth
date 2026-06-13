@@ -14,6 +14,7 @@ interface AiMem {
   peaceUntil: number; peaceBroken: boolean; nextRaid: number;
   landOk?: boolean; landCheckT?: number; // island detection (cached pathfind)
   waterRel?: boolean; // navy worth building (island or water-heavy map)
+  sawEnemyNavy?: boolean; // has ever spotted an enemy warship → reactive shipyard
   threatX?: number; threatZ?: number; threatN?: number; // where attacks come from
   hiveCd?: number; // pace hive production
   seenAir?: number; // decaying count of enemy air spotted (reactive AA)
@@ -137,7 +138,10 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
     for (let z = 2; z < H - 2; z += 4) for (let x = 2; x < W - 2; x += 4) { tot++; if (sim.map.passableSea(x, z)) sea++; }
     mem.waterRel = tot > 0 && sea / tot >= 0.12;
   }
-  const waterRel = island || !!mem.waterRel;
+  // once the AI has ever spotted an enemy warship, a navy is worth it even on a
+  // map it judged 'dry' — it builds a shipyard to answer the threat
+  if (!mem.sawEnemyNavy && enemyHasNavy(sim, p)) mem.sawEnemyNavy = true;
+  const waterRel = island || !!mem.waterRel || !!mem.sawEnemyNavy;
 
   // optional LLM strategist (Claude API, set by the host): a high-level stance
   // that bends the scripted knobs — the script stays the tactical layer
@@ -476,6 +480,15 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
   }
 
   return cmds;
+}
+
+// has any VISIBLE enemy warship been seen? (cloaked subs don't count — you can't
+// spot what you haven't pinged). Triggers a reactive shipyard.
+function enemyHasNavy(sim: Sim, p: number): boolean {
+  for (const e of sim.ents.values())
+    if (!e.b && e.hp > 0 && UNITS[e.type]?.move === 'sea' && !UNITS[e.type]?.cloak
+      && sim.foe(e.owner, p) && sim.players[e.owner].alive) return true;
+  return false;
 }
 
 // how many enemy units of a given type are on the field (gates reactive builds)

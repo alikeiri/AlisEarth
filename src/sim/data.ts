@@ -77,7 +77,7 @@ export const UNITS: Record<string, UnitDef> = {
   // armored gun ship: duels other warships and bombards the coast (long reach).
   // its sonar is SHORT — shorter than a sub's torpedo range — so a lone sub
   // out-sticks it; depth charges barely scratch a sub. Bring a Sub Hunter.
-  destroyer: { name: 'Destroyer',   cost: 1500, hp: 550, speed: 2.2, range: 9.0, dmg: 45, rof: 2.2, builtAt: 'shipyard', buildTime: 16, kind: 'sea', move: 'sea', sonar: 5.5 },
+  destroyer: { name: 'Destroyer',   cost: 1500, hp: 550, speed: 2.2, range: 11.0, dmg: 45, rof: 2.2, builtAt: 'shipyard', buildTime: 16, kind: 'sea', move: 'sea', sonar: 5.5 },
   // stays submerged and unseen until a sonar ship pings it or you get very
   // close — then it's a glass dagger: one devastating torpedo, thin hull.
   // torpedoes ships at range 6.5; lobs cruise missiles at shore BUILDINGS from
@@ -87,7 +87,7 @@ export const UNITS: Record<string, UnitDef> = {
   // hard counter to submarines, but weak at everything else
   subhunter: { name: 'Sub Hunter',  cost: 800,  hp: 360, speed: 3.6, range: 5.0, dmg: 26, rof: 1.0, builtAt: 'shipyard', buildTime: 9,  kind: 'sea', move: 'sea', sonar: 11 },
   // long-range bombardment cruiser: flattens shore bases from afar, fragile hull
-  mslcruiser:{ name: 'Missile Cruiser', cost: 1600, hp: 280, speed: 2.0, range: 14.0, dmg: 55, rof: 2.6, builtAt: 'shipyard', buildTime: 16, kind: 'sea', move: 'sea' },
+  mslcruiser:{ name: 'Missile Cruiser', cost: 1600, hp: 280, speed: 2.0, range: 18.0, dmg: 55, rof: 2.6, builtAt: 'shipyard', buildTime: 16, kind: 'sea', move: 'sea' },
   // dedicated fleet air-defence: murders aircraft, useless against hulls
   flakship:  { name: 'Flak Cruiser', cost: 1200, hp: 360, speed: 2.6, range: 8.0, dmg: 30, rof: 0.7, builtAt: 'shipyard', buildTime: 13, kind: 'sea', move: 'sea' },
   navdrone:  { name: 'Naval Drone', cost: 500,  hp: 90,  speed: 3.6, range: 4.0, dmg: 18, rof: 1.0, builtAt: 'shipyard', buildTime: 7,  kind: 'sea', move: 'sea' },
