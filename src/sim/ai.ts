@@ -6,13 +6,15 @@
 
 import { Sim, Entity, Cmd } from './sim';
 import { UNITS, BUILDINGS, TICKS_PER_SEC } from './data';
-import { W, H } from './map';
+import { W, H, nearestPassable } from './map';
 import { findPath } from './path';
 
 interface AiMem {
   nextWave: number; waveSize: number; tog: number; defCd: number;
   peaceUntil: number; peaceBroken: boolean; nextRaid: number;
   landOk?: boolean; landCheckT?: number; // island detection (cached pathfind)
+  threatX?: number; threatZ?: number; threatN?: number; // where attacks come from
+  hiveCd?: number; // pace hive production
 }
 
 const LVL = [
@@ -75,6 +77,11 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
     if (d.vOwner !== p) continue;
     const attacker = sim.ents.get(d.by);
     if (!attacker) continue;
+    // learn the enemy's attack corridor: a rolling average of where the
+    // attackers come from. After a few attacks this points down their route.
+    mem.threatX = (mem.threatX ?? attacker.x) * 0.9 + attacker.x * 0.1;
+    mem.threatZ = (mem.threatZ ?? attacker.z) * 0.9 + attacker.z * 0.1;
+    mem.threatN = (mem.threatN || 0) + 1;
     if (!mem.peaceBroken && !sim.players[attacker.owner]?.isAI) {
       mem.peaceBroken = true;
       mem.nextWave = Math.min(mem.nextWave, sim.tickN + 12 * TICKS_PER_SEC);
@@ -298,12 +305,43 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
     const t = !pl.tech['chem'] ? 'chem' : !pl.tech['bio'] ? 'bio' : !pl.tech['stealth'] ? 'stealth' : null;
     if (t) cmds.push({ k: 'research', p, bid: lab.id, tech: t });
   }
-  // a fortified Drone Hive anchors the base defense
-  const bkForHive = (myB['barracks'] || []).find(b => b.progress >= b.total && b.queue.length < 1);
-  if (bkForHive && pl.aiLvl >= 2 && nU('hive') < 1 && pl.credits > 2200)
-    cmds.push({ k: 'train', p, bid: bkForHive.id, type: 'hive' });
-  for (const h of (myU['hive'] || []))
-    if (!h.fortified && !h.orders.length) cmds.push({ k: 'fortify', p, ids: [h.id] }); // dig in at base
+  // Drone Hive defense network: anchor hives at the base, then push extras out
+  // to fortify the corridor the enemy keeps attacking through (learned above).
+  if (pl.aiLvl >= 1) {
+    const hives = myU['hive'] || [];
+    const hiveTarget = pl.aiLvl >= 3 ? 4 : pl.aiLvl >= 2 ? 3 : 2;
+    // build more hives at a barracks when affordable, paced out
+    const bkForHive = (myB['barracks'] || []).find(b => b.progress >= b.total && b.queue.length < 1);
+    if (bkForHive && hives.length < hiveTarget && pl.credits > 2400 && (mem.hiveCd || 0) <= sim.tickN) {
+      cmds.push({ k: 'train', p, bid: bkForHive.id, type: 'hive' });
+      mem.hiveCd = sim.tickN + 25 * TICKS_PER_SEC;
+    }
+    // place each hive: the first anchors the base, the rest fortify staggered
+    // posts along the enemy's route once a few attacks have revealed it
+    const base = basePos(sim, p);
+    const knowRoute = (mem.threatN || 0) >= 4 && mem.threatX !== undefined && !island;
+    const dx = (mem.threatX ?? base.x) - base.x, dz = (mem.threatZ ?? base.z) - base.z;
+    const dl = Math.hypot(dx, dz) || 1;
+    const sorted = [...hives].sort((a, b) => a.id - b.id);
+    sorted.forEach((h, idx) => {
+      if (h.fortified) return;
+      if (h.orders.length && h.orders[0].k === 'move') return; // already marching to its post
+      let post: { x: number; z: number };
+      if (!knowRoute || idx === 0) {
+        post = { x: h.x, z: h.z }; // base defense: dig in where it stands
+      } else {
+        // secure the route: each extra hive a bit further out, alternating sides
+        const reach = Math.min(dl - 4, 9 + idx * 4);
+        const off = (idx % 2 ? -1 : 1) * Math.ceil(idx / 2) * 3;
+        const px = base.x + (dx / dl) * reach - (dz / dl) * off;
+        const pz = base.z + (dz / dl) * reach + (dx / dl) * off;
+        const cp = nearestPassable(sim.map, Math.round(px), Math.round(pz), 10);
+        post = cp ? { x: cp.x + 0.5, z: cp.z + 0.5 } : { x: h.x, z: h.z };
+      }
+      if (Math.hypot(h.x - post.x, h.z - post.z) <= 3.5) cmds.push({ k: 'fortify', p, ids: [h.id] });
+      else cmds.push({ k: 'move', p, ids: [h.id], x: post.x, z: post.z });
+    });
+  }
 
   // upgrade something when rich
   if (pl.credits > 4500) {
@@ -349,6 +387,12 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
   }
 
   return cmds;
+}
+
+// the player's home reference point: its construction yard, else its spawn
+function basePos(sim: Sim, p: number): { x: number; z: number } {
+  for (const e of sim.ents.values()) if (e.b && e.owner === p && e.type === 'conyard') return { x: e.x, z: e.z };
+  return { ...sim.players[p].spawn };
 }
 
 function armyOf(sim: Sim, p: number, idleOnly: boolean): Entity[] {
