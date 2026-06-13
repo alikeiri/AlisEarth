@@ -215,6 +215,10 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
   // spending — cheap units must not starve the harvester budget
   const harvTarget = Math.max(L.harv, nB('refinery') * 2);
   const ecoShort = hasFac && nU('harv') < harvTarget;
+  // safety net: down to the last 1-2 harvesters, or one being shot at → the
+  // economy is about to collapse, so cancel other builds and rush a replacement
+  const harvUnderFire = (myU['harv'] || []).some(h => sim.tickN - h.lastHitT < 40);
+  const harvEmergency = hasFac && (nU('harv') <= 2 || (harvUnderFire && nU('harv') <= 3));
   for (const bks of (myB['barracks'] || [])) {
     if (bks.progress < bks.total || bks.queue.length >= 2) continue;
     if (armyCount >= cap) continue;
@@ -229,8 +233,14 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
     }
   }
   for (const fac of (myB['factory'] || [])) {
-    if (fac.progress < fac.total || fac.queue.length >= 2) continue;
-    if (nU('harv') < harvTarget && pl.credits > 1000) cmds.push({ k: 'train', p, bid: fac.id, type: 'harv' });
+    if (fac.progress < fac.total) continue;
+    // emergency: scrap whatever this factory is building and slot a harvester
+    if (harvEmergency && fac.queue.length && fac.queue[fac.queue.length - 1].type !== 'harv')
+      cmds.push({ k: 'cancel', p, bid: fac.id, type: fac.queue[fac.queue.length - 1].type });
+    if (fac.queue.length >= 2 && !harvEmergency) continue;
+    if (harvEmergency && nU('harv') < harvTarget + 1 && pl.credits > 300) cmds.push({ k: 'train', p, bid: fac.id, type: 'harv' });
+    else if (fac.queue.length >= 2) continue;
+    else if (nU('harv') < harvTarget && pl.credits > 1000) cmds.push({ k: 'train', p, bid: fac.id, type: 'harv' });
     else if (nU('engineer') < 1 && pl.aiLvl >= 1 && pl.credits > 1500) cmds.push({ k: 'train', p, bid: fac.id, type: 'engineer' });
     else if (armyCount < cap && pl.credits > (ecoShort ? 2200 : 1000)) {
       // islanders keep only a small home guard of vehicles

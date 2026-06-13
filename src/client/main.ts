@@ -1430,7 +1430,10 @@ class GameClient {
       }
       this.lastHover = hover;
     } else if (this.frame % 2 === 1) hover = this.lastHover;
-    canvas3.style.cursor = hover ? 'crosshair' : '';
+    // a selected missile silo turns the whole map into a strike-target reticle
+    const siloAiming = this.selection.size === 1 && this.byId.get([...this.selection][0])?.t === 'silo'
+      && this.byId.get([...this.selection][0])?.o === this.game.me;
+    canvas3.style.cursor = siloAiming ? SILO_CURSOR : hover ? 'crosshair' : '';
 
     // range/detection circles for the current selection
     const circles: { x: number; z: number; r: number; atk: boolean }[] = [];
@@ -1486,6 +1489,9 @@ class GameClient {
 
 // ---------------- Menus ----------------
 const $ = (id: string) => document.getElementById(id)!;
+
+// red target reticle shown over the map while a missile silo is selected
+const SILO_CURSOR = "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='34' height='34'%3E%3Cg fill='none' stroke='%23ff4030' stroke-width='2'%3E%3Ccircle cx='17' cy='17' r='10'/%3E%3Cpath d='M17 1v9M17 24v9M1 17h9M24 17h9'/%3E%3C/g%3E%3Ccircle cx='17' cy='17' r='1.6' fill='%23ff4030'/%3E%3C/svg%3E\") 17 17, crosshair";
 let selFaction = 'usa';
 let selDiff = 1;
 let selDiff2 = 2;
@@ -2017,6 +2023,11 @@ function initMenus() {
 }
 
 // WebGL2 support gate (all modern browsers: Chrome/Edge 56+, Firefox 51+, Safari 15+)
+// suppress the browser's right-click menu everywhere — right-click is a game
+// control, and the Chrome dropdown sometimes popped up over the minimap/HUD.
+// (inputs still work; we only stop the context menu.)
+window.addEventListener('contextmenu', e => e.preventDefault());
+
 const glOk = !!document.createElement('canvas').getContext('webgl2');
 if (!glOk) {
   document.body.innerHTML = '<div style="display:flex;height:100%;align-items:center;justify-content:center;color:#ff5043;font-size:18px;text-align:center;padding:20px">' +
