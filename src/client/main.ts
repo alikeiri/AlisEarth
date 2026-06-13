@@ -3,8 +3,8 @@
 
 import { Sim } from '../sim/sim';
 import { aiTick } from '../sim/ai';
-import { FACTIONS, BUILDINGS, UNITS, PLAYER_COLORS } from '../sim/data';
-import { GameMap, genMap, setMapSize, W, H, MAXD } from '../sim/map';
+import { FACTIONS, BUILDINGS, UNITS, PLAYER_COLORS, SIM_VERSION } from '../sim/data';
+import { GameMap, genMap, setMapSize, W, H, MAXD, SEA } from '../sim/map';
 import { Renderer } from './render';
 import { UI } from './ui';
 import { Net } from './net';
@@ -49,7 +49,7 @@ class LocalGame implements GameLike {
     // spawns together. Grow the map with the player count (never shrink the
     // player's chosen size), capped at the largest supported dimension.
     const nPlayers = simLvl2 !== null ? 2 : Math.min(4, 1 + enemyLevels.slice(0, 3).length);
-    const minForPlayers = nPlayers >= 4 ? 128 : nPlayers === 3 ? 112 : 96;
+    const minForPlayers = nPlayers >= 4 ? 160 : nPlayers === 3 ? 136 : 112;
     const effSize = Math.min(MAXD, Math.max(size, minForPlayers));
     setMapSize(effSize);
     const seed = (Date.now() ^ (Math.random() * 0x7fffffff)) >>> 0;
@@ -87,13 +87,15 @@ class LocalGame implements GameLike {
   private uploadReplay() {
     if (!this.recPlayers.length) return;
     const meta = {
-      players: this.recPlayers.map(p => ({ name: p.name, faction: p.faction, isAI: !!p.isAI })),
+      // record the FULL spec (aiLvl + team included) so the replay reconstructs
+      // the players identically — stripping them desynced economy/teams
+      players: this.recPlayers.map(p => ({ name: p.name, faction: p.faction, isAI: !!p.isAI, aiLvl: p.aiLvl, team: p.team })),
       winner: this.sim.winner, winnerName: this.sim.winner >= 0 ? this.recPlayers[this.sim.winner]?.name : null,
       lenSec: Math.round(this.sim.tickN / 10), done: true,
     };
     fetch('/replays', {
       method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ meta, seed: this.recSeed, size: this.recSize, cmds: this.recCmds }),
+      body: JSON.stringify({ meta, seed: this.recSeed, size: this.recSize, ver: SIM_VERSION, cmds: this.recCmds }),
     }).catch(() => { /* offline / static host — replay just isn't stored */ });
   }
   update(dtMs: number) {
@@ -339,7 +341,7 @@ function canPlaceClient(map: GameMap, views: any[], me: number, type: string, cx
     if (v.cx < cx + s && v.cx + v.sz > cx && v.cz < cz + s && v.cz + v.sz > cz) return false;
     if (v.o === me) {
       const d = Math.sqrt((v.x - (cx + s / 2)) ** 2 + (v.z - (cz + s / 2)) ** 2);
-      if (d <= 11) near = true;
+      if (d <= (onWater ? 22 : 11)) near = true; // shipyards reach out to the coast
     }
   }
   return near;
@@ -367,6 +369,9 @@ class GameClient {
   private areaDrag: { cx: number; cz: number; r: number } | null = null;
   private patrolMode = false;
   private patrolDraw: { x: number; z: number }[] | null = null;
+  // bulldozer terraforming: draw a path, reshape the ground toward a target height
+  private terraMode = false;
+  private terraTarget: 'raise' | 'lower' | 'water' = 'raise';
   // drag-line placement for walls/barriers
   private lineStart: { cx: number; cz: number } | null = null;
   private lineCells: { cx: number; cz: number; ok: boolean }[] = [];
@@ -477,6 +482,7 @@ class GameClient {
       if (e.code === 'Escape') {
         this.ui.setPlacing(null); this.selection.clear();
         this.patrolMode = false; this.patrolDraw = null;
+        this.terraMode = false;
         this.renderer.setFormationPath(null);
       }
       if (e.code === 'KeyH') this.issueToUnits({ k: 'stop' });
@@ -518,6 +524,14 @@ class GameClient {
         this.patrolDraw = null;
         audio.play('click');
       }
+      // T: with a bulldozer selected, enter terraform-draw mode and cycle the
+      // target height (raise land / lower land / dig to water) on repeat presses
+      if (e.code === 'KeyT' && this.myUnitIds().some(id => UNITS[this.byId.get(id)?.t]?.terra)) {
+        if (!this.terraMode) { this.terraMode = true; this.terraTarget = 'raise'; }
+        else this.terraTarget = this.terraTarget === 'raise' ? 'lower' : this.terraTarget === 'lower' ? 'water' : 'raise';
+        this.patrolMode = false; this.patrolDraw = null;
+        audio.play('click');
+      }
       // G: toggle Hold Position stance for selected units
       if (e.code === 'KeyG') {
         const ids = this.myUnitIds();
@@ -544,8 +558,12 @@ class GameClient {
       // F: fortify / unfortify selected units (hives, rifle/rocket/troopers).
       // Press again to pack up and move.
       if (e.code === 'KeyF') {
-        const ids = this.myUnitIds().filter(id => UNITS[this.byId.get(id)?.t]?.fortify);
+        const sel = this.myUnitIds();
+        const ids = sel.filter(id => UNITS[this.byId.get(id)?.t]?.fortify);
         if (ids.length) { this.game.issue({ k: 'fortify', p: this.game.me, ids }); audio.play('confirm'); }
+        // F also deploys a Construction Vehicle into a forward construction yard
+        const dep = sel.filter(id => UNITS[this.byId.get(id)?.t]?.deploys);
+        if (dep.length) { this.game.issue({ k: 'deploy', p: this.game.me, ids: dep }); audio.play('confirm'); }
       }
       // B: selected engineers build a road toward the cursor (extends base reach)
       if (e.code === 'KeyB') {
@@ -758,6 +776,41 @@ class GameClient {
     } else if (pts.length) {
       const pb = this.selectedProdBuilding();
       if (pb) { this.game.issue({ k: 'bpatrol', p: me, bid: pb.i, pts: rounded }); audio.play('confirm'); }
+    }
+  }
+
+  // finish a bulldozer terraform draw: expand the drawn polyline into a strip of
+  // cells and send the job (with the chosen target height) to the sim
+  private finishTerra(sx: number, sy: number) {
+    const me = this.game.me;
+    this.mouse.dragging = false;
+    const pts = this.patrolDraw || [];
+    this.patrolDraw = null;
+    this.terraMode = false;
+    this.renderer.setFormationPath(null);
+    const g = this.renderer.groundPoint(sx / window.innerWidth, sy / window.innerHeight);
+    if (g && (!pts.length || Math.hypot(g.x - pts[pts.length - 1].x, g.z - pts[pts.length - 1].z) > 0.4)) pts.push(g);
+    if (!pts.length) return;
+    // rasterize the polyline into unique cells, widened to a 3-cell brush
+    const seen = new Set<number>(); const cells: { x: number; z: number }[] = [];
+    const addCell = (x: number, z: number) => {
+      const cx = Math.floor(x), cz = Math.floor(z); const k = cz * W + cx;
+      if (cx < 0 || cz < 0 || cx >= W || cz >= H || seen.has(k)) return;
+      seen.add(k); cells.push({ x: cx, z: cz });
+    };
+    for (let s = 0; s < pts.length; s++) {
+      const a = pts[s], b = pts[Math.min(s + 1, pts.length - 1)];
+      const steps = Math.max(1, Math.ceil(Math.hypot(b.x - a.x, b.z - a.z) * 2));
+      for (let t = 0; t <= steps; t++) {
+        const x = a.x + (b.x - a.x) * (t / steps), z = a.z + (b.z - a.z) * (t / steps);
+        for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) addCell(x + dx, z + dz);
+      }
+    }
+    const h = this.terraTarget === 'water' ? SEA - 0.9 : this.terraTarget === 'lower' ? SEA + 0.3 : SEA + 2.2;
+    const dozers = this.myUnitIds().filter(id => UNITS[this.byId.get(id)?.t]?.terra);
+    if (dozers.length && cells.length) {
+      this.game.issue({ k: 'terraform', p: me, ids: [dozers[0]], path: cells, h });
+      audio.play('confirm');
     }
   }
 
@@ -976,7 +1029,7 @@ class GameClient {
         }
         return;
       }
-      if (this.patrolMode) {
+      if (this.patrolMode || this.terraMode) {
         this.mouse.lDown = true;
         this.mouse.downX = e.clientX; this.mouse.downY = e.clientY;
         this.mouse.dragging = false;
@@ -1056,10 +1109,12 @@ class GameClient {
     this.mouse.lDown = false;
     const me = this.game.me;
 
-    // commit a wall/barrier drag-line
-    if (this.lineStart) { this.commitLine(e.shiftKey); return; }
+    // commit a wall/barrier drag-line (clear the drag state so no stray
+    // selection rubber-band lingers once the line is placed)
+    if (this.lineStart) { this.mouse.dragging = false; this.commitLine(e.shiftKey); return; }
 
     if (this.patrolMode) { this.finishPatrol(e.clientX, e.clientY); return; }
+    if (this.terraMode) { this.finishTerra(e.clientX, e.clientY); return; }
 
     if (this.mouse.dragging) {
       this.mouse.dragging = false;
@@ -1313,7 +1368,7 @@ class GameClient {
     if (this.keys.has('KeyE')) this.renderer.rotate(-1.6 * dt);
 
     // a selected building's stored patrol route shows as a standing yellow line
-    const drawingNow = (this.patrolMode && this.patrolDraw && this.mouse.lDown) ||
+    const drawingNow = ((this.patrolMode || this.terraMode) && this.patrolDraw && this.mouse.lDown) ||
       (this.mouse.rDragging && this.rMode === 'form');
     if (!drawingNow) {
       const pb = this.selectedProdBuilding();
@@ -1321,16 +1376,19 @@ class GameClient {
       else this.renderer.setFormationPath(null);
     }
 
-    // patrol route drawing (P + left-drag)
-    if (this.patrolMode && this.patrolDraw && this.mouse.lDown && this.mouse.dragging) {
+    // patrol route / terraform path drawing (P or T, then left-drag)
+    if ((this.patrolMode || this.terraMode) && this.patrolDraw && this.mouse.lDown && this.mouse.dragging) {
       const g = this.renderer.groundPoint(this.mouse.x / window.innerWidth, this.mouse.y / window.innerHeight);
       if (g) {
         const last = this.patrolDraw[this.patrolDraw.length - 1];
-        if (!last || Math.hypot(g.x - last.x, g.z - last.z) >= 0.75) {
-          if (this.patrolDraw.length < 120) this.patrolDraw.push(g);
+        const minStep = this.terraMode ? 0.6 : 0.75;
+        if (!last || Math.hypot(g.x - last.x, g.z - last.z) >= minStep) {
+          if (this.patrolDraw.length < 200) this.patrolDraw.push(g);
         }
       }
-      this.renderer.setFormationPath(this.patrolDraw, 0xffd24a);
+      // terraform paths render in the target's colour (raise=green, lower=tan, water=blue)
+      const col = !this.terraMode ? 0xffd24a : this.terraTarget === 'water' ? 0x3da5ff : this.terraTarget === 'lower' ? 0xd2a86a : 0x57d977;
+      this.renderer.setFormationPath(this.patrolDraw, col);
     }
 
     // right-drag: grab-the-world pan, or formation line drawing
@@ -1384,6 +1442,11 @@ class GameClient {
     for (const v of views) this.byId.set(v.i, v);
     for (const id of this.selection) if (!this.byId.has(id)) this.selection.delete(id);
 
+    // terraforming edited the heightfield → rebuild the terrain mesh (throttled)
+    if (this.game.map.heightDirty && this.frame % 4 === 0) {
+      this.renderer.refreshTerrain();
+      this.game.map.heightDirty = false;
+    }
     this.renderer.updateViews(views, this.selection, dt);
     const evs = this.game.drainEvents();
     this.renderer.addEvents(evs);
@@ -1525,7 +1588,7 @@ const SILO_CURSOR = "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/20
 let selFaction = 'usa';
 let selDiff = 1;
 let selDiff2 = 2;
-let selSize = 96;
+let selSize = 112;
 let fogEnabled = true; // start-screen checkbox; spectator/replay always show all
 let selEnemies = 1; // 1-3 AI opponents in skirmish
 let selDiff3 = 2;   // third enemy's difficulty
@@ -2090,7 +2153,7 @@ function initMenus() {
   mv.addEventListener('input', () => { audio.init(); audio.setMusicVol(+mv.value / 100); });
   sv.addEventListener('input', () => { audio.init(); audio.setSfxVol(+sv.value / 100); });
   buildOptionRow('sizeRow',
-    [{ label: 'Small', v: 72 }, { label: 'Medium', v: 96 }, { label: 'Large', v: 128 }],
+    [{ label: 'Medium', v: 112 }, { label: 'Large', v: 136 }, { label: 'Huge', v: 160 }],
     () => selSize, v => { selSize = v; });
   $('btnSkirmish').addEventListener('click', () => {
     const key = (($('claudeKey') as HTMLInputElement).value || '').trim();
@@ -2125,6 +2188,12 @@ function initMenus() {
       list.querySelectorAll('.replayRow').forEach(row => row.addEventListener('click', async () => {
         try {
           const data = await (await fetch('/replays/' + row.getAttribute('data-id'))).json();
+          // a replay only reproduces on the same sim/map version it was recorded
+          // on — refuse incompatible ones instead of showing a garbled match
+          if ((data.ver || 0) !== SIM_VERSION) {
+            list.innerHTML = 'This replay was recorded on an older game version and can no longer be played back. New matches will record compatible replays.';
+            return;
+          }
           startGame(new ReplayGame(data));
         } catch { list.innerHTML = 'Replay could not be loaded.'; }
       }));

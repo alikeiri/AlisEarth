@@ -296,7 +296,7 @@ class AudioMan {
 
   startMusic() {
     if (!this.ctx || this.musicTimer || this.musicStyle === 'off') return;
-    const bpm = this.musicStyle === 'ambient' ? 60 : this.musicStyle === 'march' ? 104 : 84;
+    const bpm = this.musicStyle === 'ambient' ? 60 : this.musicStyle === 'march' ? 104 : 124;
     const spe = 60 / bpm / 2; // seconds per eighth note
     this.nextT = this.ctx.currentTime + 0.15;
     this.musicTimer = setInterval(() => {
@@ -328,11 +328,75 @@ class AudioMan {
     o.start(t); o.stop(t + dur + 0.1);
   }
 
+  // distorted electric-guitar voice: sawtooth → soft-clip waveshaper → tone
+  // filter → picked envelope. `palm` darkens it for chugging power chords.
+  private guitarCurve: Float32Array | null = null;
+  private guitar(freq: number, t: number, dur: number, peak: number, palm = false, echo = false) {
+    if (!this.ctx) return;
+    if (!this.guitarCurve) {
+      const n = 1024, c = new Float32Array(n), amt = 9;
+      for (let i = 0; i < n; i++) { const x = (i / n) * 2 - 1; c[i] = ((1 + amt) * x) / (1 + amt * Math.abs(x)); }
+      this.guitarCurve = c;
+    }
+    const o = this.ctx.createOscillator(); o.type = 'sawtooth'; o.frequency.value = freq;
+    const pre = this.ctx.createGain(); pre.gain.value = 0.7;            // drive into the clipper
+    const sh = this.ctx.createWaveShaper(); sh.curve = this.guitarCurve; sh.oversample = '2x';
+    const tone = this.ctx.createBiquadFilter(); tone.type = 'lowpass';
+    tone.frequency.value = palm ? 1400 : 2700; tone.Q.value = 0.8;
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(peak, t + 0.006);              // pick attack
+    g.gain.exponentialRampToValueAtTime(peak * 0.55, t + dur * 0.45);  // sustain
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(pre); pre.connect(sh); sh.connect(tone); tone.connect(g); g.connect(this.musG);
+    if (echo) g.connect(this.delay);
+    o.start(t); o.stop(t + dur + 0.05);
+  }
+
   private scheduleEighth(t: number, e: number, spe: number) {
     const bar = Math.floor(e / 8) % 4;
     const pos = e % 8;
     const ch = this.chords[bar];
     const style = this.musicStyle;
+
+    // ===== BATTLE: a driving electric-guitar rock track =====
+    if (style === 'battle') {
+      const root = this.midi(ch[0]);
+      const fifth = this.midi(ch[0] + 7);
+      if (pos === 0) {
+        // ringing power chord (root + fifth + octave) held most of the bar
+        this.guitar(root, t, spe * 8 * 0.92, 0.11);
+        this.guitar(fifth, t, spe * 8 * 0.92, 0.085);
+        this.guitar(root * 2, t, spe * 8 * 0.92, 0.06);
+        // distorted bass guitar drone
+        this.guitar(this.midi(ch[0] - 12), t, spe * 8 * 0.9, 0.12, true);
+      } else if (pos % 2 === 0) {
+        // palm-muted offbeat chugs to keep the momentum
+        this.guitar(root, t, spe * 0.8, 0.09, true);
+        this.guitar(fifth, t, spe * 0.8, 0.07, true);
+      }
+      // lead: a distorted pentatonic note with echo, every so often
+      if (Math.random() < 0.45) {
+        const pent = [0, 3, 5, 7, 10][(Math.random() * 5) | 0];
+        this.guitar(this.midi(ch[0] + 12 + pent), t, spe * 1.6, 0.06, false, true);
+      }
+      // hard rock drums: four-on-the-floor kick, snare backbeat, busy hats
+      if (pos % 2 === 0) this.musTone('sine', 100, t, 0.003, 0.13, 0.2, 380); // kick
+      if (pos === 4 && this.noiseBuf && this.ctx) {                            // snare on 3
+        const s = this.ctx.createBufferSource(); s.buffer = this.noiseBuf; s.loop = true;
+        const f = this.ctx.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = 1800; f.Q.value = 0.7;
+        const g = this.ctx.createGain(); g.gain.setValueAtTime(0.07, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.14);
+        s.connect(f); f.connect(g); g.connect(this.musG); s.start(t); s.stop(t + 0.16);
+      }
+      if (pos % 2 === 1 && this.noiseBuf && this.ctx) {                        // hats
+        const s = this.ctx.createBufferSource(); s.buffer = this.noiseBuf; s.loop = true;
+        const f = this.ctx.createBiquadFilter(); f.type = 'highpass'; f.frequency.value = 8000;
+        const g = this.ctx.createGain(); g.gain.setValueAtTime(0.02, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.04);
+        s.connect(f); f.connect(g); g.connect(this.musG); s.start(t); s.stop(t + 0.06);
+      }
+      return;
+    }
+
     if (pos === 0) {
       // pad chord (two detuned voices per note) + bass
       for (const n of ch) {

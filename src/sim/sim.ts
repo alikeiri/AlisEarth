@@ -2,7 +2,7 @@
 // Runs in the browser for skirmish and on the Node server for multiplayer.
 
 import { TICK, UNITS, BUILDINGS, FACTIONS, Faction, dmgMul, AIRFIELD_CAP, UPG_MAX, upgCost, ORE_VALUE, START_CREDITS, ORE_REGEN, ORE_REGEN_CAP, TECHS } from './data';
-import { GameMap, genMap, nearestPassable, nearestSea, W, H } from './map';
+import { GameMap, genMap, nearestPassable, nearestSea, W, H, SEA } from './map';
 import { findPath } from './path';
 import { RNG } from './rng';
 
@@ -11,6 +11,7 @@ export interface Order {
   pts?: { x: number; z: number }[]; i?: number; dir?: number; loop?: boolean; // patrol route
   ban?: number[]; // harvest: ore cells proven unreachable (don't re-pick them)
   pD?: number; pT?: number; // harvest approach progress watchdog
+  keep?: boolean; // attack: a player-issued order — stick to THIS target, no auto-switch
 } // kinds: move attack harvest patrol rtb flee repair road
 
 export interface Entity {
@@ -43,6 +44,7 @@ export interface Entity {
   missileStock?: string[]; // silo: armed missiles awaiting launch (up to MISSILE_CAP)
   lastMissile?: string; // silo: missile type to auto-rebuild for a strike order
   strikeX?: number; strikeZ?: number; strikeR?: number; // silo: persistent strike zone
+  terraPath?: { x: number; z: number }[]; terraI?: number; terraH?: number; // bulldozer job
   burnT?: number; burnPs?: number; // building on fire: seconds left, damage/s
 }
 
@@ -233,12 +235,15 @@ export class Sim {
           if (this.map.inB(x, z) && this.map.water[z * W + x]) wn++;
       if (wn < 2) return false;
     }
-    // must be near an existing friendly building OR a friendly road tile
+    // must be near an existing friendly building OR a friendly road tile.
+    // shipyards get extra reach so they can stretch out to a coast that isn't
+    // right next to the base (otherwise they were impossible to place)
+    const reach = type === 'shipyard' ? 22 : 11;
     const mx = cx + def.size / 2, mz = cz + def.size / 2;
     for (const e of this.ents.values()) {
       if (!e.b || e.owner !== p) continue;
       const d = Math.sqrt((e.x - mx) ** 2 + (e.z - mz) ** 2);
-      if (d <= 11) return true;
+      if (d <= reach) return true;
     }
     const rr = 5; // build reach around roads
     for (let z = Math.max(0, Math.floor(mz - rr)); z < Math.min(H, mz + rr); z++)
@@ -416,7 +421,11 @@ export class Sim {
     if (c.k === 'stance') {
       for (const id of (c.ids || [])) {
         const u = this.ents.get(id);
-        if (u && !u.b && u.owner === c.p) u.stance = c.stance ? 1 : 0;
+        if (u && !u.b && u.owner === c.p) {
+          u.stance = c.stance ? 1 : 0;
+          // Hold Position halts the unit immediately, even one already en route
+          if (c.stance) { u.orders = []; u.path = null; u.cmdT = this.tickN; }
+        }
       }
       return;
     }
@@ -442,6 +451,42 @@ export class Sim {
           this.events.push({ e: 'fortify', x: u.x, z: u.z });
         }
       }
+      return;
+    }
+    if (c.k === 'deploy') {
+      // Construction Vehicle unfolds into a forward construction yard. Unlike a
+      // normal placement this needs NO adjacency — that's the whole point.
+      for (const id of (c.ids || [])) {
+        const u = this.ents.get(id);
+        if (!u || u.b || u.owner !== c.p) continue;
+        const target = UNITS[u.type]?.deploys;
+        if (!target) continue;
+        const def = BUILDINGS[target];
+        const cx = Math.round(u.x - def.size / 2), cz = Math.round(u.z - def.size / 2);
+        let clear = true;
+        for (let z = cz; z < cz + def.size && clear; z++)
+          for (let x = cx; x < cx + def.size && clear; x++) {
+            const i = z * W + x;
+            if (!this.map.inB(x, z) || this.map.tBlocked[i] || this.map.ore[i] > 0) clear = false;
+            else if (this.map.occ[i] && this.map.occ[i] !== u.id) clear = false;
+          }
+        if (clear) {
+          u.hp = 0;                                  // consume the vehicle
+          this.addBuilding(c.p, target, cx, cz, true); // instant forward yard
+          this.events.push({ e: 'done', x: u.x, z: u.z });
+        }
+      }
+      return;
+    }
+    if (c.k === 'terraform') {
+      // assign a bulldozer a path of cells to reshape toward a target height
+      const dozer = (c.ids || []).map((i: number) => this.ents.get(i))
+        .find((u: Entity | undefined): u is Entity => !!u && !u.b && u.owner === c.p && UNITS[u.type]?.terra);
+      if (!dozer || !Array.isArray(c.path) || !c.path.length) return;
+      dozer.terraPath = c.path.slice(0, 400).map((p: any) => ({ x: Math.floor(p.x), z: Math.floor(p.z) }));
+      dozer.terraI = 0;
+      dozer.terraH = Math.max(-1.0, Math.min(8, c.h ?? (SEA + 1.5)));
+      dozer.orders = []; dozer.path = null;
       return;
     }
     if (c.k === 'buildroad') {
@@ -492,7 +537,10 @@ export class Sim {
         const o = FORM[Math.min(idx, FORM.length - 1)];
         ord = { k: 'move', x: c.x + o.x, z: c.z + o.z };
       } else if (c.k === 'attack') {
-        ord = UNITS[u.type].dmg > 0 ? { k: 'attack', tgt: c.tgt } : { k: 'move', x: c.x ?? u.x, z: c.z ?? u.z };
+        // a human's direct attack order sticks to THIS target (no auto-switching
+        // to whatever wanders into range); the AI keeps its fighting-advance
+        const human = !this.players[c.p]?.isAI;
+        ord = UNITS[u.type].dmg > 0 ? { k: 'attack', tgt: c.tgt, keep: human } : { k: 'move', x: c.x ?? u.x, z: c.z ?? u.z };
       } else if (c.k === 'harvest') {
         if (UNITS[u.type].cargo) ord = { k: 'harvest', ox: Math.floor(c.x), oz: Math.floor(c.z) };
         else {
@@ -695,24 +743,30 @@ export class Sim {
   }
 
   private findEnemy(e: Entity, range: number, skipAir = false): Entity | null {
-    let best: Entity | null = null, bd = 1e9;
+    // threat-first acquisition: anything that can shoot back outranks a harmless
+    // target (harvester, power plant), and among equals the nearest wins. So a
+    // unit clears the turret/tank threatening it before pecking at a refinery.
+    let best: Entity | null = null, bestScore = -1e9;
+    const consider = (u: Entity, d: number) => {
+      const dangerous = (u.b ? (BUILDINGS[u.type]?.attack?.dmg || 0) : (UNITS[u.type]?.dmg || 0)) > 0;
+      const score = (dangerous ? 1000 : 0) - d; // dangerous first, then closest
+      if (score > bestScore) { bestScore = score; best = u; }
+    };
     for (const u of this.nearbyUnits(e.x, e.z, range + 1)) {
       if (!this.foe(u.owner, e.owner) || u.hp <= 0 || !this.players[u.owner].alive) continue;
       const d = this.distToEnt(e.x, e.z, u);
       if (UNITS[u.type]?.cloak && d > 4) continue; // stealth: only seen up close
       // never auto-lock onto air targets the attacker cannot hurt (turret, MLRS)
       if (UNITS[u.type]?.fly && (skipAir || dmgMul(e.type, false, 'air', u.type) <= 0)) continue;
-      if (d <= range && d < bd) { bd = d; best = u; }
+      if (d <= range) consider(u, d);
     }
-    if (best) return best;
     // buildings (few — linear scan). Walls and tank barriers are inert obstacles,
-    // never auto-targeted: ground units route around them, air flies over. They
-    // only take fire from an explicit attack order or area-attack.
+    // never auto-targeted: ground units route around them, air flies over.
     for (const u of this.ents.values()) {
       if (!u.b || !this.foe(u.owner, e.owner) || u.hp <= 0 || !this.players[u.owner].alive) continue;
       if (u.type === 'wall' || u.type === 'barrier') continue;
       const d = this.distToEnt(e.x, e.z, u);
-      if (d <= range && d < bd) { bd = d; best = u; }
+      if (d <= range) consider(u, d);
     }
     return best;
   }
@@ -913,6 +967,25 @@ export class Sim {
       if (u.ephLife >= def.ephemeral) { u.hp = 0; return; }
     }
 
+    // bulldozer terraform job: roll to each cell on the drawn path and reshape
+    // it toward the target height — costs credits and takes time per cell
+    if (def.terra && u.terraPath && (u.terraI ?? 0) < u.terraPath.length) {
+      const pl = this.players[u.owner];
+      const cell = u.terraPath[u.terraI!];
+      const tx = cell.x + 0.5, tz = cell.z + 0.5;
+      const d = Math.hypot(u.x - tx, u.z - tz);
+      if (d > 1.6) { this.moveToward(u, tx, tz, def); return; } // drive up to the cell
+      if (this.tickN % 2 === 0) {
+        const TERRA_COST = 4; // credits per reshape pulse
+        if (pl.credits < TERRA_COST) return; // broke — stall the job
+        pl.credits -= TERRA_COST;
+        const settled = this.map.terraform(cell.x, cell.z, u.terraH!, 0.22);
+        this.events.push({ e: 'terra', x: tx, z: tz });
+        if (settled) u.terraI!++;
+      }
+      return;
+    }
+
     // fortify deploy / pack-up: the unit is rooted and vulnerable while it digs
     // in or tears down (the FORT_DEPLOY_VULN penalty is applied in dealDamage)
     if (u.fortT > 0) {
@@ -991,7 +1064,11 @@ export class Sim {
         // pull a unit OUT of a firefight (fixed: units became unresponsive,
         // the return-fire kept burying every move command).
         const manual = this.tickN - u.cmdT < 25;
-        if (recentlyHit && !busy && !manual && this.ents.has(u.lastHitBy)) {
+        // a player-locked attack target is sacrosanct: never auto-switch off it
+        const sticky = cur && cur.k === 'attack' && cur.keep && this.ents.has(cur.tgt!);
+        if (sticky) {
+          // hold this exact target — drive to it and fire when in range
+        } else if (recentlyHit && !busy && !manual && this.ents.has(u.lastHitBy)) {
           u.orders.unshift({ k: 'attack', tgt: u.lastHitBy }); u.path = null;
         } else if (!u.orders.length && this.tickN % 5 === u.id % 5) {
           const tgt = this.findEnemy(u, def.range + 2.5); // chase enemies in sight
@@ -1534,10 +1611,20 @@ export class Sim {
     const aliveTeams = new Set<number>();
     this.players.forEach((pl, i) => {
       if (!pl.alive) return;
-      let has = false;
-      for (const e of this.ents.values()) if (e.b && e.owner === i) { has = true; break; }
-      if (!has) { pl.alive = false; this.events.push({ e: 'elim', p: i }); }
-      else { aliveTeams.add(pl.team); lastAlive = i; }
+      // defeated once you hold no CONSTRUCTION building (construction yard) and
+      // have no Construction Vehicle left to redeploy one — losing the conyard
+      // is now decisive (build a backup MCV or defend it). Their remaining
+      // forces disband on defeat.
+      let canBuild = false;
+      for (const e of this.ents.values()) {
+        if (e.owner !== i || e.hp <= 0) continue;
+        if ((e.b && e.type === 'conyard') || (!e.b && UNITS[e.type]?.deploys)) { canBuild = true; break; }
+      }
+      if (!canBuild) {
+        pl.alive = false;
+        this.events.push({ e: 'elim', p: i });
+        for (const e of this.ents.values()) if (e.owner === i && e.hp > 0) e.hp = 0; // disband
+      } else { aliveTeams.add(pl.team); lastAlive = i; }
     });
     // the match ends when only ONE team still has players standing
     if (this.players.length > 1 && aliveTeams.size <= 1) {

@@ -16,6 +16,7 @@ const U_ICONS: Record<string, string> = {
   biotrooper: '\u{2622}️', biotank: '\u{2622}️', biodrone: '\u{2622}️', stealthtank: '\u{1F977}',
   gunboat: '\u{1F6A4}', destroyer: '\u{1F6F3}️', sub: '\u{1F93F}', navdrone: '\u{1F6F6}',
   fighter: '\u{1F6E9}️', bomber: '\u{1F4A3}', dbomber: '\u{1F916}', heli: '\u{1F681}', helidrone: '\u{1FA81}',
+  mcv: '\u{1F3D7}️', dozer: '\u{1F69C}',
 };
 export const B_LIST = ['power', 'refinery', 'radar', 'barracks', 'factory', 'turret', 'sam', 'wall', 'barrier', 'dronefac', 'shipyard', 'airforce', 'airfield', 'lab', 'silo'];
 
@@ -32,7 +33,7 @@ const UPG_INFO: Record<string, string> = {
   airforce: '+25% production speed',
   shipyard: '+25% production speed',
 };
-export const U_LIST = ['rifle', 'rocket', 'hive', 'tank', 'heavy', 'ifv', 'aatank', 'flak', 'fueltruck', 'harv', 'engineer', 'mlrs', 'recon', 'strike', 'msldrone',
+export const U_LIST = ['rifle', 'rocket', 'hive', 'tank', 'heavy', 'ifv', 'aatank', 'flak', 'fueltruck', 'harv', 'engineer', 'mcv', 'dozer', 'mlrs', 'recon', 'strike', 'msldrone',
   'chemtrooper', 'chemtank', 'chemdrone', 'biotrooper', 'biotank', 'biodrone', 'stealthtank',
   'gunboat', 'destroyer', 'sub', 'navdrone', 'fighter', 'bomber', 'dbomber', 'heli', 'helidrone',
   'cmissile', 'bbmissile', 'chemissile'];
@@ -315,6 +316,8 @@ export class UI {
         parts.push(kbd('RMB', 'move / attack' + (units.some(u => u.t === 'harv') ? ' / harvest' : '')));
         if (units.some(u => u.t === 'engineer')) parts.push(kbd('RMB', 'repair') + ' · ' + kbd('B', 'build road'));
         if (units.some(u => u.t === 'hive')) parts.push(kbd('F', 'fortify / deploy'));
+        if (units.some(u => u.t === 'mcv')) parts.push(kbd('F', 'deploy forward base'));
+        if (units.some(u => u.t === 'dozer')) parts.push(kbd('T', 'terraform (drag a path; T cycles raise/lower/water)'));
         parts.push(kbd('P', 'patrol'));
         const holding = units.some(u => u.st);
         parts.push(kbd('G', holding ? 'hold: ON' : 'hold position'));

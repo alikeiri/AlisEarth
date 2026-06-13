@@ -5,7 +5,7 @@
 import { RNG, hash2 } from './rng';
 
 export let W = 96, H = 96;
-export const MAXD = 128;           // largest supported map dimension
+export const MAXD = 160;           // largest supported map dimension
 export const SEA = 1.2;
 export function setMapSize(n: number) { W = n; H = n; }
 
@@ -40,6 +40,7 @@ export class GameMap {
   oreMax = new Float32Array(W * H);           // original ore amount (for regrowth)
   road = new Int8Array(W * H);                // 0 none, else owner+1 (extends build reach)
   roadDirty = true;
+  heightDirty = false;                        // terraforming edited the heightfield → rebuild mesh
   spawns: { x: number; z: number }[] = [];
   oreDirty = true;
 
@@ -63,6 +64,38 @@ export class GameMap {
     const i = zi * (W + 1) + xi;
     const a = this.hN[i], b = this.hN[i + 1], c = this.hN[i + W + 1], d = this.hN[i + W + 2];
     return a + (b - a) * xf + (c - a) * zf + (a - b - c + d) * xf * zf;
+  }
+
+  // recompute blocked/water flags for a rectangular region after the heightfield
+  // is edited (shared by map gen and terraforming)
+  reblock(x0: number, z0: number, x1: number, z1: number) {
+    for (let cz = Math.max(0, z0); cz < Math.min(H, z1); cz++)
+      for (let cx = Math.max(0, x0); cx < Math.min(W, x1); cx++) {
+        const i = cz * (W + 1) + cx;
+        const a = this.hN[i], b = this.hN[i + 1], c = this.hN[i + W + 1], d = this.hN[i + W + 2];
+        const avg = (a + b + c + d) / 4;
+        const slope = Math.max(a, b, c, d) - Math.min(a, b, c, d);
+        const ci = cz * W + cx;
+        this.tBlocked[ci] = 0; this.water[ci] = 0;
+        if (avg < SEA + 0.05) { this.tBlocked[ci] = 1; this.water[ci] = 1; }
+        else if (slope > 2.0) this.tBlocked[ci] = 1;
+      }
+  }
+
+  // nudge one cell's four corner nodes toward a target height by `step`, then
+  // refresh its blocked/water flags. Returns true once the cell has settled.
+  terraform(cx: number, cz: number, target: number, step: number): boolean {
+    if (!this.inB(cx, cz)) return true;
+    const ns = [cz * (W + 1) + cx, cz * (W + 1) + cx + 1, (cz + 1) * (W + 1) + cx, (cz + 1) * (W + 1) + cx + 1];
+    let done = true;
+    for (const i of ns) {
+      const dlt = target - this.hN[i];
+      if (Math.abs(dlt) <= step) this.hN[i] = target;
+      else { this.hN[i] += Math.sign(dlt) * step; done = false; }
+    }
+    this.reblock(cx - 1, cz - 1, cx + 2, cz + 2);
+    this.heightDirty = true;
+    return done;
   }
 }
 
@@ -200,12 +233,13 @@ export function genMap(seed: number, nPlayers: number): GameMap {
       if (seed & 32) wu = 1 - wu;
       if (seed & 64) wv = 1 - wv;
       const mask = maskAt(cont.rows, wu, wv);
-      // gentler coastal slope: the land plateau rises softly from the shore so
-      // there's flat buildable ground by the water (tester: coasts too steep)
-      let h = (smoothstep(0.28, 0.62, mask) * 3.2 - 0.55) * 4.4 * e;
-      h += (fbm(seed, x * 0.05, z * 0.05) - 0.5) * 2.0 * mask; // interior variation
+      // lower, flatter landmass: the plateau rises only gently from the shore so
+      // coasts aren't towering cliffs and naval guns can reach shore targets
+      // (tester: landmass too high — destroyers couldn't hit land)
+      let h = (smoothstep(0.28, 0.62, mask) * 3.2 - 0.55) * 2.7 * e;
+      h += (fbm(seed, x * 0.05, z * 0.05) - 0.5) * 1.6 * mask; // interior variation
       const ridge = fbm(seed + 777, x * 0.06, z * 0.06);
-      h += Math.max(0, ridge - 0.7) * 14 * mask; // mountains only well inland
+      h += Math.max(0, ridge - 0.7) * 8 * mask; // mountains only well inland
       h += fbm(seed + 313, x * 0.18, z * 0.18) * 0.45; // small texture
       m.hN[z * (W + 1) + x] = Math.max(-1.2, h);
     }

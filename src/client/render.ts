@@ -24,6 +24,8 @@ const MODEL_DEFS: Record<string, { file: string; size: number; axis: 'l' | 'h'; 
   // trucks: cab/bed geometry defeats the front heuristic — flip both (user-verified)
   harv:      { file: 'harv',      size: 1.70, axis: 'l', ry: Math.PI },
   engineer:  { file: 'engineer',  size: 1.35, axis: 'l', ry: Math.PI },
+  mcv:       { file: 'harv',      size: 1.90, axis: 'l', ry: Math.PI, tint: 0x4a7ab0 }, // big blue construction rig
+  dozer:     { file: 'harv',      size: 1.55, axis: 'l', ry: Math.PI, tint: 0xe0a526 }, // yellow bulldozer
   recon:     { file: 'drone',     size: 0.90, axis: 'l', ry: 0 },
   strike:    { file: 'drone',     size: 1.25, axis: 'l', ry: 0 },
   msldrone:  { file: 'drone',     size: 1.60, axis: 'l', ry: 0 },
@@ -305,6 +307,7 @@ function unitGeoSmooth(type: string): [THREE.BufferGeometry, THREE.BufferGeometr
   const ALIAS: Record<string, string> = {
     hive: 'harv', minidrone: 'recon', chemtrooper: 'rifle', biotrooper: 'rifle',
     chemtank: 'tank', biotank: 'tank', stealthtank: 'tank', chemdrone: 'recon', biodrone: 'recon',
+    mcv: 'harv', dozer: 'harv',
   };
   if (ALIAS[type]) type = ALIAS[type];
   const B: THREE.BufferGeometry[] = [], A: THREE.BufferGeometry[] = [];
@@ -607,9 +610,12 @@ function buildingGroupPro(type: string, teamColor: number): THREE.Group {
     add(new THREE.CylinderGeometry(0.06, 0.06, 0.4, 6), steel, 0.6, 0.5, 0.6);
     add(roundedSlabGeo(1.5, 0.2, 0.06, 0.06), team, 0, 0.45, -0.75);
   } else if (type === 'wall') {
-    add(roundedSlabGeo(0.92, 0.92, 0.85, 0.06), concrete, 0, 0.42, 0);
-    add(roundedSlabGeo(0.7, 0.7, 0.18, 0.05), darkM, 0, 0.9, 0);
-    add(roundedSlabGeo(0.96, 0.14, 0.05, 0.04), team, 0, 0.2, 0);
+    // solid concrete wall block with a crenellated top — fully symmetric so it
+    // reads the same from every side (no front/back to face the wrong way)
+    add(roundedSlabGeo(0.96, 0.96, 0.55, 0.05), concrete, 0, 0.275, 0);   // base block
+    add(roundedSlabGeo(1.0, 1.0, 0.08, 0.04), team, 0, 0.5, 0);           // team band wraps all sides
+    for (const [dx, dz] of [[-0.3, -0.3], [0.3, -0.3], [-0.3, 0.3], [0.3, 0.3]])
+      add(roundedSlabGeo(0.32, 0.32, 0.26, 0.04), concrete, dx, 0.67, dz); // corner merlons
   } else if (type === 'barrier') {
     // crossed concrete tank trap (hedgehog-ish)
     for (const a of [Math.PI / 4, -Math.PI / 4]) {
@@ -1090,6 +1096,30 @@ export class Renderer {
     const mesh = new THREE.Mesh(geo, mat);
     mesh.receiveShadow = true;
     return mesh;
+  }
+
+  // re-read the heightfield into the terrain mesh after terraforming edits it
+  refreshTerrain() {
+    const geo = this.terrain.geometry;
+    const pos = geo.getAttribute('position') as THREE.BufferAttribute;
+    const splat = geo.getAttribute('splat') as THREE.BufferAttribute;
+    for (let i = 0; i < pos.count; i++) {
+      const x = pos.getX(i), z = pos.getZ(i);
+      const h = this.map.heightAt(x, z);
+      pos.setY(i, h);
+      const e = 0.5;
+      const gx = this.map.heightAt(x + e, z) - this.map.heightAt(x - e, z);
+      const gz = this.map.heightAt(x, z + e) - this.map.heightAt(x, z - e);
+      const slope = Math.hypot(gx, gz);
+      const sand = 1 - sstep(SEA + 0.12, SEA + 0.55, h);
+      const rock = Math.min(1, sstep(0.85, 1.5, slope) + sstep(6.6, 7.8, h));
+      const dirt = sstep(0.56, 0.70, fbm(12345, x * 0.09, z * 0.09)) * 0.85 * (1 - sand) * (1 - rock);
+      const grass = Math.max(0, 1 - sand - rock - dirt);
+      const sum = sand + rock + dirt + grass || 1;
+      splat.setXYZW(i, grass / sum, rock / sum, sand / sum, dirt / sum);
+    }
+    pos.needsUpdate = true; splat.needsUpdate = true;
+    geo.computeVertexNormals();
   }
 
   // Swap in CC0 photo textures (Poly Haven) when available; the procedural

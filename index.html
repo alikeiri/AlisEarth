@@ -134,7 +134,8 @@
 
   /* ---------- Screens ---------- */
   .screen { position: absolute; inset: 0; background: radial-gradient(ellipse at 50% 30%, #16222c 0%, #090d11 75%);
-    display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 20; }
+    display: flex; flex-direction: column; align-items: center; justify-content: safe center; z-index: 20;
+    overflow-y: auto; padding: 20px 0; } /* scroll when the menu is taller than the viewport */
   .hidden { display: none !important; }
   .title { font-size: 44px; font-weight: 800; letter-spacing: 6px; color: #eceff1; margin-bottom: 4px; }
   .title span { color: var(--accent); }
