@@ -39,7 +39,8 @@ export interface Entity {
   patPts: { x: number; z: number }[] | null; // building patrol route for produced units
   rpt: boolean; // repeat production: finished units re-queue themselves
   primary: boolean; // primary building of its type (new units train here)
-  storedMissile?: string | null; // silo: armed missile type awaiting launch
+  storedMissile?: string | null; // silo: type of the FIRST armed missile (UI hint)
+  missileStock?: string[]; // silo: armed missiles awaiting launch (up to MISSILE_CAP)
   lastMissile?: string; // silo: missile type to auto-rebuild for a strike order
   strikeX?: number; strikeZ?: number; strikeR?: number; // silo: persistent strike zone
   burnT?: number; burnPs?: number; // building on fire: seconds left, damage/s
@@ -61,6 +62,7 @@ const FORT_TIME = 2.0;      // seconds to dig in or pack up (vulnerable meanwhil
 const FORT_ATK_MUL = 1.5;   // fortified infantry hit harder
 const FORT_DEF_MUL = 0.5;   // ...and take half damage (settled)
 const FORT_DEPLOY_VULN = 1.5; // ...but take extra while deploying / packing
+const MISSILE_CAP = 25;     // max armed missiles a single silo can stockpile
 
 const FORM: { x: number; z: number }[] = [{ x: 0, z: 0 }];
 for (let r = 1; r <= 3; r++) {
@@ -86,6 +88,14 @@ export class Sim {
   aiProfile: any = null; // host-provided study of past human-vs-AI games (adaptive AI)
   aiDirective: any = null; // optional LLM strategist (Claude API) high-level orders
   cheated = false; // godmode was used — don't feed this game into the AI's learning
+  // post-game statistics (per player index): production, kills, losses, and a
+  // time-series sampled during the match for the end-of-game charts
+  stats = {
+    builtU: [] as number[], builtB: [] as number[],   // units / buildings produced
+    destU: [] as number[], destB: [] as number[],     // enemy units / buildings destroyed (kills)
+    lostU: [] as number[], lostB: [] as number[],     // own units / buildings lost
+    series: [] as { t: number; u: number[]; b: number[]; c: number[] }[],
+  };
   private aiDmg = { inf: 0, veh: 0, air: 0, sea: 0 }; // human damage to the AI, by weapon class
   private aiDealt = { inf: 0, veh: 0, air: 0, sea: 0 }; // AI damage to the human, by its own weapon class
   private aiLost = { inf: 0, veh: 0, air: 0, sea: 0 }; // AI units lost, by kind
@@ -115,6 +125,9 @@ export class Sim {
       this.aiMem.push(null);
       this.placeStart(i);
     });
+    const n = this.players.length;
+    const z = () => new Array(n).fill(0);
+    Object.assign(this.stats, { builtU: z(), builtB: z(), destU: z(), destB: z(), lostU: z(), lostB: z() });
   }
 
   // ---------- setup ----------
@@ -149,6 +162,7 @@ export class Sim {
       stance: 0, lastHitBy: 0, lastHitT: -999, reactCd: 0,
       fortified: false, emitCd: 0, ephLife: 0, fortT: 0, fortGoal: false, research: null,
       cx: 0, cz: 0, size: 1, progress: 0, total: 1, queue: [], rallyX: -1, rallyZ: -1, lvl: 1, patPts: null, rpt: false, primary: false,
+      missileStock: [],
     };
     this.ents.set(e.id, e);
     return e;
@@ -256,7 +270,8 @@ export class Sim {
       if (!b || !b.b || b.owner !== c.p || !def || def.builtAt !== b.type) return;
       if (def.tech && !pl.tech[def.tech]) return; // not yet researched
       if (def.internal) return;
-      if (def.missile && (b.storedMissile || b.queue.length)) return; // one missile per silo
+      // silo stockpiles up to MISSILE_CAP armed missiles (stock + in-build)
+      if (def.missile && ((b.missileStock?.length || 0) + b.queue.length) >= MISSILE_CAP) return;
       if (b.progress < b.total || b.queue.length >= 6) return;
       // aircraft are limited by total airfield capacity
       if (def.pad && !this.padCapacityFree(c.p)) return;
@@ -608,7 +623,21 @@ export class Sim {
 
     if (this.tickN % 20 === 0) this.regrowOre();
     if (this.tickN % 10 === 0) this.checkEnd();
+    if (this.tickN % 50 === 0) this.sampleStats(); // 5s cadence time-series for the end charts
     this.tickN++;
+  }
+
+  // snapshot per-player unit count, building count and credits for the charts
+  private sampleStats() {
+    const n = this.players.length;
+    const u = new Array(n).fill(0), b = new Array(n).fill(0);
+    for (const e of this.ents.values()) {
+      if (e.hp <= 0) continue;
+      if (e.b) b[e.owner]++;
+      else if (!UNITS[e.type]?.internal) u[e.owner]++;
+    }
+    const c = this.players.map(p => Math.round(p.credits));
+    this.stats.series.push({ t: Math.round(this.tickN / 10), u, b, c });
   }
 
   private rebuildGrid() {
@@ -665,9 +694,12 @@ export class Sim {
       if (d <= range && d < bd) { bd = d; best = u; }
     }
     if (best) return best;
-    // buildings (few — linear scan)
+    // buildings (few — linear scan). Walls and tank barriers are inert obstacles,
+    // never auto-targeted: ground units route around them, air flies over. They
+    // only take fire from an explicit attack order or area-attack.
     for (const u of this.ents.values()) {
       if (!u.b || u.owner === e.owner || u.hp <= 0 || !this.players[u.owner].alive) continue;
+      if (u.type === 'wall' || u.type === 'barrier') continue;
       const d = this.distToEnt(e.x, e.z, u);
       if (d <= range && d < bd) { bd = d; best = u; }
     }
@@ -684,7 +716,14 @@ export class Sim {
         mul *= /^(chem|bio)/.test(att.type) ? 1.7 : FORT_DEF_MUL;
       }
     }
+    const wasAlive = tgt.hp > 0;
     tgt.hp -= base * mul;
+    // credit the destroyed-by tally to the attacker's faction on the lethal blow
+    // (walls/barriers don't count; self-destruct/dismantle bypass this path)
+    if (wasAlive && tgt.hp <= 0 && att.owner !== tgt.owner) {
+      if (tgt.b) { if (tgt.type !== 'wall' && tgt.type !== 'barrier') this.stats.destB[att.owner]++; }
+      else if (!UNITS[tgt.type]?.internal) this.stats.destU[att.owner]++;
+    }
     // study material for the adaptive AI: what weapon classes the human leans
     // on, and which of the AI's own weapon classes actually pay off
     const ap = this.players[att.owner], vp = this.players[tgt.owner];
@@ -748,6 +787,7 @@ export class Sim {
       b.hp = Math.min(b.maxHp, b.hp + b.maxHp * 0.85 * (d / b.total));
       if (b.progress >= b.total) {
         this.events.push({ e: 'done', x: b.x, z: b.z });
+        this.stats.builtB[b.owner]++;
         if (b.type === 'refinery') this.spawnFreeHarvester(b);
       }
       return;
@@ -775,17 +815,22 @@ export class Sim {
       if (pl.godmode) it.t = 0;                       // cheat: instant production
       else it.t -= TICK * rate * (1 + 0.25 * (b.lvl - 1)); // upgrades speed up production
       if (it.t <= 0 && UNITS[it.type].missile) {
-        // missiles don't spawn — they arm the silo, ready to launch
-        b.storedMissile = it.type;
+        // missiles don't spawn — they arm the silo, stacking up to MISSILE_CAP
+        (b.missileStock ??= []).push(it.type);
+        b.storedMissile = b.missileStock[0]; // UI hint: the next to fly
         b.lastMissile = it.type;
         b.queue.shift();
         this.events.push({ e: 'ready', p: b.owner });
+        // repeat: keep building toward a full stockpile while toggled on
+        if (b.rpt && (b.missileStock.length + b.queue.length) < MISSILE_CAP)
+          b.queue.push({ type: it.type, t: UNITS[it.type].buildTime, t0: UNITS[it.type].buildTime, paid: false });
       } else if (it.t <= 0) {
         const c = UNITS[it.type].move === 'sea'
           ? nearestSea(this.map, b.cx + ((b.size / 2) | 0), b.cz + b.size, 8)
           : nearestPassable(this.map, b.cx + ((b.size / 2) | 0), b.cz + b.size);
         if (c) {
           const u = this.spawnUnit(b.owner, it.type, c.x + 0.5, c.z + 0.5);
+          this.stats.builtU[b.owner]++;
           if (!UNITS[it.type].cargo && b.patPts && b.patPts.length) {
             // building patrol route: new combat units walk the designated beat
             this.assignPatrol([u], b.patPts, false);
@@ -1135,14 +1180,16 @@ export class Sim {
 
   // fire the silo's stored missile at a point (consumes the warhead)
   private launchMissile(b: Entity, x: number, z: number) {
-    if (!b.storedMissile) return false;
-    const mdef = UNITS[b.storedMissile];
+    const stock = b.missileStock;
+    if (!stock || !stock.length) return false;
+    const type = stock.shift()!;
+    const mdef = UNITS[type];
     const tx = Math.max(0, Math.min(W - 0.01, x)), tz = Math.max(0, Math.min(H - 0.01, z));
     const ft = Math.max(12, Math.round((Math.hypot(tx - b.x, tz - b.z) / (mdef.speed || 7)) * 10));
-    this.pendingBlasts.push({ t: this.tickN + ft, x: tx, z: tz, type: b.storedMissile, owner: b.owner });
+    this.pendingBlasts.push({ t: this.tickN + ft, x: tx, z: tz, type, owner: b.owner });
     this.events.push({ e: 'silo', x: b.x, z: b.z, tx, tz, ft });
-    b.lastMissile = b.storedMissile;
-    b.storedMissile = null;
+    b.lastMissile = type;
+    b.storedMissile = stock[0] || null; // next armed missile (or empty)
     return true;
   }
 
@@ -1167,8 +1214,8 @@ export class Sim {
       if (e.b) n += 1; // bias slightly toward structures
       if (n > best) { best = n; target = e; }
     }
-    // keep a missile cooking for the next salvo
-    if (!b.storedMissile && !b.queue.length) {
+    // keep a missile cooking for the next salvo (when the stockpile runs dry)
+    if (!(b.missileStock?.length) && !b.queue.length) {
       const type = b.lastMissile || 'cmissile';
       const def = UNITS[type];
       if (def && (!def.tech || pl.tech[def.tech])) {
@@ -1176,7 +1223,7 @@ export class Sim {
         if (pl.credits >= cost) { pl.credits -= cost; b.queue.push({ type, t: def.buildTime, t0: def.buildTime }); }
       }
     }
-    if (b.storedMissile && target) this.launchMissile(b, target.x, target.z);
+    if (b.missileStock?.length && target) this.launchMissile(b, target.x, target.z);
   }
 
   // missile impact: area damage with falloff; the warhead type drives dmgMul
@@ -1400,8 +1447,10 @@ export class Sim {
           for (let x = e.cx; x < e.cx + e.size; x++)
             if (this.map.inB(x, z) && this.map.occ[z * W + x] === e.id) this.map.occ[z * W + x] = 0;
         this.events.push({ e: 'boom', x: e.x, z: e.z, big: true });
+        if (e.type !== 'wall' && e.type !== 'barrier') this.stats.lostB[e.owner]++;
       } else {
         this.events.push({ e: 'boom', x: e.x, z: e.z, big: false });
+        if (!UNITS[e.type]?.internal) this.stats.lostU[e.owner]++;
         // AI casualty ledger (drives the next game's unit-mix preferences)
         if (this.players[e.owner]?.isAI) {
           const k = UNITS[e.type]?.kind as keyof typeof this.aiLost;
@@ -1511,6 +1560,7 @@ export class Sim {
         if (e.primary) v.pm = 1;
         if (e.research) { v.rs = e.research.tech; v.rsf = 1 - e.research.t / e.research.t0; }
         if (e.storedMissile) v.ms = e.storedMissile;
+        if (e.missileStock && e.missileStock.length) v.msn = e.missileStock.length;
         if (e.strikeR && e.strikeR > 0) { v.kx = e.strikeX; v.kz = e.strikeZ; v.kr = e.strikeR; }
         if (e.burnT && e.burnT > 0) v.bn = 1;
       } else {

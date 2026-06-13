@@ -250,10 +250,11 @@ export class UI {
       const id = [...selection][0];
       const v = views.find(x => x.i === id);
       if (v && v.b && v.o === me && v.pr >= 1 &&
-        ['barracks', 'factory', 'dronefac', 'airforce', 'shipyard'].includes(v.t)) {
+        ['barracks', 'factory', 'dronefac', 'airforce', 'shipyard', 'silo'].includes(v.t)) {
         this.rptTarget = id;
         this.rptState = !!v.rp;
-        this.rptBtn.textContent = `⟳ Repeat production: ${this.rptState ? 'ON' : 'OFF'}`;
+        const label = v.t === 'silo' ? 'Auto-build missiles' : 'Repeat production';
+        this.rptBtn.textContent = `⟳ ${label}: ${this.rptState ? 'ON' : 'OFF'}`;
         this.rptBtn.classList.toggle('on', this.rptState);
       }
     }
@@ -321,12 +322,18 @@ export class UI {
         parts.push(kbd('H', 'stop') + ' · ' + kbd('C', 'ranges'));
         parts.push(kbd('Ctrl+#', 'group'));
       } else if (sel.length === 1 && sel[0].b && sel[0].o === me) {
-        parts.push(kbd('RMB', 'set rally point'));
-        if (['barracks', 'factory', 'dronefac', 'airforce', 'shipyard'].includes(sel[0].t))
-          parts.push(kbd('2×LMB', sel[0].pm ? 'primary ✓' : 'set primary'));
-        if (['barracks', 'factory', 'dronefac', 'airforce', 'shipyard'].includes(sel[0].t)) {
-          parts.push(kbd('P', 'patrol route for produced units'));
-          parts.push(kbd('R', 'repeat production'));
+        if (sel[0].t === 'silo') {
+          const n = sel[0].msn || (sel[0].ms ? 1 : 0);
+          parts.push(`<span class="kbd">${n}/25</span>missiles ready`);
+          parts.push(kbd('RMB', 'launch / bombard area'));
+          parts.push(kbd('R', sel[0].rp ? 'auto-build: ON' : 'auto-build missiles'));
+        } else {
+          parts.push(kbd('RMB', 'set rally point'));
+          if (['barracks', 'factory', 'dronefac', 'airforce', 'shipyard'].includes(sel[0].t)) {
+            parts.push(kbd('2×LMB', sel[0].pm ? 'primary ✓' : 'set primary'));
+            parts.push(kbd('P', 'patrol route for produced units'));
+            parts.push(kbd('R', 'repeat production'));
+          }
         }
         if (this.upgTarget >= 0) parts.push(kbd('⬆', 'upgrade (sidebar button)'));
       }

@@ -3,7 +3,7 @@
 
 import { Sim } from '../sim/sim';
 import { aiTick } from '../sim/ai';
-import { FACTIONS, BUILDINGS, UNITS } from '../sim/data';
+import { FACTIONS, BUILDINGS, UNITS, PLAYER_COLORS } from '../sim/data';
 import { GameMap, genMap, setMapSize, W, H } from '../sim/map';
 import { Renderer } from './render';
 import { UI } from './ui';
@@ -138,6 +138,7 @@ class LocalGame implements GameLike {
         if (e.primary) v.pm = 1;
         if (e.research) { v.rs = e.research.tech; v.rsf = 1 - e.research.t / e.research.t0; }
         if (e.storedMissile) v.ms = e.storedMissile;
+        if (e.missileStock && e.missileStock.length) v.msn = e.missileStock.length;
         if (e.strikeR && e.strikeR > 0) { v.kx = e.strikeX; v.kz = e.strikeZ; v.kr = e.strikeR; }
         if (e.burnT && e.burnT > 0) v.bn = 1;
       } else {
@@ -949,6 +950,8 @@ class GameClient {
   }
 
   private onDown(e: MouseEvent) {
+    // middle button: Chrome pops its autoscroll "compass" cursor — kill it
+    if (e.button === 1) { e.preventDefault(); return; }
     if (e.button === 0) {
       // walls/barriers: press starts a drag-line, committed on release
       if (this.ui.placing && this.isLineBuild(this.ui.placing)) {
@@ -1350,7 +1353,7 @@ class GameClient {
     // fog of war for human players (spectator/replay modes see everything;
     // disabled when the player unchecked it on the start screen)
     let views = allViews;
-    if (!(this.game as any).isSim && fogEnabled) {
+    if (!(this.game as any).isSim && fogEnabled && !this.over) {
       if (!this.fog) this.fog = new Uint8Array(W * H);
       if (this.frame % 3 === 0) this.updateFog(allViews);
       const f = this.fog;
@@ -1415,7 +1418,9 @@ class GameClient {
       const mmViews = this.radarBlips.length ? views.concat(this.radarBlips) : views;
       this.ui.minimap(this.game.map, mmViews, this.camQuad(), dt * 3, fogFn);
     }
-    const dragRect = this.mouse.dragging && !this.patrolMode // no selection box while drawing a patrol route
+    // no selection box while drawing a patrol route or drag-placing a structure
+    // line (walls / tank barriers) — those drags aren't a selection
+    const dragRect = this.mouse.dragging && !this.patrolMode && !this.ui.placing
       ? { x0: this.mouse.downX, y0: this.mouse.downY, x1: this.mouse.x, y1: this.mouse.y }
       : null;
 
@@ -1489,6 +1494,8 @@ class GameClient {
     const meDead = !(this.game as any).isSim && players[this.game.me] && players[this.game.me].a === false;
     if ((st.over || meDead) && !this.over) {
       this.over = true;
+      // the battle is decided — lift the fog so the whole map is revealed
+      if (this.fog) { this.fog.fill(2); this.renderer.setFog(this.fog); }
       const wn = st.over && st.winner >= 0 && players[st.winner] ? players[st.winner].n
         : meDead ? (players.find((p: any, i: number) => i !== this.game.me && p.a)?.n || 'The enemy') : 'Nobody';
       this.onEnd(!meDead && st.winner === this.game.me, wn);
@@ -1707,6 +1714,85 @@ function updateSpeedInd(speed: number) {
   }
 }
 
+// ---- post-game battle report: production/kill/loss table + time-series chart ----
+function renderEndStats(game: GameLike) {
+  const box = document.getElementById('endStats')!;
+  const sim: any = (game as any).sim;
+  if (!sim || !sim.stats || !sim.stats.series || !sim.players) { box.classList.add('hidden'); return; }
+  const players: any[] = sim.players;
+  const s = sim.stats;
+  const colorOf = (i: number) => '#' + PLAYER_COLORS[i % PLAYER_COLORS.length].toString(16).padStart(6, '0');
+  const nameOf = (i: number) => (players[i]?.name || ('Player ' + (i + 1))) + (players[i]?.fac?.flag ? ' ' + players[i].fac.flag : '');
+
+  // ---- table: built / killed / lost per faction ----
+  const cols = ['Faction', 'Units Built', 'Bldgs Built', 'Units Killed', 'Bldgs Killed', 'Units Lost', 'Bldgs Lost'];
+  let html = '<tr>' + cols.map((c, i) => `<th${i === 0 ? " style='text-align:left'" : ''}>${c}</th>`).join('') + '</tr>';
+  players.forEach((_p, i) => {
+    const cells = [s.builtU[i] || 0, s.builtB[i] || 0, s.destU[i] || 0, s.destB[i] || 0, s.lostU[i] || 0, s.lostB[i] || 0];
+    html += `<tr><td class="name"><span class="dot" style="background:${colorOf(i)}"></span>${nameOf(i)}</td>` +
+      cells.map(v => `<td>${v}</td>`).join('') + '</tr>';
+  });
+  (document.getElementById('statsTable') as HTMLElement).innerHTML = html;
+
+  // ---- interactive chart: units / buildings / credits over time ----
+  const metrics = [{ key: 'u', label: 'Units' }, { key: 'b', label: 'Buildings' }, { key: 'c', label: 'Credits' }];
+  let metric = 'u';
+  const ctrls = document.getElementById('chartControls')!;
+  ctrls.innerHTML = metrics.map(m => `<button class="chartBtn${m.key === metric ? ' sel' : ''}" data-k="${m.key}">${m.label}</button>`).join('');
+  const canvas = document.getElementById('statsChart') as HTMLCanvasElement;
+  const hint = document.getElementById('chartHint')!;
+  const series = s.series as { t: number; u: number[]; b: number[]; c: number[] }[];
+  let hoverX = -1;
+
+  const draw = () => {
+    const ctx = canvas.getContext('2d')!;
+    const W2 = canvas.width, H2 = canvas.height;
+    ctx.clearRect(0, 0, W2, H2);
+    const padL = 50, padR = 14, padT = 14, padB = 26;
+    const plotW = W2 - padL - padR, plotH = H2 - padT - padB;
+    if (!series.length) { hint.textContent = 'No time-series data recorded.'; return; }
+    const vals = (smp: any) => smp[metric] as number[];
+    let maxV = 1; const maxT = series[series.length - 1].t || 1;
+    for (const smp of series) for (const v of vals(smp)) if (v > maxV) maxV = v;
+    maxV = Math.ceil(maxV * 1.1);
+    const xOf = (t: number) => padL + (t / maxT) * plotW;
+    const yOf = (v: number) => padT + plotH - (v / maxV) * plotH;
+    ctx.strokeStyle = '#1d2730'; ctx.lineWidth = 1; ctx.fillStyle = '#5f7480'; ctx.font = '11px system-ui';
+    for (let g = 0; g <= 4; g++) {
+      const yy = padT + (plotH * g) / 4;
+      ctx.beginPath(); ctx.moveTo(padL, yy); ctx.lineTo(W2 - padR, yy); ctx.stroke();
+      ctx.textAlign = 'right'; ctx.fillText(String(Math.round(maxV * (1 - g / 4))), padL - 6, yy + 4);
+    }
+    ctx.textAlign = 'center';
+    for (let g = 0; g <= 4; g++) ctx.fillText(Math.round((maxT * g) / 4 / 60) + 'm', padL + (plotW * g) / 4, H2 - 8);
+    players.forEach((_p, i) => {
+      ctx.strokeStyle = colorOf(i); ctx.lineWidth = 2; ctx.beginPath();
+      series.forEach((smp, idx) => { const x = xOf(smp.t), y = yOf(vals(smp)[i] || 0); idx === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y); });
+      ctx.stroke();
+    });
+    if (hoverX >= 0) {
+      const t = ((hoverX - padL) / plotW) * maxT;
+      let bi = 0, bd = 1e9;
+      series.forEach((smp, idx) => { const d = Math.abs(smp.t - t); if (d < bd) { bd = d; bi = idx; } });
+      const smp = series[bi], hx = xOf(smp.t);
+      ctx.strokeStyle = '#3a4a56'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(hx, padT); ctx.lineTo(hx, padT + plotH); ctx.stroke();
+      players.forEach((_p, i) => { const y = yOf(vals(smp)[i] || 0); ctx.fillStyle = colorOf(i); ctx.beginPath(); ctx.arc(hx, y, 3, 0, 7); ctx.fill(); });
+      const mm = Math.floor(smp.t / 60), ss = Math.round(smp.t % 60).toString().padStart(2, '0');
+      hint.innerHTML = `${mm}:${ss} — ` + players.map((_p, i) => `<span style="color:${colorOf(i)}">${vals(smp)[i] || 0}</span>`).join(' · ');
+    } else hint.textContent = 'Hover the chart to read values over time.';
+  };
+
+  ctrls.querySelectorAll('.chartBtn').forEach(btn => btn.addEventListener('click', () => {
+    metric = (btn as HTMLElement).getAttribute('data-k')!;
+    ctrls.querySelectorAll('.chartBtn').forEach(b => b.classList.toggle('sel', b === btn));
+    draw();
+  }));
+  canvas.onmousemove = (e: MouseEvent) => { const r = canvas.getBoundingClientRect(); hoverX = (e.clientX - r.left) * (canvas.width / r.width); draw(); };
+  canvas.onmouseleave = () => { hoverX = -1; draw(); };
+  box.classList.remove('hidden');
+  draw();
+}
+
 function startGame(game: GameLike) {
   if (client) { client.destroy(); client = null; }
   if (advisor) { advisor.stop(); advisor = null; }
@@ -1715,6 +1801,7 @@ function startGame(game: GameLike) {
   client = new GameClient(game, (won, winnerName) => {
     const isSim = (game as any).isSim;
     audio.play(won || isSim ? 'win' : 'lose');
+    renderEndStats(game); // battle report table + chart (skirmish/sim/replay)
     if ((game as any).isReplay) {
       $('endTitle').textContent = 'REPLAY OVER';
       ($('endTitle') as HTMLElement).style.color = '#ffc940';
@@ -2036,6 +2123,10 @@ function initMenus() {
 // control, and the Chrome dropdown sometimes popped up over the minimap/HUD.
 // (inputs still work; we only stop the context menu.)
 window.addEventListener('contextmenu', e => e.preventDefault());
+// the middle mouse button triggers Chrome's autoscroll "compass" overlay —
+// suppress it page-wide (it isn't a game control and looked broken on the map)
+window.addEventListener('mousedown', e => { if (e.button === 1) e.preventDefault(); });
+window.addEventListener('auxclick', e => { if (e.button === 1) e.preventDefault(); });
 
 const glOk = !!document.createElement('canvas').getContext('webgl2');
 if (!glOk) {

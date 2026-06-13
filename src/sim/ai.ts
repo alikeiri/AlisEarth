@@ -15,6 +15,9 @@ interface AiMem {
   landOk?: boolean; landCheckT?: number; // island detection (cached pathfind)
   threatX?: number; threatZ?: number; threatN?: number; // where attacks come from
   hiveCd?: number; // pace hive production
+  seenAir?: number; // decaying count of enemy air spotted (reactive AA)
+  lastHurtT?: number; // last tick a building of ours took damage (posture)
+  defenders?: number[]; // infantry designated to the fortified defense line
 }
 
 const LVL = [
@@ -82,6 +85,7 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
     mem.threatX = (mem.threatX ?? attacker.x) * 0.9 + attacker.x * 0.1;
     mem.threatZ = (mem.threatZ ?? attacker.z) * 0.9 + attacker.z * 0.1;
     mem.threatN = (mem.threatN || 0) + 1;
+    if (d.b) mem.lastHurtT = sim.tickN; // base under fire → tighten the posture
     if (!mem.peaceBroken && !sim.players[attacker.owner]?.isAI) {
       mem.peaceBroken = true;
       mem.nextWave = Math.min(mem.nextWave, sim.tickN + 12 * TICKS_PER_SEC);
@@ -146,6 +150,24 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
   const cost = (t: string) => Math.round(BUILDINGS[t].cost * pl.fac.costMul * pl.bonusCost);
   const surplus = pl.powerMade - pl.powerUsed;
 
+  // --- live recon: react to the army the enemy is actually fielding now ---
+  // (a brief sighting biases production for a while via a decaying counter)
+  let eAir = 0;
+  for (const e of sim.ents.values()) {
+    if (e.b || e.owner === p || e.hp <= 0) continue;
+    if (!sim.players[e.owner]?.alive) continue;
+    const ed = UNITS[e.type];
+    if (ed && ed.kind === 'air' && ed.fly && !ed.missile && !ed.internal) eAir++;
+  }
+  mem.seenAir = Math.max((mem.seenAir || 0) * 0.96, eAir);
+  if ((mem.seenAir || 0) >= 1) { antiAir = true; sams = Math.max(sams, (mem.seenAir || 0) >= 4 ? 3 : 2); }
+
+  // --- dynamic posture: turtle when poor or pressured, press when rich/safe ---
+  const underAttack = sim.tickN - (mem.lastHurtT ?? -1e9) < 15 * TICKS_PER_SEC;
+  if (underAttack) turrets += 1;                                  // shore up the line under fire
+  if (pl.credits > 6000) { cap = Math.min(90, cap + 8); waveEvery = Math.max(18, waveEvery - 6); } // flush: attack
+  if (pl.credits < 1200 && underAttack) mem.nextWave = Math.max(mem.nextWave, sim.tickN + 10 * TICKS_PER_SEC); // hold
+
   // build order — economy, production breadth, then defense depth
   let want: string | null = null;
   if (surplus < 25) want = 'power';
@@ -183,30 +205,26 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
     const def = BUILDINGS[want];
     const ok = !def.prereq || nB(def.prereq) > 0;
     if (ok && pl.credits >= cost(want)) {
-      const enemy = nearestEnemyBuilding(sim, p);
-      let toward: { x: number; z: number } | null = null;
-      if (want === 'refinery') toward = oreFrontier(sim, p);
-      else if (want === 'turret' || want === 'sam') {
-        // guard the base perimeter facing the enemy — NOT a picket line
-        // strung out toward the enemy base (it gets picked off piecemeal)
-        if (enemy) {
-          let cx = 0, cz = 0, n = 0;
-          for (const e of sim.ents.values()) if (e.b && e.owner === p) { cx += e.x; cz += e.z; n++; }
-          cx /= n || 1; cz /= n || 1;
-          const dl = Math.hypot(enemy.x - cx, enemy.z - cz) || 1;
-          toward = { x: cx + ((enemy.x - cx) / dl) * 6, z: cz + ((enemy.z - cz) / dl) * 6 };
+      // defensive structures: spread across the enemy-facing front so their
+      // ranges tile the approach instead of clumping on one spot
+      if (want === 'turret' || want === 'sam') {
+        const spot = defenseSpot(sim, p, want, basePos(sim, p), defenseDir(sim, p, mem))
+          || findSpot(sim, p, want, null);
+        if (spot) cmds.push({ k: 'place', p, type: want, cx: spot.x, cz: spot.z });
+      } else {
+        let toward: { x: number; z: number } | null = null;
+        if (want === 'refinery') toward = oreFrontier(sim, p);
+        let spot = findSpot(sim, p, want, toward);
+        // expansion creep: if the ore frontier is beyond build range, push a
+        // cheap power node toward it to extend the base footprint
+        if (want === 'refinery' && toward && spot &&
+          Math.hypot(spot.x - toward.x, spot.z - toward.z) > 11 &&
+          pl.credits > cost('power') + 500) {
+          const creep = findSpot(sim, p, 'power', toward);
+          if (creep) { cmds.push({ k: 'place', p, type: 'power', cx: creep.x, cz: creep.z }); spot = null; }
         }
+        if (spot) cmds.push({ k: 'place', p, type: want, cx: spot.x, cz: spot.z });
       }
-      let spot = findSpot(sim, p, want, toward);
-      // expansion creep: if the ore frontier is beyond build range, push a
-      // cheap power node toward it to extend the base footprint
-      if (want === 'refinery' && toward && spot &&
-        Math.hypot(spot.x - toward.x, spot.z - toward.z) > 11 &&
-        pl.credits > cost('power') + 500) {
-        const creep = findSpot(sim, p, 'power', toward);
-        if (creep) { cmds.push({ k: 'place', p, type: 'power', cx: creep.x, cz: creep.z }); spot = null; }
-      }
-      if (spot) cmds.push({ k: 'place', p, type: want, cx: spot.x, cz: spot.z });
     }
   }
 
@@ -239,6 +257,10 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
       cmds.push({ k: 'train', p, bid: bks.id, type: t });
     }
   }
+  // anti-air demand scales with the air the enemy is actually fielding now
+  const airSeen = mem.seenAir || 0;
+  const aaTarget = airSeen >= 1 ? Math.min(8, 2 + Math.ceil(airSeen)) : (antiAir ? 4 : 0);
+  const aaPrio = airSeen >= 1 ? 0.6 : 0.35;
   for (const fac of (myB['factory'] || [])) {
     if (fac.progress < fac.total) continue;
     // emergency: scrap whatever this factory is building and slot a harvester
@@ -249,13 +271,18 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
     else if (fac.queue.length >= 2) continue;
     else if (nU('harv') < harvTarget && pl.credits > 1000) cmds.push({ k: 'train', p, bid: fac.id, type: 'harv' });
     else if (nU('engineer') < 1 && pl.aiLvl >= 1 && pl.credits > 1500) cmds.push({ k: 'train', p, bid: fac.id, type: 'engineer' });
+    // reactive AA is a NEED, not surplus: build to the target even at army cap
+    // so an air assault always gets answered (user: "if air seen, build AA/flak")
+    else if (airSeen >= 1 && nU('aatank') + nU('flak') < aaTarget && pl.credits > 700) {
+      cmds.push({ k: 'train', p, bid: fac.id, type: sim.rng.next() < 0.5 ? 'aatank' : 'flak' });
+    }
     else if (armyCount < cap && pl.credits > (ecoShort ? 2200 : 1000)) {
       // islanders keep only a small home guard of vehicles
       const groundArmy = nU('tank') + nU('heavy') + nU('ifv') + nU('mlrs') + nU('aatank') + nU('flak');
       if (island && groundArmy >= 8) continue;
       const r = sim.rng.next();
       const t = nU('mlrs') < L.siege ? 'mlrs'
-        : (antiAir && nU('aatank') + nU('flak') < 4 && r < 0.35) ? (r < 0.18 ? 'aatank' : 'flak')
+        : (nU('aatank') + nU('flak') < aaTarget && r < aaPrio) ? (r < aaPrio * 0.5 ? 'aatank' : 'flak')
         : r < (antiInf ? 0.4 : 0.25) ? 'mlrs' // artillery shreds infantry masses
         : r < (antiInf ? 0.7 : 0.42) ? 'ifv'  // autocannons mop up the rest
         : r < (antiInf ? 0.76 : 0.47) && pl.credits > 1600 ? 'fueltruck' // breach charge
@@ -305,42 +332,43 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
     const t = !pl.tech['chem'] ? 'chem' : !pl.tech['bio'] ? 'bio' : !pl.tech['stealth'] ? 'stealth' : null;
     if (t) cmds.push({ k: 'research', p, bid: lab.id, tech: t });
   }
-  // Drone Hive defense network: anchor hives at the base, then push extras out
-  // to fortify the corridor the enemy keeps attacking through (learned above).
+  // === defensive garrison: fortified drone hives + an infantry line, both
+  // spread across the enemy-facing front (the learned corridor) and dug in ===
   if (pl.aiLvl >= 1) {
+    const base = basePos(sim, p);
+    const ddir = defenseDir(sim, p, mem);
+
+    // drone hives: build toward a target, then fan out and fortify the front.
+    // the oldest hive anchors home; the rest secure the approach corridor.
     const hives = myU['hive'] || [];
     const hiveTarget = pl.aiLvl >= 3 ? 4 : pl.aiLvl >= 2 ? 3 : 2;
-    // build more hives at a barracks when affordable, paced out
     const bkForHive = (myB['barracks'] || []).find(b => b.progress >= b.total && b.queue.length < 1);
-    if (bkForHive && hives.length < hiveTarget && pl.credits > 2400 && (mem.hiveCd || 0) <= sim.tickN) {
+    if (bkForHive && hives.length < hiveTarget && pl.credits > 2200 && (mem.hiveCd || 0) <= sim.tickN) {
       cmds.push({ k: 'train', p, bid: bkForHive.id, type: 'hive' });
-      mem.hiveCd = sim.tickN + 25 * TICKS_PER_SEC;
+      mem.hiveCd = sim.tickN + 22 * TICKS_PER_SEC;
     }
-    // place each hive: the first anchors the base, the rest fortify staggered
-    // posts along the enemy's route once a few attacks have revealed it
-    const base = basePos(sim, p);
-    const knowRoute = (mem.threatN || 0) >= 4 && mem.threatX !== undefined && !island;
-    const dx = (mem.threatX ?? base.x) - base.x, dz = (mem.threatZ ?? base.z) - base.z;
-    const dl = Math.hypot(dx, dz) || 1;
-    const sorted = [...hives].sort((a, b) => a.id - b.id);
-    sorted.forEach((h, idx) => {
-      if (h.fortified) return;
-      if (h.orders.length && h.orders[0].k === 'move') return; // already marching to its post
-      let post: { x: number; z: number };
-      if (!knowRoute || idx === 0) {
-        post = { x: h.x, z: h.z }; // base defense: dig in where it stands
-      } else {
-        // secure the route: each extra hive a bit further out, alternating sides
-        const reach = Math.min(dl - 4, 9 + idx * 4);
-        const off = (idx % 2 ? -1 : 1) * Math.ceil(idx / 2) * 3;
-        const px = base.x + (dx / dl) * reach - (dz / dl) * off;
-        const pz = base.z + (dz / dl) * reach + (dx / dl) * off;
-        const cp = nearestPassable(sim.map, Math.round(px), Math.round(pz), 10);
-        post = cp ? { x: cp.x + 0.5, z: cp.z + 0.5 } : { x: h.x, z: h.z };
+    const sortedH = [...hives].sort((a, b) => a.id - b.id);
+    const hPosts = frontPosts(sim, base, ddir, Math.max(1, hives.length), 7, 11);
+    sortedH.forEach((h, i) => deployFortify(cmds, p, h, i === 0 ? base : hPosts[i]));
+
+    // fortified infantry line: cheap, dense, dug in behind sandbags. Designate a
+    // capped slice of idle riflemen/rockets as defenders (don't gut the army);
+    // fortified/marching defenders are auto-excluded from offensive waves.
+    const defTarget = island ? 2 : pl.aiLvl >= 3 ? 8 : pl.aiLvl >= 2 ? 6 : 4;
+    mem.defenders = (mem.defenders || []).filter(id => { const u = sim.ents.get(id); return !!u && u.hp > 0; });
+    if (mem.defenders.length < defTarget) {
+      const pool = [...(myU['rifle'] || []), ...(myU['rocket'] || []), ...(myU['chemtrooper'] || []), ...(myU['biotrooper'] || [])];
+      for (const u of pool) {
+        if (mem.defenders.length >= defTarget) break;
+        if (u.fortified || u.fortT > 0 || mem.defenders.includes(u.id)) continue;
+        if (u.orders.length && u.orders[0].k === 'attack') continue; // don't recall attackers
+        mem.defenders.push(u.id);
       }
-      if (Math.hypot(h.x - post.x, h.z - post.z) <= 3.5) cmds.push({ k: 'fortify', p, ids: [h.id] });
-      else cmds.push({ k: 'move', p, ids: [h.id], x: post.x, z: post.z });
-    });
+    }
+    if (mem.defenders.length) {
+      const dPosts = frontPosts(sim, base, ddir, mem.defenders.length, 3, 6);
+      mem.defenders.forEach((id, i) => { const u = sim.ents.get(id); if (u) deployFortify(cmds, p, u, dPosts[i]); });
+    }
   }
 
   // upgrade something when rich
@@ -393,6 +421,72 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
 function basePos(sim: Sim, p: number): { x: number; z: number } {
   for (const e of sim.ents.values()) if (e.b && e.owner === p && e.type === 'conyard') return { x: e.x, z: e.z };
   return { ...sim.players[p].spawn };
+}
+
+// the direction the base should be facing: the learned attack corridor once a
+// few raids have revealed it, otherwise the nearest enemy base, else map centre
+function defenseDir(sim: Sim, p: number, mem: AiMem): { x: number; z: number } {
+  const b = basePos(sim, p);
+  let tx: number, tz: number;
+  if ((mem.threatN || 0) >= 3 && mem.threatX !== undefined) { tx = mem.threatX; tz = mem.threatZ!; }
+  else { const en = nearestEnemyBuilding(sim, p); if (en) { tx = en.x; tz = en.z; } else { tx = W / 2; tz = H / 2; } }
+  const dx = tx - b.x, dz = tz - b.z; const dl = Math.hypot(dx, dz) || 1;
+  return { x: dx / dl, z: dz / dl };
+}
+
+// pick the best NEW spot for a defensive structure: spread it across the
+// enemy-facing front so the weapon ranges tile the approach instead of stacking
+// on one spot. Each call fills the widest gap in the current screen.
+function defenseSpot(sim: Sim, p: number, type: string, base: { x: number; z: number }, dir: { x: number; z: number }): { x: number; z: number } | null {
+  const range = BUILDINGS[type]?.attack?.range || 7;
+  const perp = { x: -dir.z, z: dir.x };
+  const isAA = type === 'sam';
+  const mine: Entity[] = [];
+  for (const e of sim.ents.values()) {
+    if (!e.b || e.owner !== p) continue;
+    if ((e.type === 'turret' || e.type === 'sam') && (e.type === 'sam') === isAA) mine.push(e);
+  }
+  let best: { x: number; z: number } | null = null, bestScore = -1e9;
+  const frontDepth = 7; // sit a little ahead of the base centroid
+  for (let along = 3; along <= 12; along++) {
+    for (let lat = -14; lat <= 14; lat++) {
+      const cx = Math.round(base.x + dir.x * along + perp.x * lat);
+      const cz = Math.round(base.z + dir.z * along + perp.z * lat);
+      if (!sim.canPlace(p, type, cx, cz)) continue;
+      let score = -Math.abs(along - frontDepth) * 0.25; // hug the front line
+      let near = Infinity;
+      for (const d of mine) near = Math.min(near, Math.hypot(d.x - cx, d.z - cz));
+      if (!mine.length) score -= Math.abs(lat) * 0.15;             // first one: centre the front
+      else if (near < range * 0.6) score -= (range * 0.6 - near) * 1.5; // too clumped
+      else score += Math.min(near, range * 1.3) * 0.4;             // spread ~range apart, tiled coverage
+      score += sim.rng.next() * 0.2;
+      if (score > bestScore) { bestScore = score; best = { x: cx, z: cz }; }
+    }
+  }
+  return best;
+}
+
+// evenly spaced fortify posts fanned across the enemy-facing front, set a
+// little ahead of the base; each snapped to the nearest passable cell
+function frontPosts(sim: Sim, base: { x: number; z: number }, dir: { x: number; z: number }, n: number, spread: number, depth: number): { x: number; z: number }[] {
+  const perp = { x: -dir.z, z: dir.x };
+  const out: { x: number; z: number }[] = [];
+  for (let i = 0; i < n; i++) {
+    const lat = (i - (n - 1) / 2) * spread;
+    const px = base.x + dir.x * depth + perp.x * lat;
+    const pz = base.z + dir.z * depth + perp.z * lat;
+    const cp = nearestPassable(sim.map, Math.round(px), Math.round(pz), 8);
+    out.push(cp ? { x: cp.x + 0.5, z: cp.z + 0.5 } : { x: base.x, z: base.z });
+  }
+  return out;
+}
+
+// move a fortifiable unit (hive / infantry) to its post and dig in on arrival
+function deployFortify(cmds: Cmd[], p: number, u: Entity, post: { x: number; z: number }): void {
+  if (u.fortified || u.fortT > 0) return;                       // already dug in / mid-deploy
+  if (u.orders.length && u.orders[0].k === 'move') return;      // already marching to a post
+  if (Math.hypot(u.x - post.x, u.z - post.z) <= 2.5) cmds.push({ k: 'fortify', p, ids: [u.id] });
+  else cmds.push({ k: 'move', p, ids: [u.id], x: post.x, z: post.z });
 }
 
 function armyOf(sim: Sim, p: number, idleOnly: boolean): Entity[] {
@@ -451,6 +545,7 @@ function bestStrikeTarget(sim: Sim, p: number): Entity | null {
   const enemyB: Entity[] = [], defenders: Entity[] = [];
   for (const e of sim.ents.values()) {
     if (!e.b || e.owner === p || !sim.players[e.owner].alive) continue;
+    if (e.type === 'wall' || e.type === 'barrier') continue; // not worth a wave — route around
     enemyB.push(e);
     if (e.type === 'turret' || e.type === 'sam') defenders.push(e);
   }

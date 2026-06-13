@@ -1,13 +1,21 @@
 // Deploy FRACTURED EARTH to the Vultr box as a Docker container.
 // Touches ONLY: /opt/fractured-earth, a 'fractured-earth' container, one ufw rule.
 import { Client } from 'ssh2';
-import { readdirSync, statSync } from 'fs';
+import { readdirSync, statSync, readFileSync, existsSync } from 'fs';
 import { join, posix } from 'path';
 
-const HOST = process.env.DEPLOY_HOST;
-const USER = process.env.DEPLOY_USER || 'root';
-const PASS = process.env.DEPLOY_PASS;
-if (!HOST || !PASS) { console.error('Set DEPLOY_HOST / DEPLOY_PASS'); process.exit(1); }
+// local fallback secrets (gitignored) so deploys work without exported env vars
+let local = {};
+try {
+  const f = join(process.cwd(), 'deploy', 'secrets.local.json');
+  if (existsSync(f)) local = JSON.parse(readFileSync(f, 'utf8'));
+} catch { /* ignore malformed file — env vars still win */ }
+
+const HOST = process.env.DEPLOY_HOST || local.DEPLOY_HOST;
+const USER = process.env.DEPLOY_USER || local.DEPLOY_USER || 'root';
+const PASS = process.env.DEPLOY_PASS || local.DEPLOY_PASS;
+const ADVISOR_KEY = process.env.ADVISOR_KEY || local.ADVISOR_KEY;
+if (!HOST || !PASS) { console.error('Set DEPLOY_HOST / DEPLOY_PASS (env or deploy/secrets.local.json)'); process.exit(1); }
 
 const LOCAL = process.cwd();
 const REMOTE = '/opt/fractured-earth';
@@ -73,7 +81,7 @@ conn.on('ready', async () => {
     console.log('starting container...');
     await exec('docker rm -f fractured-earth 2>/dev/null || true');
     // optional Claude strategist key: lives only in the container env, never in files
-    const advisorEnv = process.env.ADVISOR_KEY ? `-e ADVISOR_KEY='${process.env.ADVISOR_KEY}' ` : '';
+    const advisorEnv = ADVISOR_KEY ? `-e ADVISOR_KEY='${ADVISOR_KEY}' ` : '';
     const run = await exec(
       `docker run -d --name fractured-earth --restart unless-stopped ` +
       `-p ${PORT}:8080 -v ${REMOTE}:/app -w /app -m 300m ${advisorEnv}node:20-alpine ` +

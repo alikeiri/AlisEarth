@@ -164,6 +164,21 @@
   .lpDot { width: 12px; height: 12px; border-radius: 50%; }
   #roomCode { font-size: 34px; letter-spacing: 10px; color: var(--accent); font-weight: 800; margin: 6px 0 14px; }
   #endScreen .title { font-size: 60px; }
+  #endStats { width: 800px; max-width: 94vw; margin: 6px auto 14px; }
+  .statsHead { font-size: 15px; letter-spacing: 3px; text-transform: uppercase; color: var(--accent);
+    text-align: center; margin-bottom: 8px; }
+  #statsTable { width: 100%; border-collapse: collapse; font-size: 13px; margin-bottom: 14px; }
+  #statsTable th, #statsTable td { padding: 6px 8px; text-align: center; border-bottom: 1px solid #2c3a44; }
+  #statsTable th { color: #8aa0ad; font-weight: 600; letter-spacing: 0.5px; }
+  #statsTable td.name { text-align: left; font-weight: 700; }
+  #statsTable td.name .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 7px; vertical-align: middle; }
+  #chartControls { display: flex; gap: 8px; justify-content: center; margin-bottom: 8px; flex-wrap: wrap; }
+  .chartBtn { background: #16202a; border: 1px solid #2c3a44; color: #b7c6d0; border-radius: 5px;
+    padding: 5px 14px; font-size: 12px; cursor: pointer; letter-spacing: 0.5px; }
+  .chartBtn.sel { background: var(--accent); color: #06223a; border-color: var(--accent); font-weight: 700; }
+  #chartWrap { background: #0d141a; border: 1px solid #2c3a44; border-radius: 6px; padding: 6px; }
+  #statsChart { width: 100%; height: 260px; display: block; }
+  #chartHint { font-size: 12px; color: #6f8694; text-align: center; margin-top: 6px; min-height: 16px; }
   .err { color: var(--bad); font-size: 13px; min-height: 18px; }
 </style>
 </head>
@@ -266,6 +281,13 @@
   <div id="endScreen" class="screen hidden">
     <div class="title" id="endTitle">VICTORY</div>
     <div class="subtitle" id="endSub"></div>
+    <div id="endStats" class="hidden">
+      <div class="statsHead">Battle Report</div>
+      <table id="statsTable"></table>
+      <div id="chartControls"></div>
+      <div id="chartWrap"><canvas id="statsChart" width="760" height="260"></canvas></div>
+      <div id="chartHint">Hover the chart to read values over time.</div>
+    </div>
     <div class="menubox"><button class="mbtn primary" id="btnAgain">BACK TO MENU</button></div>
   </div>
 
