@@ -794,7 +794,7 @@ class GameClient {
     const z0 = Math.min(r.z0, r.z1), z1 = Math.max(r.z0, r.z1);
     let sum = 0, n = 0;
     for (let z = Math.floor(z0); z <= Math.floor(z1); z++)
-      for (let x = Math.floor(x0); x <= Math.floor(x1); x++) { sum += this.map.heightAt(x + 0.5, z + 0.5); n++; }
+      for (let x = Math.floor(x0); x <= Math.floor(x1); x++) { sum += this.game.map.heightAt(x + 0.5, z + 0.5); n++; }
     this.terraBaseH = n ? sum / n : SEA + 1;
     this.terraTargetH = this.terraBaseH;
     this.terraAnchorY = this.mouse.y;
@@ -1411,7 +1411,7 @@ class GameClient {
       const g = this.renderer.groundPoint(this.mouse.x / window.innerWidth, this.mouse.y / window.innerHeight);
       if (g) { this.terraRect.x1 = g.x; this.terraRect.z1 = g.z; }
       const r = this.terraRect;
-      this.renderer.setTerraPreview({ x0: r.x0, z0: r.z0, x1: r.x1, z1: r.z1, h: this.map.heightAt((r.x0 + r.x1) / 2, (r.z0 + r.z1) / 2), base: 0 });
+      this.renderer.setTerraPreview({ x0: r.x0, z0: r.z0, x1: r.x1, z1: r.z1, h: this.game.map.heightAt((r.x0 + r.x1) / 2, (r.z0 + r.z1) / 2), base: this.game.map.heightAt((r.x0 + r.x1) / 2, (r.z0 + r.z1) / 2) - 0.1 });
       if (terraHint) { terraHint.textContent = 'TERRAFORM — drag the area, release to set its height'; terraHint.classList.remove('hidden'); }
     } else if (this.terraMode === 'height' && this.terraRect) {
       // moving the mouse UP raises the target, DOWN lowers it
@@ -1561,7 +1561,7 @@ class GameClient {
       && this.byId.get([...this.selection][0])?.o === this.game.me;
     // only assign when it changes — re-setting a data-URI cursor every frame
     // makes Chrome re-decode the image and flicker
-    const wantCursor = siloAiming ? SILO_CURSOR : hover ? 'crosshair' : '';
+    const wantCursor = this.terraMode ? TERRA_CURSOR : siloAiming ? SILO_CURSOR : hover ? 'crosshair' : '';
     if (wantCursor !== this.lastCursor) { canvas3.style.cursor = wantCursor; this.lastCursor = wantCursor; }
 
     // range/detection circles for the current selection
@@ -1628,6 +1628,8 @@ const $ = (id: string) => document.getElementById(id)!;
 
 // red target reticle shown over the map while a missile silo is selected
 const SILO_CURSOR = "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='34' height='34'%3E%3Cg fill='none' stroke='%23ff4030' stroke-width='2'%3E%3Ccircle cx='17' cy='17' r='10'/%3E%3Cpath d='M17 1v9M17 24v9M1 17h9M24 17h9'/%3E%3C/g%3E%3Ccircle cx='17' cy='17' r='1.6' fill='%23ff4030'/%3E%3C/svg%3E\") 17 17, crosshair";
+// green leveling icon shown while a bulldozer is terraforming (area + up/down arrows)
+const TERRA_CURSOR = "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='32' height='32'%3E%3Cg fill='none' stroke='%234ade6a' stroke-width='2'%3E%3Crect x='5' y='13' width='22' height='14' rx='1'/%3E%3Cpath d='M16 2v8M12 6l4-4 4 4'/%3E%3C/g%3E%3C/svg%3E\") 16 20, crosshair";
 let selFaction = 'usa';
 let selDiff = 1;
 let selDiff2 = 2;

@@ -1116,7 +1116,8 @@ export class Renderer {
     const lo = Math.min(r.base, r.h), hi = Math.max(r.base, r.h);
     this.terraPrev.position.set((minX + maxX) / 2, (lo + hi) / 2, (minZ + maxZ) / 2);
     this.terraPrev.scale.set(Math.max(1, maxX - minX), Math.max(0.3, hi - lo), Math.max(1, maxZ - minZ));
-    (this.terraPrev.material as THREE.MeshBasicMaterial).color.setHex(r.h >= r.base ? 0x57d977 : 0x3da5ff);
+    // green cube rising ABOVE the ground when raising, red cube BELOW when lowering
+    (this.terraPrev.material as THREE.MeshBasicMaterial).color.setHex(r.h >= r.base ? 0x4ade6a : 0xff4040);
     this.terraPrev.visible = true;
   }
 
@@ -1521,7 +1522,10 @@ export class Renderer {
     if (!active || !type) return;
     const s = BUILDINGS[type].size;
     this.ghost.scale.set(s, 1, s);
-    this.ghost.position.set(cx! + s / 2, this.map.heightAt(cx! + s / 2, cz! + s / 2) + 0.4, cz! + s / 2);
+    // lift the shipyard ghost to the water surface so it's visible over the sea
+    const baseY = this.map.heightAt(cx! + s / 2, cz! + s / 2);
+    const gy = type === 'shipyard' ? Math.max(baseY, SEA - 0.05) : baseY;
+    this.ghost.position.set(cx! + s / 2, gy + 0.4, cz! + s / 2);
     (this.ghost.material as THREE.MeshBasicMaterial).color.setHex(ok ? 0x57d977 : 0xff5043);
   }
 

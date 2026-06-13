@@ -328,29 +328,32 @@ class AudioMan {
     o.start(t); o.stop(t + dur + 0.1);
   }
 
-  // distorted electric-guitar voice: sawtooth → soft-clip waveshaper → tone
-  // filter → picked envelope. `palm` darkens it for chugging power chords.
+  // distorted electric-guitar voice: TWO detuned sawtooths driven hard into a
+  // hard-clip waveshaper (heavy overdrive) → bright tone → SUSTAINED envelope.
+  // The detune + heavy clip + held sustain read as a buzzy guitar, not a piano.
   private guitarCurve: Float32Array | null = null;
   private guitar(freq: number, t: number, dur: number, peak: number, palm = false, echo = false) {
     if (!this.ctx) return;
     if (!this.guitarCurve) {
-      const n = 1024, c = new Float32Array(n), amt = 9;
-      for (let i = 0; i < n; i++) { const x = (i / n) * 2 - 1; c[i] = ((1 + amt) * x) / (1 + amt * Math.abs(x)); }
+      const n = 1024, c = new Float32Array(n), amt = 22;       // hard clip = lots of grit
+      for (let i = 0; i < n; i++) { const x = (i / n) * 2 - 1; c[i] = Math.tanh(amt * x); }
       this.guitarCurve = c;
     }
-    const o = this.ctx.createOscillator(); o.type = 'sawtooth'; o.frequency.value = freq;
-    const pre = this.ctx.createGain(); pre.gain.value = 0.7;            // drive into the clipper
-    const sh = this.ctx.createWaveShaper(); sh.curve = this.guitarCurve; sh.oversample = '2x';
-    const tone = this.ctx.createBiquadFilter(); tone.type = 'lowpass';
-    tone.frequency.value = palm ? 1400 : 2700; tone.Q.value = 0.8;
-    const g = this.ctx.createGain();
-    g.gain.setValueAtTime(0.0001, t);
-    g.gain.exponentialRampToValueAtTime(peak, t + 0.006);              // pick attack
-    g.gain.exponentialRampToValueAtTime(peak * 0.55, t + dur * 0.45);  // sustain
-    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-    o.connect(pre); pre.connect(sh); sh.connect(tone); tone.connect(g); g.connect(this.musG);
-    if (echo) g.connect(this.delay);
-    o.start(t); o.stop(t + dur + 0.05);
+    for (const det of [0.997, 1.003]) {                         // thick double-tracked tone
+      const o = this.ctx.createOscillator(); o.type = 'sawtooth'; o.frequency.value = freq * det;
+      const pre = this.ctx.createGain(); pre.gain.value = 1.6;  // hot drive into the clipper
+      const sh = this.ctx.createWaveShaper(); sh.curve = this.guitarCurve; sh.oversample = '4x';
+      const tone = this.ctx.createBiquadFilter(); tone.type = 'lowpass';
+      tone.frequency.value = palm ? 2000 : 4200; tone.Q.value = 1.1; // brighter = buzzier
+      const g = this.ctx.createGain();
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(peak * 0.5, t + 0.004);    // fast pick attack
+      g.gain.setValueAtTime(peak * 0.45, t + dur * 0.7);             // HOLD (ringing sustain)
+      g.gain.exponentialRampToValueAtTime(0.0001, t + dur);          // release
+      o.connect(pre); pre.connect(sh); sh.connect(tone); tone.connect(g); g.connect(this.musG);
+      if (echo) g.connect(this.delay);
+      o.start(t); o.stop(t + dur + 0.05);
+    }
   }
 
   private scheduleEighth(t: number, e: number, spe: number) {
@@ -375,10 +378,11 @@ class AudioMan {
         this.guitar(root, t, spe * 0.8, 0.09, true);
         this.guitar(fifth, t, spe * 0.8, 0.07, true);
       }
-      // lead: a distorted pentatonic note with echo, every so often
-      if (Math.random() < 0.45) {
-        const pent = [0, 3, 5, 7, 10][(Math.random() * 5) | 0];
-        this.guitar(this.midi(ch[0] + 12 + pent), t, spe * 1.6, 0.06, false, true);
+      // lead: a FIXED minor-pentatonic riff (one note per eighth) so it reads as
+      // a melody, not random noodling — the pattern repeats each bar
+      const RIFF = [0, 7, 5, 7, 3, 5, 7, 12];
+      if (pos % 1 === 0 && RIFF[pos] !== undefined) {
+        this.guitar(this.midi(ch[0] + 12 + RIFF[pos]), t, spe * 1.4, 0.055, false, true);
       }
       // hard rock drums: four-on-the-floor kick, snare backbeat, busy hats
       if (pos % 2 === 0) this.musTone('sine', 100, t, 0.003, 0.13, 0.2, 380); // kick
