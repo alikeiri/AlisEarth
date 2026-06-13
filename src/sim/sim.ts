@@ -818,19 +818,22 @@ export class Sim {
       if (u.ephLife >= def.ephemeral) { u.hp = 0; return; }
     }
 
-    // fortified drone hive: stationary, emits mini drones, ignores move orders
+    // fortified drone hive: stationary watchtower with extended reach. It scans
+    // for the nearest enemy in range and launches interceptor drones DIRECTLY
+    // at it — fast under threat, a slow standing screen when quiet.
     if (def.fortify && u.fortified) {
       u.orders = u.orders.filter(o => o.k === 'fortify');
+      const threat = def.range > 0 ? this.findEnemy(u, def.range) : null;
       u.emitCd -= TICK;
-      if (u.emitCd <= 0) {
-        u.emitCd = 7;
+      if (u.emitCd <= 0 && def.emits) {
         const c = nearestPassable(this.map, Math.floor(u.x), Math.floor(u.z));
-        if (c && def.emits) {
+        if (c) {
           const d = this.spawnUnit(u.owner, def.emits, c.x + 0.5, c.z + 0.5);
-          d.stance = 0; // aggressive: auto-hunts nearby enemies
-        }
+          d.stance = 0;
+          if (threat) { d.orders = [{ k: 'attack', tgt: threat.id }]; d.cmdT = this.tickN; } // dispatch on the intruder
+          u.emitCd = threat ? 1.8 : 9; // swarm a real threat; idle patrol otherwise
+        } else u.emitCd = 1;
       }
-      // also fire back if it has a weapon (hives don't, but future-proof)
       return;
     }
 

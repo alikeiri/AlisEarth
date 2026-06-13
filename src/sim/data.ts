@@ -48,7 +48,7 @@ export const UNITS: Record<string, UnitDef> = {
   aatank: { name: 'AA Vehicle',   cost: 950,  hp: 280, speed: 3.0, range: 8.0, dmg: 42, rof: 1.6, builtAt: 'factory',  buildTime: 11, kind: 'veh' },
   flak:   { name: 'Flak Gun',     cost: 650,  hp: 240, speed: 2.6, range: 6.5, dmg: 16, rof: 0.45, builtAt: 'factory', buildTime: 9,  kind: 'veh' },
   engineer: { name: 'Engineer',   cost: 600,  hp: 200, speed: 2.2, range: 0,   dmg: 0,  rof: 1,   builtAt: 'factory',  buildTime: 10, kind: 'veh', repair: true, road: true },
-  hive:    { name: 'Drone Hive',  cost: 1500, hp: 900, speed: 1.1, range: 0,   dmg: 0,  rof: 1,   builtAt: 'barracks', buildTime: 16, kind: 'inf', fortify: true, emits: 'minidrone' },
+  hive:    { name: 'Drone Hive',  cost: 1500, hp: 900, speed: 1.1, range: 13,  dmg: 0,  rof: 1,   builtAt: 'barracks', buildTime: 16, kind: 'inf', fortify: true, emits: 'minidrone' },
   minidrone: { name: 'Mini Drone', cost: 0,   hp: 40,  speed: 4.2, range: 4.0, dmg: 200, rof: 1, builtAt: '',         buildTime: 0,  kind: 'air', fly: true, alt: 1.6, ephemeral: 26, internal: true, kamikaze: true },
   // naval (Ship Factory, water only)
   gunboat:   { name: 'Gunboat',     cost: 700,  hp: 300, speed: 2.8, range: 5.5, dmg: 22, rof: 1.2, builtAt: 'shipyard', buildTime: 10, kind: 'sea', move: 'sea' },
