@@ -4,9 +4,10 @@ export const TICK = 0.1;            // seconds per sim tick (10 Hz)
 export const TICKS_PER_SEC = 10;
 export const ORE_VALUE = 0.8;      // credits per ore unit (economy pacing)
 export const START_CREDITS = 3000;
-export const ORE_REGEN = 2;       // ore regrown per field cell per second...
-export const ORE_REGEN_CAP = 0.35; // ...up to this fraction of the original amount
-// (tester: one small patch must NOT sustain a war economy forever)
+export const ORE_REGEN = 0.9;     // ore regrown per field cell per second...
+export const ORE_REGEN_CAP = 0.22; // ...up to this fraction of the original amount
+// (tester: regen was too generous — depleted fields recover slowly now, so map
+// control and expansion matter; one small patch can't sustain a war forever)
 
 export interface UnitDef {
   name: string; cost: number; hp: number; speed: number;

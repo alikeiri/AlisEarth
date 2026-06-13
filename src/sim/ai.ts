@@ -157,7 +157,7 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
   // (a brief sighting biases production for a while via a decaying counter)
   let eAir = 0, eAA = 0, eCombat = 0, eBuildings = 0;
   for (const e of sim.ents.values()) {
-    if (e.owner === p || e.hp <= 0 || !sim.players[e.owner]?.alive) continue;
+    if (!sim.foe(e.owner, p) || e.hp <= 0 || !sim.players[e.owner]?.alive) continue;
     const ed = UNITS[e.type];
     if (e.b) {
       if (e.type !== 'wall' && e.type !== 'barrier') eBuildings++;
@@ -562,7 +562,7 @@ function enemyHarvester(sim: Sim, p: number): Entity | null {
   const s = sim.players[p].spawn;
   let best: Entity | null = null, bd = 1e9;
   for (const e of sim.ents.values()) {
-    if (e.b || e.owner === p || e.type !== 'harv' || !sim.players[e.owner].alive) continue;
+    if (e.b || !sim.foe(e.owner, p) || e.type !== 'harv' || !sim.players[e.owner].alive) continue;
     const d = (e.x - s.x) ** 2 + (e.z - s.z) ** 2;
     if (d < bd) { bd = d; best = e; }
   }
@@ -576,7 +576,7 @@ function bestStrikeTarget(sim: Sim, p: number): Entity | null {
   const s = sim.players[p].spawn;
   const enemyB: Entity[] = [], defenders: Entity[] = [];
   for (const e of sim.ents.values()) {
-    if (!e.b || e.owner === p || !sim.players[e.owner].alive) continue;
+    if (!e.b || !sim.foe(e.owner, p) || !sim.players[e.owner].alive) continue;
     if (e.type === 'wall' || e.type === 'barrier') continue; // not worth a wave — route around
     enemyB.push(e);
     if (e.type === 'turret' || e.type === 'sam') defenders.push(e);
@@ -600,7 +600,7 @@ function airDefenseTarget(sim: Sim, p: number): Entity | null {
   const s = sim.players[p].spawn;
   let best: Entity | null = null, bd = 1e9;
   for (const e of sim.ents.values()) {
-    if (e.owner === p || e.hp <= 0 || !sim.players[e.owner].alive) continue;
+    if (!sim.foe(e.owner, p) || e.hp <= 0 || !sim.players[e.owner].alive) continue;
     if (e.type !== 'sam' && e.type !== 'aatank' && e.type !== 'flak') continue;
     const d = (e.x - s.x) ** 2 + (e.z - s.z) ** 2;
     if (d < bd) { bd = d; best = e; }
@@ -612,7 +612,7 @@ function nearestEnemyBuilding(sim: Sim, p: number): Entity | null {
   const s = sim.players[p].spawn;
   let best: Entity | null = null, bd = 1e9;
   for (const e of sim.ents.values()) {
-    if (!e.b || e.owner === p || !sim.players[e.owner].alive) continue;
+    if (!e.b || !sim.foe(e.owner, p) || !sim.players[e.owner].alive) continue;
     const d = (e.x - s.x) ** 2 + (e.z - s.z) ** 2;
     if (d < bd) { bd = d; best = e; }
   }

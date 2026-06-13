@@ -357,7 +357,13 @@ export function genMap(seed: number, nPlayers: number): GameMap {
     }
   }
 
-  // -- ore fields
+  // -- ore fields. Track patch centres and keep them a minimum distance apart
+  // so fields stay distinct (don't merge into one sprawling mega-patch).
+  const oreCenters: { x: number; z: number }[] = [];
+  const farFromOre = (cx: number, cz: number, gap: number) => {
+    for (const c of oreCenters) if ((c.x - cx) ** 2 + (c.z - cz) ** 2 < gap * gap) return false;
+    return true;
+  };
   const addOre = (cx: number, cz: number, r: number, amt: number) => {
     for (let z = cz - r; z <= cz + r; z++) {
       for (let x = cx - r; x <= cx + r; x++) {
@@ -367,6 +373,7 @@ export function genMap(seed: number, nPlayers: number): GameMap {
         m.ore[z * W + x] = amt * (0.7 + 0.6 * rng.next());
       }
     }
+    oreCenters.push({ x: cx, z: cz });
   };
   // two fields near every start (even unused ones - they become expansions)
   for (const s of starts) {
@@ -374,13 +381,14 @@ export function genMap(seed: number, nPlayers: number): GameMap {
     addOre(Math.round(s.x + dx * 10), Math.round(s.z + dz * 3 + rng.range(-3, 3)), 2, 700);
     addOre(Math.round(s.x + dx * 3 + rng.range(-3, 3)), Math.round(s.z + dz * 10), 2, 700);
   }
-  // central contested fields
+  // central contested fields — spaced out from every existing patch
+  const MIN_GAP = 13;
   let placed = 0, tries = 0;
   const wantOre = Math.max(3, Math.round(W / 19));
-  while (placed < wantOre && tries < 200) {
+  while (placed < wantOre && tries < 400) {
     tries++;
     const cx = 24 + rng.int(W - 48), cz = 24 + rng.int(H - 48);
-    if (m.blockedT(cx, cz)) continue;
+    if (m.blockedT(cx, cz) || !farFromOre(cx, cz, MIN_GAP)) continue;
     addOre(cx, cz, 3, 900);
     placed++;
   }
@@ -388,14 +396,15 @@ export function genMap(seed: number, nPlayers: number): GameMap {
   // -- special crystal fields: rare, contested, 3x value
   let gems = 0, gtries = 0;
   const wantGems = Math.max(2, Math.round(W / 44));
-  while (gems < wantGems && gtries < 300) {
+  while (gems < wantGems && gtries < 400) {
     gtries++;
     const cx = 20 + rng.int(W - 40), cz = 20 + rng.int(H - 40);
-    if (m.blockedT(cx, cz)) continue;
+    if (m.blockedT(cx, cz) || !farFromOre(cx, cz, MIN_GAP)) continue;
     let farFromSpawns = true;
     for (const s of starts)
       if ((cx - s.x) ** 2 + (cz - s.z) ** 2 < 24 * 24) { farFromSpawns = false; break; }
     if (!farFromSpawns) continue;
+    oreCenters.push({ x: cx, z: cz });
     for (let z = cz - 2; z <= cz + 2; z++)
       for (let x = cx - 2; x <= cx + 2; x++) {
         if (!m.inB(x, z) || m.blockedT(x, z)) continue;

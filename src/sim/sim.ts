@@ -48,6 +48,7 @@ export interface Entity {
 
 export interface PlayerState {
   name: string; faction: string; fac: Faction; isAI: boolean; aiLvl: number;
+  team: number;                            // allies share a team; FFA = unique per player
   credits: number; alive: boolean;
   powerMade: number; powerUsed: number; pf: number;
   bonusCost: number; bonusIncome: number; // brutal-AI handicaps
@@ -108,7 +109,7 @@ export class Sim {
   private reported = false;
   private grid = new Map<number, number[]>(); // spatial hash of units, cell = 2 units
 
-  constructor(seed: number, specs: { name: string; faction: string; isAI?: boolean; aiLvl?: number }[]) {
+  constructor(seed: number, specs: { name: string; faction: string; isAI?: boolean; aiLvl?: number; team?: number }[]) {
     this.rng = new RNG(seed);
     this.map = genMap(seed, specs.length);
     specs.forEach((s, i) => {
@@ -116,6 +117,7 @@ export class Sim {
       const lvl = s.aiLvl ?? 1;
       this.players.push({
         name: s.name, faction: fac.id, fac, isAI: !!s.isAI, aiLvl: lvl,
+        team: s.team ?? i, // default: everyone on their own team (free-for-all)
         credits: START_CREDITS, alive: true, powerMade: 0, powerUsed: 0, pf: 1,
         bonusCost: s.isAI && lvl >= 3 ? 0.85 : 1,
         bonusIncome: s.isAI && lvl >= 3 ? 1.3 : 1,
@@ -219,6 +221,9 @@ export class Sim {
         if (!this.map.inB(x, z) || this.map.occ[i]) return false;
         // water blocks normal buildings, but a shipyard is built on it
         if (this.map.tBlocked[i] && !(onWater && this.map.water[i])) return false;
+        // never build on an ore patch — it buries the field and traps the
+        // harvesters trying to mine it (reported: AI harvesters getting stuck)
+        if (this.map.ore[i] > 0) return false;
       }
     // shipyards must straddle the coast: water in/around the footprint
     if (type === 'shipyard') {
@@ -318,7 +323,7 @@ export class Sim {
       const r = Math.max(1, Math.min(14, c.r || 0));
       const targets: Entity[] = [];
       for (const e of this.ents.values()) {
-        if (e.owner === c.p || e.hp <= 0 || !this.players[e.owner].alive) continue;
+        if (!this.foe(e.owner, c.p) || e.hp <= 0 || !this.players[e.owner].alive) continue;
         const d = e.b ? this.distToEnt(c.x, c.z, e) : Math.hypot(e.x - c.x, e.z - c.z);
         if (d <= r) targets.push(e);
       }
@@ -683,10 +688,16 @@ export class Sim {
     return best;
   }
 
+  // two owners are foes when they sit on different teams (same team = allies,
+  // and a player is always allied with itself)
+  foe(a: number, b: number): boolean {
+    return a !== b && this.players[a]?.team !== this.players[b]?.team;
+  }
+
   private findEnemy(e: Entity, range: number, skipAir = false): Entity | null {
     let best: Entity | null = null, bd = 1e9;
     for (const u of this.nearbyUnits(e.x, e.z, range + 1)) {
-      if (u.owner === e.owner || u.hp <= 0 || !this.players[u.owner].alive) continue;
+      if (!this.foe(u.owner, e.owner) || u.hp <= 0 || !this.players[u.owner].alive) continue;
       const d = this.distToEnt(e.x, e.z, u);
       if (UNITS[u.type]?.cloak && d > 4) continue; // stealth: only seen up close
       // never auto-lock onto air targets the attacker cannot hurt (turret, MLRS)
@@ -698,7 +709,7 @@ export class Sim {
     // never auto-targeted: ground units route around them, air flies over. They
     // only take fire from an explicit attack order or area-attack.
     for (const u of this.ents.values()) {
-      if (!u.b || u.owner === e.owner || u.hp <= 0 || !this.players[u.owner].alive) continue;
+      if (!u.b || !this.foe(u.owner, e.owner) || u.hp <= 0 || !this.players[u.owner].alive) continue;
       if (u.type === 'wall' || u.type === 'barrier') continue;
       const d = this.distToEnt(e.x, e.z, u);
       if (d <= range && d < bd) { bd = d; best = u; }
@@ -707,6 +718,7 @@ export class Sim {
   }
 
   private dealDamage(att: Entity, tgt: Entity, base: number) {
+    if (!this.foe(att.owner, tgt.owner)) return; // no friendly fire between allies / self
     let mul = dmgMul(att.type, tgt.b, tgt.b ? 'b' : UNITS[tgt.type].kind, tgt.b ? undefined : tgt.type);
     if (!tgt.b) {
       if (tgt.fortT > 0) mul *= FORT_DEPLOY_VULN;        // exposed while digging in / packing up
@@ -885,7 +897,7 @@ export class Sim {
       if (u.sd <= 0) {
         const R = 2.6;
         for (const o of this.nearbyUnits(u.x, u.z, R + 1)) {
-          if (o.owner === u.owner || o.hp <= 0 || o.id === u.id) continue;
+          if (!this.foe(o.owner, u.owner) || o.hp <= 0 || o.id === u.id) continue;
           const d = Math.hypot(o.x - u.x, o.z - u.z);
           if (d <= R) this.dealDamage(u, o, u.maxHp * 0.6 * (1 - 0.5 * (d / R)));
         }
@@ -1024,7 +1036,7 @@ export class Sim {
     // moving ground vehicles crush enemy infantry under their treads
     if (def.kind === 'veh' && u.mvi >= this.tickN - 1) {
       for (const o of this.nearbyUnits(u.x, u.z, 0.7)) {
-        if (o.owner === u.owner || o.hp <= 0) continue;
+        if (!this.foe(o.owner, u.owner) || o.hp <= 0) continue;
         if (UNITS[o.type]?.kind !== 'inf') continue;
         if ((o.x - u.x) ** 2 + (o.z - u.z) ** 2 > 0.42) continue;
         this.dealDamage(u, o, 9999);
@@ -1203,7 +1215,7 @@ export class Sim {
     let target: Entity | null = null, best = -1;
     const inZone: Entity[] = [];
     for (const e of this.ents.values()) {
-      if (e.owner === b.owner || e.hp <= 0 || !this.players[e.owner].alive) continue;
+      if (!this.foe(e.owner, b.owner) || e.hp <= 0 || !this.players[e.owner].alive) continue;
       const dx = e.x - b.strikeX!, dz = e.z - b.strikeZ!;
       if (dx * dx + dz * dz <= R2) inZone.push(e);
     }
@@ -1232,7 +1244,7 @@ export class Sim {
     const R = mdef.blastR || 3;
     const fake: any = { id: 0, owner: bl.owner, type: bl.type, b: false };
     for (const e of [...this.ents.values()]) {
-      if (e.owner === bl.owner || e.hp <= 0 || !this.players[e.owner].alive) continue;
+      if (!this.foe(e.owner, bl.owner) || e.hp <= 0 || !this.players[e.owner].alive) continue;
       const d = e.b ? this.distToEnt(bl.x, bl.z, e) : Math.hypot(e.x - bl.x, e.z - bl.z);
       if (d > R) continue;
       this.dealDamage(fake, e, mdef.dmg * (1 - 0.45 * (d / R)));
@@ -1246,7 +1258,7 @@ export class Sim {
     const def = UNITS[u.type];
     const R = 3.0;
     for (const e of [...this.ents.values()]) {
-      if (e.owner === u.owner || e.hp <= 0 || !this.players[e.owner].alive) continue;
+      if (!this.foe(e.owner, u.owner) || e.hp <= 0 || !this.players[e.owner].alive) continue;
       const d = e.b ? this.distToEnt(u.x, u.z, e) : Math.hypot(e.x - u.x, e.z - u.z);
       if (d > R) continue;
       this.dealDamage(u, e, def.dmg * (1 - 0.4 * (d / R)));
@@ -1518,17 +1530,23 @@ export class Sim {
   }
 
   private checkEnd() {
-    let nAlive = 0, lastAlive = -1;
+    let lastAlive = -1;
+    const aliveTeams = new Set<number>();
     this.players.forEach((pl, i) => {
       if (!pl.alive) return;
       let has = false;
       for (const e of this.ents.values()) if (e.b && e.owner === i) { has = true; break; }
       if (!has) { pl.alive = false; this.events.push({ e: 'elim', p: i }); }
-      else { nAlive++; lastAlive = i; }
+      else { aliveTeams.add(pl.team); lastAlive = i; }
     });
-    if (this.players.length > 1 && nAlive <= 1) {
+    // the match ends when only ONE team still has players standing
+    if (this.players.length > 1 && aliveTeams.size <= 1) {
       this.done = true;
+      // credit a surviving human on the winning team (so they see VICTORY),
+      // otherwise the last player standing represents the winning side
       this.winner = lastAlive;
+      for (let i = 0; i < this.players.length; i++)
+        if (this.players[i].alive && !this.players[i].isAI) { this.winner = i; break; }
       // hand the host a study report so the AI can adapt next game
       const hasHuman = this.players.some(pl => !pl.isAI);
       const hasAI = this.players.some(pl => pl.isAI);

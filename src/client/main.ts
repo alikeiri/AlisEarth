@@ -4,7 +4,7 @@
 import { Sim } from '../sim/sim';
 import { aiTick } from '../sim/ai';
 import { FACTIONS, BUILDINGS, UNITS, PLAYER_COLORS } from '../sim/data';
-import { GameMap, genMap, setMapSize, W, H } from '../sim/map';
+import { GameMap, genMap, setMapSize, W, H, MAXD } from '../sim/map';
 import { Renderer } from './render';
 import { UI } from './ui';
 import { Net } from './net';
@@ -44,8 +44,14 @@ class LocalGame implements GameLike {
 
   // simLvl2 !== null switches to simulation mode: two AIs fight, you spectate.
   // enemyLevels lists one difficulty per AI opponent (1-3) in a skirmish.
-  constructor(name: string, faction: string, aiLvl = 1, size = 96, simLvl2: number | null = null, enemyLevels: number[] = [1]) {
-    setMapSize(size);
+  constructor(name: string, faction: string, aiLvl = 1, size = 96, simLvl2: number | null = null, enemyLevels: number[] = [1], teams: number[] = []) {
+    // more players need more room — a 4-player FFA on a small map crams the
+    // spawns together. Grow the map with the player count (never shrink the
+    // player's chosen size), capped at the largest supported dimension.
+    const nPlayers = simLvl2 !== null ? 2 : Math.min(4, 1 + enemyLevels.slice(0, 3).length);
+    const minForPlayers = nPlayers >= 4 ? 128 : nPlayers === 3 ? 112 : 96;
+    const effSize = Math.min(MAXD, Math.max(size, minForPlayers));
+    setMapSize(effSize);
     const seed = (Date.now() ^ (Math.random() * 0x7fffffff)) >>> 0;
     const LVL_NAMES = ['Easy', 'Normal', 'Hard', 'Brutal'];
     const pickFacs = (avoid: string[], n: number) => {
@@ -64,11 +70,11 @@ class LocalGame implements GameLike {
     } else {
       const lvls = enemyLevels.slice(0, 3);
       const facs = pickFacs([faction], lvls.length);
-      const specs: any[] = [{ name, faction }];
+      const specs: any[] = [{ name, faction, team: teams[0] }];
       lvls.forEach((lv, i) =>
-        specs.push({ name: `AI ${FACTIONS[facs[i]].name} (${LVL_NAMES[lv] || 'Normal'})`, faction: facs[i], isAI: true, aiLvl: lv }));
+        specs.push({ name: `AI ${FACTIONS[facs[i]].name} (${LVL_NAMES[lv] || 'Normal'})`, faction: facs[i], isAI: true, aiLvl: lv, team: teams[i + 1] }));
       this.sim = new Sim(seed, specs);
-      this.recSeed = seed; this.recSize = size; this.recPlayers = specs.map(s => ({ ...s }));
+      this.recSeed = seed; this.recSize = effSize; this.recPlayers = specs.map(s => ({ ...s }));
     }
     // the AI studies past games and adapts: server intelligence is primary,
     // the browser's own profile fills in when the server is unreachable
@@ -159,7 +165,7 @@ class LocalGame implements GameLike {
   players(): any[] {
     return this.sim.players.map(pl => ({
       c: Math.floor(pl.credits), a: pl.alive, pm: Math.round(pl.powerMade), pu: Math.round(pl.powerUsed),
-      n: pl.name, f: pl.faction, tech: Object.keys(pl.tech).filter(k => pl.tech[k]),
+      n: pl.name, f: pl.faction, tm: pl.team, ai: pl.isAI, tech: Object.keys(pl.tech).filter(k => pl.tech[k]),
     }));
   }
   drainEvents() { const e = this.evQ; this.evQ = []; return e; }
@@ -235,7 +241,7 @@ class ReplayGame implements GameLike {
   players(): any[] {
     return this.sim.players.map(pl => ({
       c: Math.floor(pl.credits), a: pl.alive, pm: Math.round(pl.powerMade), pu: Math.round(pl.powerUsed),
-      n: pl.name, f: pl.faction, tech: Object.keys(pl.tech).filter(k => pl.tech[k]),
+      n: pl.name, f: pl.faction, tm: pl.team, ai: pl.isAI, tech: Object.keys(pl.tech).filter(k => pl.tech[k]),
     }));
   }
   drainEvents() { const e = this.evQ; this.evQ = []; return e; }
@@ -323,6 +329,7 @@ function canPlaceClient(map: GameMap, views: any[], me: number, type: string, cx
       const i = z * W + x;
       if (!map.inB(x, z)) return false;
       if (map.tBlocked[i] && !(onWater && map.water[i])) return false; // shipyards sit on water
+      if (map.ore && map.ore[i] > 0) return false; // can't build on an ore patch
     }
   // prerequisite building must exist and be finished (else placement fails server-side)
   if (def.prereq && !views.some(v => v.b && v.o === me && v.t === def.prereq && (v.pr ?? 1) >= 1)) return false;
@@ -382,6 +389,7 @@ class GameClient {
   // fog of war: 0 never seen, 1 explored, 2 currently visible — client-side
   // per-player view masking (spectator modes see everything)
   private fog: Uint8Array | null = null;
+  private allies = new Set<number>(); // owners on my team (incl. me) — shared vision
   // radar: threat detection near the base, pierces fog within its range
   private radarBlips: any[] = [];
   private lastAlert = 0;
@@ -987,7 +995,7 @@ class GameClient {
       // right-press ON an enemy with units selected: drag opens an attack
       // circle — everything inside gets targeted on release
       const enemyUnder = this.myUnitIds().length
-        ? this.pickView(e.clientX, e.clientY, v => v.o !== this.game.me) : null;
+        ? this.pickView(e.clientX, e.clientY, v => !this.allies.has(v.o)) : null;
       const siloSel = (this.selection.size === 1 && !this.myUnitIds().length) ? this.byId.get([...this.selection][0]) : null;
       if (enemyUnder) {
         const g = this.renderer.groundPoint(e.clientX / window.innerWidth, e.clientY / window.innerHeight);
@@ -1095,7 +1103,7 @@ class GameClient {
     const f = this.fog!;
     for (let i = 0; i < f.length; i++) if (f[i] === 2) f[i] = 1;
     for (const v of allViews) {
-      if (v.o !== this.game.me) continue;
+      if (!this.allies.has(v.o)) continue; // my team (incl. allies) grants vision
       const def = (UNITS as any)[v.t] || (BUILDINGS as any)[v.t];
       const sight = v.b ? 7 : Math.max(5, (def?.range || 4) + 3);
       const cx = Math.floor(v.x), cz = Math.floor(v.z), r = Math.ceil(sight);
@@ -1124,7 +1132,7 @@ class GameClient {
     const RANGE = 24, RANGE2 = RANGE * RANGE;
     const threats: any[] = [];
     for (const v of allViews) {
-      if (v.o === me || v.b) continue;
+      if (this.allies.has(v.o) || v.b) continue; // allied units aren't threats
       if (!(UNITS[v.t]?.dmg > 0) && v.t !== 'fueltruck') continue; // only attackers
       let near = false;
       for (const b of myBuildings) if ((b.x - v.x) ** 2 + (b.z - v.z) ** 2 < RANGE2) { near = true; break; }
@@ -1212,7 +1220,7 @@ class GameClient {
         return;
       }
     }
-    const enemy = this.pickView(sx, sy, v => v.o !== me);
+    const enemy = this.pickView(sx, sy, v => !this.allies.has(v.o));
     if (enemy) {
       this.game.issue({ k: 'attack', p: me, ids, tgt: enemy.i, x: enemy.x, z: enemy.z, q: queue });
       audio.ack(this.dominantType(ids), 'attack');
@@ -1350,6 +1358,12 @@ class GameClient {
     }
 
     const allViews = this.game.views();
+    // who's on my team (allies share vision and stay always-visible)
+    const plList = this.game.players?.() || [];
+    const myTeam = plList[this.game.me]?.tm;
+    this.allies.clear();
+    plList.forEach((pl: any, i: number) => { if (pl && pl.tm === myTeam) this.allies.add(i); });
+    this.allies.add(this.game.me);
     // fog of war for human players (spectator/replay modes see everything;
     // disabled when the player unchecked it on the start screen)
     let views = allViews;
@@ -1358,7 +1372,7 @@ class GameClient {
       if (this.frame % 3 === 0) this.updateFog(allViews);
       const f = this.fog;
       views = allViews.filter(v => {
-        if (v.o === this.game.me) return true;
+        if (this.allies.has(v.o)) return true;
         const fv = f[Math.floor(v.z) * W + Math.floor(v.x)] || 0;
         return v.b ? fv >= 1 : fv === 2; // buildings stay on the map once scouted
       });
@@ -1429,7 +1443,7 @@ class GameClient {
     const canvas3 = document.getElementById('three') as HTMLCanvasElement;
     if (!this.ui.placing && !this.patrolMode && !this.mouse.dragging && !this.mouse.rDragging
       && this.myUnitIds().length && this.frame % 2 === 0) {
-      const enemy = this.pickView(this.mouse.x, this.mouse.y, v => v.o !== this.game.me);
+      const enemy = this.pickView(this.mouse.x, this.mouse.y, v => !this.allies.has(v.o));
       if (enemy) {
         const p = this.renderer.project(enemy.x, enemy.z, enemy.b ? 1 : 0.5);
         if (p.ok) hover = { x: p.x, y: p.y };
@@ -1515,6 +1529,7 @@ let selSize = 96;
 let fogEnabled = true; // start-screen checkbox; spectator/replay always show all
 let selEnemies = 1; // 1-3 AI opponents in skirmish
 let selDiff3 = 2;   // third enemy's difficulty
+let selTeams = [1, 2, 3, 4]; // team per player slot (You, AI1, AI2, AI3); FFA by default
 let client: GameClient | null = null;
 let net: Net | null = null;
 
@@ -1527,6 +1542,31 @@ function buildOptionRow(rowId: string, opts: { label: string; v: number }[], get
     b.textContent = o.label;
     b.addEventListener('click', () => { set(o.v); buildOptionRow(rowId, opts, get, set); });
     row.appendChild(b);
+  }
+}
+
+// one team chip per player slot (You + AI 1..N); click cycles team 1-4. Players
+// sharing a team number are allies — same colour tint, they won't fight.
+const TEAM_TINT = ['#3da5ff', '#ff5043', '#57d977', '#ffc940'];
+function buildTeamRow() {
+  const row = $('teamRow');
+  row.innerHTML = '';
+  const labels = ['You', 'AI 1', 'AI 2', 'AI 3'];
+  const n = 1 + selEnemies;
+  for (let i = 0; i < n; i++) {
+    const chip = document.createElement('div');
+    chip.className = 'optbtn';
+    chip.style.cssText = 'display:flex;align-items:center;gap:6px;min-width:74px;justify-content:center';
+    const paint = () => {
+      const tint = TEAM_TINT[(selTeams[i] - 1) % 4];
+      chip.style.borderColor = tint;
+      chip.style.boxShadow = `inset 0 0 0 2px ${tint}33`;
+      chip.textContent = `${labels[i]} · T${selTeams[i]}`;
+      chip.style.color = tint;
+    };
+    paint();
+    chip.addEventListener('click', () => { selTeams[i] = (selTeams[i] % 4) + 1; paint(); });
+    row.appendChild(chip);
   }
 }
 
@@ -2034,10 +2074,12 @@ function initMenus() {
       selEnemies = v;
       $('diffRow2Wrap').classList.toggle('hidden', v < 2);
       $('diffRow3Wrap').classList.toggle('hidden', v < 3);
+      buildTeamRow(); // more/fewer enemies → rebuild the team chips
     });
   $('diffRow2Wrap').classList.toggle('hidden', selEnemies < 2);
   buildOptionRow('diffRow2', LVLS, () => selDiff2, v => { selDiff2 = v; });
   buildOptionRow('diffRow3', LVLS, () => selDiff3, v => { selDiff3 = v; });
+  buildTeamRow();
   // audio settings: music style + volume sliders
   const musSel = $('musStyle') as HTMLSelectElement;
   musSel.value = audio.musicStyle;
@@ -2055,7 +2097,8 @@ function initMenus() {
     try { localStorage.setItem('ae_claude_key', key); } catch { /* no storage */ }
     fogEnabled = ($('fogChk') as HTMLInputElement)?.checked ?? true;
     const levels = [selDiff, selDiff2, selDiff3].slice(0, selEnemies);
-    startGame(new LocalGame(playerName(), selFaction, selDiff, selSize, null, levels));
+    const teams = selTeams.slice(0, 1 + selEnemies);
+    startGame(new LocalGame(playerName(), selFaction, selDiff, selSize, null, levels, teams));
   });
   $('btnSimulate').addEventListener('click', () => {
     // spectate AI (level 1 row) vs AI 2 (level 2 row); +/- adjusts speed to 32×
