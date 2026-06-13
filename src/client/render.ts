@@ -753,6 +753,7 @@ export class Renderer {
   private colTmp = new THREE.Color();
   private vTmp = new THREE.Vector3();
   private rotorMesh!: THREE.InstancedMesh;
+  private sandbagMesh!: THREE.InstancedMesh;
   // baked skeletal poses for infantry: [aim, runFrame1..N] — instances are
   // written into the pose set matching their state each frame
   private posedParts: Record<string, { mesh: THREE.InstancedMesh; mode: number }[][]> = {};
@@ -1007,6 +1008,29 @@ export class Renderer {
     this.rotorMesh.frustumCulled = false;
     this.rotorMesh.count = 0;
     this.scene.add(this.rotorMesh);
+
+    // sandbag ring for fortified infantry: a circle of stacked sandbag blocks
+    const bags: THREE.BufferGeometry[] = [];
+    const ringR = 0.62;
+    for (let i = 0; i < 9; i++) {
+      const a = (i / 9) * Math.PI * 2;
+      const lower = new THREE.BoxGeometry(0.26, 0.13, 0.18).toNonIndexed();
+      lower.translate(Math.cos(a) * ringR, 0.07, Math.sin(a) * ringR);
+      lower.rotateY(-a);
+      bags.push(lower);
+      if (i % 2 === 0) { // a sparse second course
+        const up = new THREE.BoxGeometry(0.24, 0.12, 0.16).toNonIndexed();
+        up.translate(Math.cos(a) * ringR, 0.2, Math.sin(a) * ringR);
+        bags.push(up);
+      }
+    }
+    this.sandbagMesh = new THREE.InstancedMesh(
+      mergeGeometries(bags)!,
+      new THREE.MeshStandardMaterial({ color: 0x9c8a5c, roughness: 0.95 }),
+      MAX_INST
+    );
+    this.sandbagMesh.frustumCulled = false; this.sandbagMesh.castShadow = true; this.sandbagMesh.count = 0;
+    this.scene.add(this.sandbagMesh);
 
     this.resize();
   }
@@ -1542,7 +1566,7 @@ export class Renderer {
     for (const t in this.unitParts) counts[t] = 0;
     for (const t in this.posedParts) this.poseCounts[t] = this.posedParts[t].map(() => 0);
     const seen = new Set<number>();
-    let selN = 0, rotN = 0;
+    let selN = 0, rotN = 0, bagN = 0;
     let rallyV: any = null;
 
     for (const v of views) {
@@ -1688,6 +1712,16 @@ export class Renderer {
         this.dummy.updateMatrix();
         this.rotorMesh.setMatrixAt(rotN++, this.dummy.matrix);
       }
+
+      // sandbag ring around fortified / deploying infantry
+      if ((v.fo || v.ft) && md?.kind === 'inf' && v.t !== 'hive' && bagN < MAX_INST) {
+        this.dummy.position.set(v.x, gy + 0.02, v.z);
+        this.dummy.rotation.set(0, v.i * 1.7, 0);
+        const grow = v.ft ? 0.6 : 1; // half-built while deploying
+        this.dummy.scale.set(1, grow, 1);
+        this.dummy.updateMatrix();
+        this.sandbagMesh.setMatrixAt(bagN++, this.dummy.matrix);
+      }
       seen.add(v.i);
     }
 
@@ -1712,6 +1746,8 @@ export class Renderer {
     this.selRing.count = selN;
     this.selRing.instanceMatrix.needsUpdate = true;
     this.rotorMesh.count = rotN;
+    this.sandbagMesh.count = bagN;
+    this.sandbagMesh.instanceMatrix.needsUpdate = true;
     this.rotorMesh.instanceMatrix.needsUpdate = true;
 
     // rally marker for the selected production building

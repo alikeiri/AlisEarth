@@ -33,8 +33,8 @@ export interface UnitDef {
 }
 
 export const UNITS: Record<string, UnitDef> = {
-  rifle:  { name: 'Rifle Squad',  cost: 100,  hp: 90,  speed: 2.0, range: 4.0, dmg: 7,  rof: 0.8, builtAt: 'barracks', buildTime: 5,  kind: 'inf' },
-  rocket: { name: 'Rocket Team',  cost: 300,  hp: 80,  speed: 1.8, range: 5.5, dmg: 24, rof: 2.2, builtAt: 'barracks', buildTime: 8,  kind: 'inf' },
+  rifle:  { name: 'Rifle Squad',  cost: 100,  hp: 90,  speed: 2.0, range: 4.0, dmg: 7,  rof: 0.8, builtAt: 'barracks', buildTime: 5,  kind: 'inf', fortify: true },
+  rocket: { name: 'Rocket Team',  cost: 300,  hp: 80,  speed: 1.8, range: 5.5, dmg: 24, rof: 2.2, builtAt: 'barracks', buildTime: 8,  kind: 'inf', fortify: true },
   tank:   { name: 'Battle Tank',  cost: 800,  hp: 340, speed: 2.6, range: 5.5, dmg: 34, rof: 1.6, builtAt: 'factory',  buildTime: 12, kind: 'veh' },
   heavy:  { name: 'Heavy Tank',   cost: 1250, hp: 640, speed: 2.0, range: 6.0, dmg: 58, rof: 2.2, builtAt: 'factory',  buildTime: 17, kind: 'veh' },
   harv:   { name: 'Harvester',    cost: 900,  hp: 450, speed: 1.6, range: 0,   dmg: 0,  rof: 1,   builtAt: 'factory',  buildTime: 14, kind: 'veh', cargo: 400 },
@@ -57,10 +57,10 @@ export const UNITS: Record<string, UnitDef> = {
   navdrone:  { name: 'Naval Drone', cost: 500,  hp: 90,  speed: 3.6, range: 4.0, dmg: 18, rof: 1.0, builtAt: 'shipyard', buildTime: 7,  kind: 'sea', move: 'sea' },
   // aircraft (Aircraft Plant; require Airfield capacity)
   // ---- tech-gated units (require a Research Lab + the named research) ----
-  chemtrooper: { name: 'Chem Trooper', cost: 500,  hp: 110, speed: 1.9, range: 4.2, dmg: 16, rof: 0.8, builtAt: 'barracks', buildTime: 7,  kind: 'inf', tech: 'chem' },
+  chemtrooper: { name: 'Chem Trooper', cost: 500,  hp: 110, speed: 1.9, range: 4.2, dmg: 16, rof: 0.8, builtAt: 'barracks', buildTime: 7,  kind: 'inf', tech: 'chem', fortify: true },
   chemtank:    { name: 'Chem Tank',    cost: 1000, hp: 360, speed: 2.4, range: 5.0, dmg: 30, rof: 1.4, builtAt: 'factory',  buildTime: 13, kind: 'veh', tech: 'chem' },
   chemdrone:   { name: 'Chem Drone',   cost: 900,  hp: 140, speed: 3.0, range: 4.5, dmg: 24, rof: 1.6, builtAt: 'dronefac', buildTime: 11, kind: 'air', fly: true, alt: 2.7, tech: 'chem' },
-  biotrooper:  { name: 'Bio Trooper',  cost: 550,  hp: 120, speed: 1.9, range: 4.2, dmg: 14, rof: 0.7, builtAt: 'barracks', buildTime: 7,  kind: 'inf', tech: 'bio' },
+  biotrooper:  { name: 'Bio Trooper',  cost: 550,  hp: 120, speed: 1.9, range: 4.2, dmg: 14, rof: 0.7, builtAt: 'barracks', buildTime: 7,  kind: 'inf', tech: 'bio', fortify: true },
   biotank:     { name: 'Bio Tank',     cost: 1100, hp: 400, speed: 2.2, range: 5.2, dmg: 34, rof: 1.6, builtAt: 'factory',  buildTime: 14, kind: 'veh', tech: 'bio' },
   biodrone:    { name: 'Bio Drone',    cost: 950,  hp: 150, speed: 3.0, range: 4.5, dmg: 26, rof: 1.7, builtAt: 'dronefac', buildTime: 12, kind: 'air', fly: true, alt: 2.7, tech: 'bio' },
   stealthtank: { name: 'Stealth Tank', cost: 1300, hp: 300, speed: 3.0, range: 5.5, dmg: 46, rof: 1.8, builtAt: 'factory',  buildTime: 15, kind: 'veh', tech: 'stealth', cloak: true },

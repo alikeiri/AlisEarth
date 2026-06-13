@@ -25,6 +25,7 @@ export interface Entity {
   stance: number; // 0 aggressive (default), 1 hold position
   lastHitBy: number; lastHitT: number; reactCd: number; // return-fire / flee reactions
   fortified: boolean; emitCd: number; ephLife: number; // drone hive + ephemeral units
+  fortT: number; fortGoal: boolean; // fortify deploy/pack transition (vulnerable while changing)
   aimX?: number; aimZ?: number; // last firing target — renderer turns the unit toward it
   oreCd: number; // harvester cooldown after every reachable field proved empty/blocked
   sd: number; // self-destruct: seconds left (0 = inactive); detonates at 0
@@ -52,6 +53,11 @@ export interface PlayerState {
 }
 
 export type Cmd = any;
+
+const FORT_TIME = 2.0;      // seconds to dig in or pack up (vulnerable meanwhile)
+const FORT_ATK_MUL = 1.5;   // fortified infantry hit harder
+const FORT_DEF_MUL = 0.5;   // ...and take half damage (settled)
+const FORT_DEPLOY_VULN = 1.5; // ...but take extra while deploying / packing
 
 const FORM: { x: number; z: number }[] = [{ x: 0, z: 0 }];
 for (let r = 1; r <= 3; r++) {
@@ -137,7 +143,7 @@ export class Sim {
       orders: [], path: null, pi: 0, cd: 0, mt: 0, cargo: 0, cargoVal: 0, repath: 0,
       wx: 0, wz: 0, stuckT: 0, mvi: -9, pathFail: 0, ammo: -1, oreCd: 0, sd: 0, cmdT: -999,
       stance: 0, lastHitBy: 0, lastHitT: -999, reactCd: 0,
-      fortified: false, emitCd: 0, ephLife: 0, research: null,
+      fortified: false, emitCd: 0, ephLife: 0, fortT: 0, fortGoal: false, research: null,
       cx: 0, cz: 0, size: 1, progress: 0, total: 1, queue: [], rallyX: -1, rallyZ: -1, lvl: 1, patPts: null, rpt: false, primary: false,
     };
     this.ents.set(e.id, e);
@@ -392,9 +398,12 @@ export class Sim {
     if (c.k === 'fortify') {
       for (const id of (c.ids || [])) {
         const u = this.ents.get(id);
-        if (u && !u.b && u.owner === c.p && UNITS[u.type]?.fortify) {
-          u.fortified = !u.fortified;
+        if (u && !u.b && u.owner === c.p && UNITS[u.type]?.fortify && u.fortT <= 0) {
+          // start a deploy (or pack-up) transition — vulnerable while it runs
+          u.fortGoal = !u.fortified;
+          u.fortT = FORT_TIME;
           u.orders = []; u.path = null; u.emitCd = 2;
+          this.events.push({ e: 'fortify', x: u.x, z: u.z });
         }
       }
       return;
@@ -651,7 +660,10 @@ export class Sim {
 
   private dealDamage(att: Entity, tgt: Entity, base: number) {
     let mul = dmgMul(att.type, tgt.b, tgt.b ? 'b' : UNITS[tgt.type].kind, tgt.b ? undefined : tgt.type);
-    if (!tgt.b && tgt.fortified) mul *= 0.5; // dug-in drone hive is hard to kill
+    if (!tgt.b) {
+      if (tgt.fortT > 0) mul *= FORT_DEPLOY_VULN;       // exposed while digging in / packing up
+      else if (tgt.fortified) mul *= FORT_DEF_MUL;      // dug in behind sandbags: tough
+    }
     tgt.hp -= base * mul;
     // study material for the adaptive AI: what weapon classes the human leans
     // on, and which of the AI's own weapon classes actually pay off
@@ -816,6 +828,26 @@ export class Sim {
     if (def.ephemeral) {
       u.ephLife += TICK;
       if (u.ephLife >= def.ephemeral) { u.hp = 0; return; }
+    }
+
+    // fortify deploy / pack-up: the unit is rooted and vulnerable while it digs
+    // in or tears down (the FORT_DEPLOY_VULN penalty is applied in dealDamage)
+    if (u.fortT > 0) {
+      u.fortT -= TICK;
+      u.orders = u.orders.filter(o => o.k === 'fortify');
+      if (u.fortT <= 0) { u.fortified = u.fortGoal; u.fortT = 0; u.emitCd = 1; this.events.push({ e: u.fortified ? 'dug' : 'packed', x: u.x, z: u.z }); }
+      return;
+    }
+
+    // fortified infantry: dug in behind sandbags — hold position, fire harder
+    // at anything in range (extended a touch); cannot move until unfortified
+    if (def.fortify && u.fortified && !def.emits) {
+      u.orders = u.orders.filter(o => o.k === 'fortify');
+      if (def.dmg > 0 && u.cd <= 0) {
+        const tgt = this.findEnemy(u, def.range + 1.5);
+        if (tgt) this.fire(u, tgt, def.dmg * FORT_ATK_MUL, def.rof);
+      }
+      return;
     }
 
     // fortified drone hive: stationary watchtower with extended reach. It scans
@@ -1410,6 +1442,7 @@ export class Sim {
       } else {
         if (e.stance) v.st = e.stance;
         if (e.fortified) v.fo = 1;
+        if (e.fortT > 0) v.ft = 1; // deploying / packing (vulnerable)
         if (UNITS[e.type]?.cloak) v.ck = 1;
         if (e.cd > 0 && UNITS[e.type]?.dmg > 0) {
           v.fr = 1; // mid-reload = in a firefight (drives aim pose)

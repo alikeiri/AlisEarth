@@ -139,6 +139,7 @@ class LocalGame implements GameLike {
       } else {
         if (e.stance) v.st = e.stance;
         if (e.fortified) v.fo = 1;
+        if (e.fortT > 0) v.ft = 1; // deploying / packing
         if (UNITS[e.t]?.cloak || UNITS[e.type]?.cloak) v.ck = 1;
         if (e.cd > 0 && UNITS[e.type]?.dmg > 0) {
           v.fr = 1; // firing — drives infantry aim pose
@@ -526,9 +527,11 @@ class GameClient {
       // C: toggle range/detection circles on selected units & buildings
       else if (e.code === 'KeyC') this.showRanges = !this.showRanges;
       // F: fortify / unfortify selected Drone Hives
+      // F: fortify / unfortify selected units (hives, rifle/rocket/troopers).
+      // Press again to pack up and move.
       if (e.code === 'KeyF') {
-        const hives = this.myUnitIds().filter(id => this.byId.get(id)?.t === 'hive');
-        if (hives.length) { this.game.issue({ k: 'fortify', p: this.game.me, ids: hives }); audio.play('confirm'); }
+        const ids = this.myUnitIds().filter(id => UNITS[this.byId.get(id)?.t]?.fortify);
+        if (ids.length) { this.game.issue({ k: 'fortify', p: this.game.me, ids }); audio.play('confirm'); }
       }
       // B: selected engineers build a road toward the cursor (extends base reach)
       if (e.code === 'KeyB') {
@@ -593,6 +596,7 @@ class GameClient {
       else if (act === 'stop') this.issueToUnits({ k: 'stop' });
       else if (act === 'hold') { if (ids.length) { const anyAgg = ids.some(id => !this.byId.get(id)?.st); this.game.issue({ k: 'stance', p: this.game.me, ids, stance: anyAgg ? 1 : 0 }); } }
       else if (act === 'patrol') { if (ids.length || this.selectedProdBuilding()) { this.patrolMode = !this.patrolMode; this.patrolDraw = null; } }
+      else if (act === 'fortify') { const f = ids.filter(id => UNITS[this.byId.get(id)?.t]?.fortify); if (f.length) this.game.issue({ k: 'fortify', p: this.game.me, ids: f }); }
       else if (act === 'ranges') { this.showRanges = !this.showRanges; btn.classList.toggle('on', this.showRanges); }
       else if (act === 'destruct') {
         if (ids.length) { this.game.issue({ k: 'selfdestruct', p: this.game.me, ids }); audio.play('sdbeep'); }
