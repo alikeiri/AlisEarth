@@ -362,6 +362,7 @@ class GameClient {
   // drag-line placement for walls/barriers
   private lineStart: { cx: number; cz: number } | null = null;
   private lineCells: { cx: number; cz: number; ok: boolean }[] = [];
+  private lastCursor = '';
   private cheatBuf = '';
   private groups: Record<number, number[]> = {};
   private lastGroupTap = { n: 0, t: 0 };
@@ -1433,7 +1434,10 @@ class GameClient {
     // a selected missile silo turns the whole map into a strike-target reticle
     const siloAiming = this.selection.size === 1 && this.byId.get([...this.selection][0])?.t === 'silo'
       && this.byId.get([...this.selection][0])?.o === this.game.me;
-    canvas3.style.cursor = siloAiming ? SILO_CURSOR : hover ? 'crosshair' : '';
+    // only assign when it changes — re-setting a data-URI cursor every frame
+    // makes Chrome re-decode the image and flicker
+    const wantCursor = siloAiming ? SILO_CURSOR : hover ? 'crosshair' : '';
+    if (wantCursor !== this.lastCursor) { canvas3.style.cursor = wantCursor; this.lastCursor = wantCursor; }
 
     // range/detection circles for the current selection
     const circles: { x: number; z: number; r: number; atk: boolean }[] = [];
@@ -1450,9 +1454,14 @@ class GameClient {
     // live attack/strike-circle while dragging
     if (this.mouse.rDragging && (this.rMode === 'aatk' || this.rMode === 'silo') && this.areaDrag && this.areaDrag.r > 0.5)
       circles.push({ x: this.areaDrag.cx, z: this.areaDrag.cz, r: this.areaDrag.r, atk: true, fill: true } as any);
-    // standing missile-strike zones on my silos
+    // standing missile-strike zones on my silos (red)
     for (const v of views) if (v.kr && v.o === this.game.me)
       circles.push({ x: v.kx, z: v.kz, r: v.kr, atk: true, fill: true } as any);
+    // selected silo: amber preview of the target area under the cursor
+    if (siloAiming && !this.mouse.rDragging && this.mouse.x < window.innerWidth - 250) {
+      const g = this.renderer.groundPoint(this.mouse.x / window.innerWidth, this.mouse.y / window.innerHeight);
+      if (g) circles.push({ x: g.x, z: g.z, r: 4, atk: true, fill: true, preview: true } as any);
+    }
     // age out command effects
     for (const f of this.cmdFx) f.t -= dt;
     this.cmdFx = this.cmdFx.filter(f => f.t > 0);

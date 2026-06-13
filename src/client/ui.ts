@@ -536,16 +536,29 @@ export class UI {
           if (!started) { ctx.moveTo(p.x, p.y); started = true; } else ctx.lineTo(p.x, p.y);
         }
         if (anyOk) {
-          if ((c as any).fill) { // area-attack circle: filled for visibility
+          const prev = (c as any).preview;
+          if ((c as any).fill) { // area-attack / strike circle: filled for visibility
             ctx.closePath();
-            ctx.fillStyle = 'rgba(255,90,70,0.18)';
+            ctx.fillStyle = prev ? 'rgba(255,200,60,0.14)' : 'rgba(255,90,70,0.18)';
             ctx.fill();
           }
-          ctx.strokeStyle = 'rgba(255,90,70,0.5)';
+          ctx.strokeStyle = prev ? 'rgba(255,200,60,0.85)' : 'rgba(255,90,70,0.5)';
           ctx.lineWidth = (c as any).fill ? 2 : 1.4;
           ctx.setLineDash([5, 4]);
           ctx.stroke();
           ctx.setLineDash([]);
+          // crosshair at the centre so the aim point is unmistakable
+          if (prev || (c as any).fill) {
+            const ctr = project(c.x, c.z, 0.2);
+            if (ctr.ok) {
+              ctx.strokeStyle = prev ? 'rgba(255,210,90,0.95)' : 'rgba(255,110,90,0.9)';
+              ctx.lineWidth = 1.5;
+              ctx.beginPath();
+              ctx.moveTo(ctr.x - 8, ctr.y); ctx.lineTo(ctr.x + 8, ctr.y);
+              ctx.moveTo(ctr.x, ctr.y - 8); ctx.lineTo(ctr.x, ctr.y + 8);
+              ctx.stroke();
+            }
+          }
         }
       }
     }
