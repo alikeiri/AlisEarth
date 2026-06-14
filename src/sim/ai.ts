@@ -35,6 +35,7 @@ const LVL = [
 export function aiTick(sim: Sim, p: number): Cmd[] {
   const pl = sim.players[p];
   if (!pl || !pl.alive || sim.done) return [];
+  if (pl.passive) return []; // tutorial practice target: never acts
   const cmds: Cmd[] = [];
   const L = LVL[Math.max(0, Math.min(3, pl.aiLvl ?? 1))];
 

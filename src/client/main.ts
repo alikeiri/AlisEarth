@@ -38,6 +38,7 @@ class LocalGame implements GameLike {
   me = 0;
   speed = 1; // 0.5×–8× sim speed (+/- keys); multiplayer has no such field
   isSim = false; // spectator simulation: AI vs AI, no human player
+  tutorial = false; // guided first-game: passive enemy, scripted overlay, no replay upload
   private pending: any[] = [];
   private acc = 0;
   private evQ: any[] = [];
@@ -49,7 +50,8 @@ class LocalGame implements GameLike {
 
   // simLvl2 !== null switches to simulation mode: two AIs fight, you spectate.
   // enemyLevels lists one difficulty per AI opponent (1-3) in a skirmish.
-  constructor(name: string, faction: string, aiLvl = 1, size = 96, simLvl2: number | null = null, enemyLevels: number[] = [1], teams: number[] = []) {
+  constructor(name: string, faction: string, aiLvl = 1, size = 96, simLvl2: number | null = null, enemyLevels: number[] = [1], teams: number[] = [], tutorial = false) {
+    this.tutorial = tutorial;
     // more players need more room — a 4-player FFA on a small map crams the
     // spawns together. Grow the map with the player count (never shrink the
     // player's chosen size), capped at the largest supported dimension.
@@ -84,6 +86,12 @@ class LocalGame implements GameLike {
     // the AI studies past games and adapts: server intelligence is primary,
     // the browser's own profile fills in when the server is unreachable
     this.sim.aiProfile = mergedProfile();
+    if (tutorial) {
+      // calm sandbox: the lone enemy sits still as a practice target, and the
+      // learner gets a fat treasury so they can build whatever a step asks for
+      this.sim.players.forEach(pl => { if (pl.isAI) pl.passive = true; });
+      this.sim.players[0].credits = 12000;
+    }
   }
   get map() { return this.sim.map; }
   get tickN() { return this.sim.tickN; }
@@ -116,14 +124,14 @@ class LocalGame implements GameLike {
       for (const ev of this.sim.events) {
         if (ev.e === 'aiReport' && !this.reportSaved) {
           this.reportSaved = true;
-          if (!ev.r.cheated) { // godmode games never train the AI
+          if (!ev.r.cheated && !this.tutorial) { // godmode/tutorial never train the AI
             saveAiReport(ev.r);
             requestLesson(ev.r); // fire-and-forget post-mortem
           }
         }
       }
-      // skip the replay too for cheated games (it would feed match analysis)
-      if (this.sim.done && !this.recSaved && !this.isSim) { this.recSaved = true; if (!this.sim.cheated) this.uploadReplay(); }
+      // skip the replay too for cheated/tutorial games (would skew match analysis)
+      if (this.sim.done && !this.recSaved && !this.isSim && !this.tutorial) { this.recSaved = true; if (!this.sim.cheated) this.uploadReplay(); }
       this.evQ.push(...this.sim.events);
     }
     if (guard >= gMax) this.acc = 0; // tab was backgrounded — drop the backlog
@@ -1800,6 +1808,99 @@ let selDiff3 = 2;   // third enemy's difficulty
 let selTeams = [1, 2, 3, 4]; // team per player slot (You, AI1, AI2, AI3); FFA by default
 let client: GameClient | null = null;
 let net: Net | null = null;
+let tutCtl: TutorialController | null = null;
+
+// One guided step. `target` is a CSS selector to spotlight; `done` is an optional
+// predicate over the live game that auto-advances when satisfied — every step
+// also has a manual Next button so the learner can never get stuck.
+interface TutStep {
+  text: string;
+  target?: string;                                  // element to highlight (spotlight)
+  done?: (g: LocalGame, c: GameClient, base: number) => boolean;
+  snap?: (g: LocalGame, c: GameClient) => number;   // baseline captured on entry (for "count grew")
+}
+
+// counts living combat units (anything mobile that isn't a harvester/MCV)
+function ownCombatUnits(g: LocalGame): number {
+  let n = 0;
+  for (const e of g.sim.ents.values())
+    if (!e.b && e.owner === 0 && e.hp > 0 && e.type !== 'harv' && e.type !== 'mcv') n++;
+  return n;
+}
+function ownsBuilding(g: LocalGame, type: string): boolean {
+  for (const e of g.sim.ents.values()) if (e.b && e.owner === 0 && e.type === type && e.hp > 0) return true;
+  return false;
+}
+
+const TUT_STEPS: TutStep[] = [
+  { text: 'Welcome, Commander! This short tutorial walks you through the basics on a calm map — your enemy stays put so you can practise, and you start with a big treasury. Click <b>Next</b> to begin.' },
+  { text: 'First, the camera. Pan with <b>W A S D</b> or by pushing the mouse to the screen edges, <b>zoom</b> with the mouse wheel, and <b>rotate</b> with <b>Q</b> / <b>E</b>. Have a quick look around your base, then click Next.' },
+  { text: 'Up top is your <b>Credits</b> balance — the money behind everything you build — and your <b>Power</b> meter. You already have a <b>Power Plant</b> making energy and an <b>Ore Refinery</b> whose <b>Harvester</b> is mining ore into credits. That is your economy at work.', target: '#topbar' },
+  { text: 'Now you build. On the right is the <b>build menu</b>. Under <b>Structures</b>, click <b>Barracks</b>, then click a spot near your base to place it. It lets you train infantry.', target: '#sidebar', done: g => ownsBuilding(g, 'barracks') },
+  { text: 'Nicely done. Build a <b>War Factory</b> the same way — it unlocks tanks and other vehicles. Bigger structures need prerequisites; yours are already met.', target: '#sidebar', done: g => ownsBuilding(g, 'factory') },
+  { text: 'Scroll down to the <b>Units</b> section and click <b>Rifle Squad</b> to train one. Trained units roll out of the building that makes them.', target: '#sidebar', snap: g => ownCombatUnits(g), done: (g, _c, base) => ownCombatUnits(g) > base },
+  { text: 'Select units by <b>left-clicking</b> one, or <b>drag a box</b> around several. Then <b>right-click</b> the ground to move them. Select one of your units now.', done: (_g, c) => c.selection.size >= 1 },
+  { text: 'With units selected, these buttons command them: <b>Hold Position</b>, <b>Hold Fire</b>, <b>Patrol</b> and <b>Fortify</b>. To attack, right-click an enemy. Click Next when ready.', target: '#touchBar' },
+  { text: 'The <b>minimap</b> shows the whole battlefield. Click it to jump the camera — your enemy base is out there waiting.', target: '#minimapWrap' },
+  { text: "That's the core loop: <b>economy → production → army</b>. Build up a force and destroy the enemy base to win, or click <b>✕</b> (top-right) to leave anytime. Good luck, Commander!" },
+];
+
+class TutorialController {
+  private i = -1;
+  private base = 0;
+  private raf = 0;
+  private stopped = false;
+  constructor(private client: GameClient, private game: LocalGame) {
+    $('tutOverlay').classList.remove('hidden');
+    $('tutNext').onclick = () => this.advance();
+    $('tutSkip').onclick = () => this.stop();
+    this.advance();
+    const loop = () => {
+      if (this.stopped) return;
+      this.tick();
+      this.raf = requestAnimationFrame(loop);
+    };
+    this.raf = requestAnimationFrame(loop);
+  }
+  private advance() {
+    this.i++;
+    if (this.i >= TUT_STEPS.length) { this.stop(); return; }
+    const s = TUT_STEPS[this.i];
+    this.base = s.snap ? s.snap(this.game, this.client) : 0;
+    $('tutText').innerHTML = s.text;
+    $('tutProgress').textContent = `Step ${this.i + 1} / ${TUT_STEPS.length}`;
+    ($('tutNext') as HTMLButtonElement).textContent = this.i === TUT_STEPS.length - 1 ? 'Finish' : 'Next ▶';
+  }
+  private tick() {
+    // the game ended (or the player left) — tear the overlay down
+    if ((this.client as any).over) { this.stop(); return; }
+    const s = TUT_STEPS[this.i];
+    // keep the spotlight glued to its (possibly moving) target element
+    const hl = $('tutHighlight');
+    if (s?.target) {
+      const el = document.querySelector(s.target) as HTMLElement | null;
+      const r = el?.getBoundingClientRect();
+      if (r && r.width) {
+        const pad = 6;
+        hl.style.display = 'block';
+        hl.style.left = (r.left - pad) + 'px';
+        hl.style.top = (r.top - pad) + 'px';
+        hl.style.width = (r.width + pad * 2) + 'px';
+        hl.style.height = (r.height + pad * 2) + 'px';
+      } else hl.style.display = 'none';
+    } else hl.style.display = 'none';
+    // auto-advance once the step's goal is met
+    if (s?.done && s.done(this.game, this.client, this.base)) { audio.play('confirm'); this.advance(); }
+  }
+  stop() {
+    if (this.stopped) return;
+    this.stopped = true;
+    cancelAnimationFrame(this.raf);
+    $('tutOverlay').classList.add('hidden');
+    $('tutHighlight').style.display = 'none';
+    if (tutCtl === this) tutCtl = null;
+  }
+}
 
 function buildOptionRow(rowId: string, opts: { label: string; v: number }[], get: () => number, set: (v: number) => void) {
   const row = $(rowId);
@@ -2107,6 +2208,7 @@ function renderEndStats(game: GameLike) {
 function startGame(game: GameLike) {
   if (client) { client.destroy(); client = null; }
   if (advisor) { advisor.stop(); advisor = null; }
+  if (tutCtl) { tutCtl.stop(); tutCtl = null; }
   hideAll();
   audio.init();
   client = new GameClient(game, (won, winnerName) => {
@@ -2165,12 +2267,15 @@ function startGame(game: GameLike) {
     show('endScreen');
   });
   // Claude strategist: local skirmish only (a shared directive would steer
-  // BOTH sides of a simulation). Personal key if entered, else the proxy.
-  if (game instanceof LocalGame && !game.isSim) {
+  // BOTH sides of a simulation, and the tutorial wants a quiet enemy). Personal
+  // key if entered, else the proxy.
+  if (game instanceof LocalGame && !game.isSim && !game.tutorial) {
     const key = (localStorage.getItem('ae_claude_key') || '').trim();
     advisor = new ClaudeAdvisor(game, key, taunt => client?.aiSays(taunt));
     advisor.start();
   }
+  // guided first game: overlay the step-by-step coach on top of the HUD
+  if (game instanceof LocalGame && game.tutorial && client) tutCtl = new TutorialController(client, game);
 }
 
 // a fresh ridiculous callsign every game when no name is entered
@@ -2392,6 +2497,12 @@ function initMenus() {
     const teams = selTeams.slice(0, 1 + selEnemies);
     startGame(new LocalGame(playerName(), selFaction, selDiff, selSize, null, levels, teams));
   });
+  $('btnTutorial').addEventListener('click', () => {
+    // guided first game: one passive enemy, fog on so the minimap step makes
+    // sense, a fat treasury and the scripted coach (set up in startGame)
+    fogEnabled = true;
+    startGame(new LocalGame(playerName(), selFaction, 0, 112, null, [0], [], true));
+  });
   $('btnSimulate').addEventListener('click', () => {
     // spectate AI (level 1 row) vs AI 2 (level 2 row); +/- adjusts speed to 32×
     const nRaw = window.prompt('How many AI vs AI matches should run back-to-back?\n(Each match teaches the AI — speed carries over, +/- up to 32×)', '1');
@@ -2460,6 +2571,7 @@ function initMenus() {
     // and the game ends if no human remains. No stats, not counted as a defeat.
     if (net) { net.send({ t: 'leave' }); net.close(); net = null; }
     simQueue = null;
+    if (tutCtl) { tutCtl.stop(); tutCtl = null; }
     if (client) { client.destroy(); client = null; }
     show('menu');
   });

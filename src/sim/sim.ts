@@ -59,6 +59,7 @@ export interface PlayerState {
   team: number;                            // allies share a team; FFA = unique per player
   credits: number; alive: boolean;
   left?: boolean;                          // departed via "Just Exit" — not a defeat
+  passive?: boolean;                       // tutorial target: AI does nothing
   powerMade: number; powerUsed: number; pf: number;
   bonusCost: number; bonusIncome: number; // brutal-AI handicaps
   godmode?: boolean;                       // cheat: instant builds (taints the game)
