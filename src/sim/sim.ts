@@ -792,6 +792,20 @@ export class Sim {
     return a !== b && this.players[a]?.team !== this.players[b]?.team;
   }
 
+  // can this attacker actually deal damage to this target? encodes the submarine
+  // rules in ONE place so auto-acquire, return-fire and explicit orders all agree:
+  //  - a submarine can be hurt ONLY by a sonar-equipped attacker (Destroyer,
+  //    Sub Hunter, Helicopter) — land units, aircraft, turrets, other subs can't
+  //  - a submarine itself can only hit ships (torpedoes) and buildings (cruise
+  //    missiles) — never land units or aircraft
+  canHarm(att: Entity, tgt: Entity): boolean {
+    if (!tgt.b && UNITS[tgt.type]?.cloak && UNITS[tgt.type]?.move === 'sea')
+      return !att.b && !!UNITS[att.type]?.sonar;
+    if (!att.b && UNITS[att.type]?.cloak && UNITS[att.type]?.move === 'sea')
+      return tgt.b || UNITS[tgt.type]?.kind === 'sea';
+    return true;
+  }
+
   // nearest enemy wall/barrier within reach that sits toward the target — the
   // thing to blast through when a unit is walled off from its objective
   private nearestWallToward(u: Entity, tgt: Entity): Entity | null {
@@ -820,7 +834,6 @@ export class Sim {
     // a submarine torpedoes only ships and cruise-missiles only buildings — it
     // never engages land units or aircraft, and reaches buildings from afar
     const subAtt = !e.b && !!attDef?.cloak && attDef?.move === 'sea';
-    const siege = subAtt && attDef?.siegeRange ? Math.max(range, attDef.siegeRange) : range;
     const consider = (u: Entity, d: number) => {
       const dangerous = (u.b ? (BUILDINGS[u.type]?.attack?.dmg || 0) : (UNITS[u.type]?.dmg || 0)) > 0;
       const score = (dangerous ? 1000 : 0) - d; // dangerous first, then closest
@@ -846,11 +859,12 @@ export class Sim {
     }
     // buildings (few — linear scan). Walls and tank barriers are inert obstacles,
     // never auto-targeted: ground units route around them, air flies over.
-    for (const u of this.ents.values()) {
+    // submarines never AUTO-target buildings (only on an explicit player order).
+    if (!subAtt) for (const u of this.ents.values()) {
       if (!u.b || !this.foe(u.owner, e.owner) || u.hp <= 0 || !this.players[u.owner].alive) continue;
       if (u.type === 'wall' || u.type === 'barrier') continue;
       const d = this.distToEnt(e.x, e.z, u);
-      if (d <= siege) consider(u, d); // subs reach buildings at cruise-missile range
+      if (d <= range) consider(u, d);
     }
     return best;
   }
@@ -1214,7 +1228,7 @@ export class Sim {
         const sticky = cur && cur.k === 'attack' && cur.keep && this.ents.has(cur.tgt!);
         if (sticky) {
           // hold this exact target — drive to it and fire when in range
-        } else if (recentlyHit && !busy && !manual && this.ents.has(u.lastHitBy)) {
+        } else if (recentlyHit && !busy && !manual && this.ents.has(u.lastHitBy) && this.canHarm(u, this.ents.get(u.lastHitBy)!)) {
           u.orders.unshift({ k: 'attack', tgt: u.lastHitBy }); u.path = null;
         } else if (!u.orders.length && this.tickN % 5 === u.id % 5) {
           const tgt = this.findEnemy(u, def.range + 2.5); // chase enemies in sight
@@ -1373,6 +1387,9 @@ export class Sim {
     } else if (ord.k === 'attack') {
       const tgt = this.ents.get(ord.tgt!);
       if (!tgt || tgt.hp <= 0) { u.orders.shift(); u.path = null; return; }
+      // can't actually hurt this target (e.g. a land unit ordered onto a sub, or
+      // a sub onto a tank)? drop the order instead of pinging it harmlessly
+      if (!this.canHarm(u, tgt)) { u.orders.shift(); u.path = null; return; }
       // patrolling units break off the chase if it drags them too far from the route
       if (u.orders[1]?.k === 'patrol' && this.tickN % 10 === u.id % 10) {
         const pp = u.orders[1].pts || [];

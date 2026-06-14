@@ -615,24 +615,20 @@ function buildingGroupPro(type: string, teamColor: number): THREE.Group {
     add(new THREE.CylinderGeometry(0.06, 0.06, 0.4, 6), steel, 0.6, 0.5, 0.6);
     add(roundedSlabGeo(1.5, 0.2, 0.06, 0.06), team, 0, 0.45, -0.75);
   } else if (type === 'wall') {
-    // solid concrete wall block with a crenellated top — fully symmetric so it
-    // reads the same from every side (no front/back to face the wrong way).
-    // the base is TALL and slightly oversized so it sinks well into the ground
-    // and overlaps its neighbours — no gaps to see (or walk) under at the joins,
-    // even where adjacent cells sit at different terrain heights.
-    add(roundedSlabGeo(1.06, 1.06, 1.15, 0.05), concrete, 0, 0.12, 0);    // base block (sunk ~0.45 below grade)
-    add(roundedSlabGeo(1.08, 1.08, 0.08, 0.04), team, 0, 0.6, 0);         // team band wraps all sides
-    for (const [dx, dz] of [[-0.3, -0.3], [0.3, -0.3], [-0.3, 0.3], [0.3, 0.3]])
-      add(roundedSlabGeo(0.34, 0.34, 0.26, 0.04), concrete, dx, 0.76, dz); // corner merlons
+    // solid concrete wall, crenellated top — symmetric on every side. Plain box
+    // geometry (centred origin) keeps it unambiguously right-side up; the block
+    // is slightly oversized and sunk a touch so neighbours overlap with no gap.
+    add(new THREE.BoxGeometry(1.04, 0.8, 1.04), concrete, 0, 0.28, 0);   // main block (~ -0.12 .. 0.68)
+    add(new THREE.BoxGeometry(1.06, 0.1, 1.06), team, 0, 0.6, 0);        // team band near the top
+    for (const [dx, dz] of [[-0.32, -0.32], [0.32, -0.32], [-0.32, 0.32], [0.32, 0.32]])
+      add(new THREE.BoxGeometry(0.32, 0.34, 0.32), concrete, dx, 0.85, dz); // merlons clearly ON TOP
   } else if (type === 'barrier') {
-    // crossed concrete tank trap on a sunk base plate that fills the whole cell
-    // (so units never appear to slip under the thin beams at the edges)
-    add(roundedSlabGeo(1.04, 1.04, 0.7, 0.06), concrete, 0, -0.05, 0);    // sunk base plate
+    // crossed concrete tank trap (hedgehog) — no base plate, as in the original
     for (const a of [Math.PI / 4, -Math.PI / 4]) {
-      const beam = add(new THREE.BoxGeometry(0.14, 0.14, 1.2), concrete, 0, 0.42, 0);
+      const beam = add(new THREE.BoxGeometry(0.14, 0.14, 1.18), concrete, 0, 0.3, 0);
       beam.rotation.y = a;
     }
-    add(new THREE.BoxGeometry(0.14, 0.14, 1.2), darkM, 0, 0.54, 0);
+    add(new THREE.BoxGeometry(0.14, 0.14, 1.18), darkM, 0, 0.42, 0);
   } else if (type === 'radar') {
     add(roundedSlabGeo(1.8, 1.8, 0.35), concrete);
     add(new THREE.CylinderGeometry(0.18, 0.26, 0.7, 10), darkM, 0, 0.7, 0); // mast
@@ -1959,7 +1955,7 @@ export class Renderer {
 
     // rally marker for the selected production building
     if (rallyV) {
-      const ry = this.map.heightAt(rallyV.rx, rallyV.rz);
+      const ry = Math.max(this.map.heightAt(rallyV.rx, rallyV.rz), SEA); // float the flag on water (shipyard rallies)
       this.rallyFlag.position.set(rallyV.rx, ry, rallyV.rz);
       // gold pennant when the rally sits on an ore field (harvesters will mine there)
       let onOre = false;
@@ -1968,7 +1964,7 @@ export class Renderer {
         for (let dx = -1; dx <= 1 && !onOre; dx++)
           if (this.map.inB(rcx + dx, rcz + dz) && this.map.ore[(rcz + dz) * W + rcx + dx] > 0) onOre = true;
       (this.rallyPennant.material as THREE.MeshBasicMaterial).color.setHex(onOre ? 0xd9a520 : (PLAYER_COLORS[rallyV.o] ?? 0x6aff6a));
-      const by = this.map.heightAt(rallyV.x, rallyV.z) + 1.0;
+      const by = Math.max(this.map.heightAt(rallyV.x, rallyV.z), SEA) + 1.0;
       this.rallyLinePos[0] = rallyV.x; this.rallyLinePos[1] = by; this.rallyLinePos[2] = rallyV.z;
       this.rallyLinePos[3] = rallyV.rx; this.rallyLinePos[4] = ry + 0.6; this.rallyLinePos[5] = rallyV.rz;
       (this.rallyLine.geometry.getAttribute('position') as THREE.BufferAttribute).needsUpdate = true;

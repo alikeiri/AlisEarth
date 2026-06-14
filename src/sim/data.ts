@@ -103,7 +103,7 @@ export const UNITS: Record<string, UnitDef> = {
   fighter:   { name: 'Fighter',      cost: 1200, hp: 210, speed: 4.6, range: 6.5, dmg: 40,  rof: 0.9, builtAt: 'airforce', buildTime: 12, kind: 'air', fly: true, alt: 3.4, pad: true },
   bomber:    { name: 'Bomber',       cost: 2000, hp: 320, speed: 2.6, range: 3.0, dmg: 120, rof: 5.0, builtAt: 'airforce', buildTime: 18, kind: 'air', fly: true, alt: 3.4, pad: true, payload: 2 },
   dbomber:   { name: 'Drone Bomber', cost: 2600, hp: 280, speed: 3.0, range: 4.0, dmg: 90,  rof: 4.0, builtAt: 'airforce', buildTime: 20, kind: 'air', fly: true, alt: 3.4, pad: true, payload: 3 },
-  heli:      { name: 'Helicopter',   cost: 1600, hp: 260, speed: 3.2, range: 5.5, dmg: 40,  rof: 1.4, builtAt: 'airforce', buildTime: 14, kind: 'air', fly: true, alt: 2.7, pad: true },
+  heli:      { name: 'Helicopter',   cost: 1600, hp: 260, speed: 3.2, range: 5.5, dmg: 40,  rof: 1.4, builtAt: 'airforce', buildTime: 14, kind: 'air', fly: true, alt: 2.7, pad: true, sonar: 9 }, // MAD: detects & rockets subs
   helidrone: { name: 'Helidrone',    cost: 800,  hp: 120, speed: 3.6, range: 4.5, dmg: 20,  rof: 0.9, builtAt: 'airforce', buildTime: 9,  kind: 'air', fly: true, alt: 2.7, pad: true },
   // suicide truck: fuel + explosives, huge fireball, sets buildings ablaze
   fueltruck: { name: 'Fuel Truck',   cost: 900,  hp: 220, speed: 3.6, range: 4.0, dmg: 280, rof: 1, builtAt: 'factory', buildTime: 10, kind: 'veh', bombTruck: true },
@@ -282,7 +282,7 @@ export function dmgMul(attType: string, tgtIsBuilding: boolean, tgtKind: string,
   if (attType === 'bomber') return tgtIsBuilding ? 2.4 : (tgtKind === 'inf' ? 1.3 : 1.0);
   if (attType === 'dbomber') return tgtIsBuilding ? 1.8 : 1.0;
   if (attType === 'heli')   return tgtKind === 'veh' ? 1.8 : 1.25; // rockets vs armor, guns vs inf
-  if (attType === 'sub')    return tgtIsBuilding ? 0.7 : 0.8;
+  if (attType === 'sub')    return tgtIsBuilding ? 0.35 : 0.8; // cruise-missile siege halved
   if (attType === 'mlrs')   return tgtIsBuilding ? 2.0 : (tgtKind === 'inf' ? 1.5 : 0.7);
   if (attType === 'msldrone') return tgtIsBuilding ? 1.5 : (tgtKind === 'veh' ? 1.8 : 0.5);
   if (attType === 'recon')  return tgtIsBuilding ? 0.4 : (tgtKind === 'inf' ? 1.2 : 0.5);
