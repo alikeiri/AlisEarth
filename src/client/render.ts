@@ -616,18 +616,23 @@ function buildingGroupPro(type: string, teamColor: number): THREE.Group {
     add(roundedSlabGeo(1.5, 0.2, 0.06, 0.06), team, 0, 0.45, -0.75);
   } else if (type === 'wall') {
     // solid concrete wall block with a crenellated top — fully symmetric so it
-    // reads the same from every side (no front/back to face the wrong way)
-    add(roundedSlabGeo(0.96, 0.96, 0.55, 0.05), concrete, 0, 0.275, 0);   // base block
-    add(roundedSlabGeo(1.0, 1.0, 0.08, 0.04), team, 0, 0.5, 0);           // team band wraps all sides
+    // reads the same from every side (no front/back to face the wrong way).
+    // the base is TALL and slightly oversized so it sinks well into the ground
+    // and overlaps its neighbours — no gaps to see (or walk) under at the joins,
+    // even where adjacent cells sit at different terrain heights.
+    add(roundedSlabGeo(1.06, 1.06, 1.15, 0.05), concrete, 0, 0.12, 0);    // base block (sunk ~0.45 below grade)
+    add(roundedSlabGeo(1.08, 1.08, 0.08, 0.04), team, 0, 0.6, 0);         // team band wraps all sides
     for (const [dx, dz] of [[-0.3, -0.3], [0.3, -0.3], [-0.3, 0.3], [0.3, 0.3]])
-      add(roundedSlabGeo(0.32, 0.32, 0.26, 0.04), concrete, dx, 0.67, dz); // corner merlons
+      add(roundedSlabGeo(0.34, 0.34, 0.26, 0.04), concrete, dx, 0.76, dz); // corner merlons
   } else if (type === 'barrier') {
-    // crossed concrete tank trap (hedgehog-ish)
+    // crossed concrete tank trap on a sunk base plate that fills the whole cell
+    // (so units never appear to slip under the thin beams at the edges)
+    add(roundedSlabGeo(1.04, 1.04, 0.7, 0.06), concrete, 0, -0.05, 0);    // sunk base plate
     for (const a of [Math.PI / 4, -Math.PI / 4]) {
-      const beam = add(new THREE.BoxGeometry(0.12, 0.12, 1.15), concrete, 0, 0.3, 0);
+      const beam = add(new THREE.BoxGeometry(0.14, 0.14, 1.2), concrete, 0, 0.42, 0);
       beam.rotation.y = a;
     }
-    add(new THREE.BoxGeometry(0.12, 0.12, 1.15), darkM, 0, 0.42, 0);
+    add(new THREE.BoxGeometry(0.14, 0.14, 1.2), darkM, 0, 0.54, 0);
   } else if (type === 'radar') {
     add(roundedSlabGeo(1.8, 1.8, 0.35), concrete);
     add(new THREE.CylinderGeometry(0.18, 0.26, 0.7, 10), darkM, 0, 0.7, 0); // mast
@@ -815,6 +820,7 @@ export class Renderer {
   private extTex: Record<string, THREE.Texture> = {};
   private fogTex: THREE.DataTexture | null = null;
   private fogMesh: THREE.Mesh | null = null;
+  private fogGeo: THREE.PlaneGeometry | null = null;
   gpuName = 'unknown';
 
   constructor(canvas: HTMLCanvasElement, map: GameMap) {
@@ -1197,6 +1203,7 @@ export class Renderer {
       splat.setXYZW(i, grass / sum, rock / sum, sand / sum, dirt / sum);
     }
     pos.needsUpdate = true; splat.needsUpdate = true; terra.needsUpdate = true;
+    if (this.fogGeo) this.drapeFog(this.fogGeo); // keep the fog hugging the reshaped ground
     geo.computeVertexNormals();
   }
 
@@ -1422,17 +1429,17 @@ export class Renderer {
     tex.magFilter = THREE.LinearFilter; tex.minFilter = THREE.LinearFilter;
     this.fogTex = tex;
 
-    const geo = new THREE.PlaneGeometry(W, H, W, H);
+    // 2× the sim grid (matches the terrain mesh) so the fog follows steep coast
+    // cliffs and terraformed slopes closely instead of poking through them
+    const geo = new THREE.PlaneGeometry(W, H, W * 2, H * 2);
     geo.rotateX(-Math.PI / 2);
     geo.translate(W / 2, 0, H / 2);
-    const pos = geo.getAttribute('position') as THREE.BufferAttribute;
     const uv = geo.getAttribute('uv') as THREE.BufferAttribute;
-    for (let i = 0; i < pos.count; i++) {
-      const x = pos.getX(i), z = pos.getZ(i);
-      pos.setY(i, Math.max(this.map.heightAt(x, z), SEA) + 0.4); // sit just above ground/water
-      uv.setXY(i, x / W, z / H); // sample the mask by world cell
-    }
-    pos.needsUpdate = true; uv.needsUpdate = true;
+    const pos = geo.getAttribute('position') as THREE.BufferAttribute;
+    for (let i = 0; i < pos.count; i++) uv.setXY(i, pos.getX(i) / W, pos.getZ(i) / H); // sample the mask by world cell
+    uv.needsUpdate = true;
+    this.fogGeo = geo;
+    this.drapeFog(geo); // set vertex heights to hug the terrain
 
     const mat = new THREE.MeshBasicMaterial({
       map: tex, transparent: true, depthWrite: false, color: 0x05080c, fog: false,
@@ -1443,6 +1450,15 @@ export class Renderer {
     mesh.visible = false;
     this.scene.add(mesh);
     this.fogMesh = mesh;
+  }
+
+  // lay the fog mesh vertices on the terrain surface (lifted a hair) so it hugs
+  // cliffs and terraformed slopes. Re-run whenever the terrain height changes.
+  private drapeFog(geo: THREE.PlaneGeometry) {
+    const pos = geo.getAttribute('position') as THREE.BufferAttribute;
+    for (let i = 0; i < pos.count; i++)
+      pos.setY(i, Math.max(this.map.heightAt(pos.getX(i), pos.getZ(i)), SEA) + 0.55);
+    pos.needsUpdate = true;
   }
 
   // push the client's fog mask (0 unseen, 1 explored, 2 visible) to the texture
@@ -1526,7 +1542,17 @@ export class Renderer {
     this.camX = Math.max(4, Math.min(W - 4, x));
     this.camZ = Math.max(4, Math.min(H - 4, z));
   }
-  zoomBy(f: number) { this.dist = Math.max(11, Math.min(58, this.dist * f)); }
+  zoomBy(f: number, gx?: number, gz?: number) {
+    const d0 = this.dist;
+    this.dist = Math.max(11, Math.min(58, this.dist * f));
+    // zoom toward the cursor: shift the look-at target so the ground point under
+    // the pointer stays roughly put (keeps the cursor point fixed as you scroll)
+    if (gx !== undefined && gz !== undefined) {
+      const r = this.dist / d0;
+      this.camX = Math.max(4, Math.min(W - 4, gx + (this.camX - gx) * r));
+      this.camZ = Math.max(4, Math.min(H - 4, gz + (this.camZ - gz) * r));
+    }
+  }
   rotate(a: number) { this.yaw += a; }
   // camera pitch above the horizon; default matches the classic RTS down-angle
   pitch = Math.atan2(0.92, 0.78); // ≈ 0.868 rad

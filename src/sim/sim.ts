@@ -49,6 +49,7 @@ export interface Entity {
   icd?: number; // interceptor (Iron Dome / Patriot): reload cooldown between missile kills
   stunT?: number; // EMP stun: seconds the unit is frozen (can't move or fire)
   mineStock?: number; // engineer: proximity mines left to lay
+  rzx?: number; rzz?: number; rzr?: number; // engineer: assigned auto-repair zone (centre + radius)
 }
 
 export interface PlayerState {
@@ -542,7 +543,12 @@ export class Sim {
     if (!units.length) return;
 
     if (c.k === 'stop') {
-      for (const u of units) { u.orders = []; u.path = null; u.cmdT = this.tickN; }
+      for (const u of units) { u.orders = []; u.path = null; u.terraPath = undefined; u.rzr = 0; u.cmdT = this.tickN; }
+      return;
+    }
+    if (c.k === 'repairzone') {
+      // engineers: stand watch over an area, auto-repairing friendlies inside it
+      for (const u of units) if (UNITS[u.type]?.repair) { u.rzx = c.cx; u.rzz = c.cz; u.rzr = c.r; }
       return;
     }
     if (c.k === 'patrol' && Array.isArray(c.pts) && c.pts.length) {
@@ -577,6 +583,9 @@ export class Sim {
       }
       if (!ord) return;
       u.cmdT = this.tickN; // explicit order — shield it from auto-reactions
+      // a manual order cancels an in-progress terraform job (keep what was already
+      // reshaped — just stop here) so the bulldozer is free to drive off
+      if (u.terraPath) u.terraPath = undefined;
       if (c.q) u.orders.push(ord);
       else { u.orders = [ord]; u.path = null; }
     });
@@ -744,6 +753,22 @@ export class Sim {
       }
     }
     return out;
+  }
+
+  // nearest damaged friendly around a POINT (used by engineers patrolling a zone)
+  private findDamagedFriendlyAt(owner: number, cx: number, cz: number, r: number, selfId: number): Entity | null {
+    let best: Entity | null = null, bd = 1e9;
+    for (const u of this.nearbyUnits(cx, cz, r)) {
+      if (u.id === selfId || u.owner !== owner || u.hp <= 0 || u.hp >= u.maxHp) continue;
+      const d = Math.hypot(u.x - cx, u.z - cz);
+      if (d <= r && d < bd) { bd = d; best = u; }
+    }
+    for (const u of this.ents.values()) {
+      if (!u.b || u.owner !== owner || u.hp <= 0 || u.hp >= u.maxHp || u.progress < u.total) continue;
+      const d = this.distToEnt(cx, cz, u);
+      if (d <= r && d < bd) { bd = d; best = u; }
+    }
+    return best;
   }
 
   findDamagedFriendly(e: Entity, range: number): Entity | null {
@@ -1221,8 +1246,16 @@ export class Sim {
     }
     // idle engineers look for something to fix
     if (def.repair && !u.orders.length && this.tickN % 5 === u.id % 5) {
-      const t = this.findDamagedFriendly(u, 9);
-      if (t) u.orders.unshift({ k: 'repair', tgt: t.id });
+      if (u.rzr && u.rzr > 0) {
+        // assigned an auto-repair zone: fix damaged friendlies inside it, and
+        // drift back toward the zone when there's nothing to do nearby
+        const t = this.findDamagedFriendlyAt(u.owner, u.rzx!, u.rzz!, u.rzr, u.id);
+        if (t) u.orders.unshift({ k: 'repair', tgt: t.id });
+        else if (Math.hypot(u.x - u.rzx!, u.z - u.rzz!) > u.rzr) u.orders.unshift({ k: 'move', x: u.rzx!, z: u.rzz! });
+      } else {
+        const t = this.findDamagedFriendly(u, 9);
+        if (t) u.orders.unshift({ k: 'repair', tgt: t.id });
+      }
     }
 
     // moving ground vehicles crush enemy infantry under their treads

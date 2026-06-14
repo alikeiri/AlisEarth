@@ -749,7 +749,10 @@ export class UI {
     for (const v of views) {
       const damaged = v.h < v.m;
       const constructing = v.b && v.pr < 1;
-      if (!damaged && !constructing && !selection.has(v.i)) continue;
+      // walls and tank barriers only ever show a bar while actually damaged —
+      // no clutter from selecting them or their (brief) construction
+      if (v.t === 'wall' || v.t === 'barrier') { if (!damaged) continue; }
+      else if (!damaged && !constructing && !selection.has(v.i)) continue;
       const p = project(v.x, v.z, v.b ? 2.4 : 1.25);
       if (!p.ok) continue;
       const w = v.b ? 36 : 22;

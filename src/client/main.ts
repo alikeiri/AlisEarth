@@ -10,6 +10,11 @@ import { UI } from './ui';
 import { Net } from './net';
 import { audio } from './audio';
 
+// build stamp, injected by vite (see vite.config.ts)
+declare const __APP_REV__: string;
+declare const __APP_HASH__: string;
+declare const __BUILD_TIME__: string;
+
 interface GameLike {
   me: number;
   map: GameMap;
@@ -159,6 +164,7 @@ class LocalGame implements GameLike {
           if (e.aimX !== undefined) { v.ax = e.aimX; v.az = e.aimZ; } // turn toward the target
         }
         if (e.sd > 0) v.sd = Math.ceil(e.sd); // self-destruct countdown
+        if (e.rzr && e.rzr > 0) { v.rzx = e.rzx; v.rzz = e.rzz; v.rzr = e.rzr; } // engineer repair zone
       }
       out.push(v);
     }
@@ -367,7 +373,7 @@ class GameClient {
     mode: '' as '' | 'pan' | 'box' | 'pinch', sx: 0, sy: 0, downT: 0, moved: false,
     pinchD: 0, pinchA: 0, boxToggle: false, longTimer: 0 as any,
   };
-  private rMode: 'pan' | 'form' | 'aatk' | 'silo' = 'pan';
+  private rMode: 'pan' | 'form' | 'aatk' | 'silo' | 'reparea' = 'pan';
   private formPath: { x: number; z: number }[] | null = null;
   private areaDrag: { cx: number; cz: number; r: number } | null = null;
   private patrolMode = false;
@@ -473,7 +479,10 @@ class GameClient {
       e.preventDefault();
       // Ctrl+wheel tilts the camera (horizon view ↔ top-down); plain wheel zooms
       if (e.ctrlKey) this.renderer.tiltBy(e.deltaY > 0 ? 0.07 : -0.07);
-      else this.renderer.zoomBy(e.deltaY > 0 ? 1.12 : 0.89);
+      else {
+        const g = this.renderer.groundPoint(e.clientX / window.innerWidth, e.clientY / window.innerHeight);
+        this.renderer.zoomBy(e.deltaY > 0 ? 1.12 : 0.89, g?.x, g?.z); // zoom toward the cursor
+      }
     }, { passive: false });
     on(window, 'keydown', (e: KeyboardEvent) => {
       // typing in the chat input (or any form field) must not trigger hotkeys
@@ -1077,8 +1086,17 @@ class GameClient {
         this.rMode = 'silo';
         this.areaDrag = g ? { cx: g.x, cz: g.z, r: 0 } : null;
       } else {
-        // 2+ units selected: right-drag draws a formation line; otherwise it pans
-        this.rMode = this.myUnitIds().length >= 2 ? 'form' : 'pan';
+        const ids = this.myUnitIds();
+        const engs = ids.filter(id => UNITS[this.byId.get(id)?.t]?.repair);
+        if (ids.length && engs.length === ids.length) {
+          // engineers only: right-drag marks out an auto-repair patrol zone
+          const g = this.renderer.groundPoint(e.clientX / window.innerWidth, e.clientY / window.innerHeight);
+          this.rMode = 'reparea';
+          this.areaDrag = g ? { cx: g.x, cz: g.z, r: 0 } : null;
+        } else {
+          // 2+ units selected: right-drag draws a formation line; otherwise it pans
+          this.rMode = ids.length >= 2 ? 'form' : 'pan';
+        }
       }
     }
   }
@@ -1117,6 +1135,15 @@ class GameClient {
           this.game.issue({ k: 'silostrike', p: this.game.me, bid: silo.i, x: Math.round(area.cx * 10) / 10, z: Math.round(area.cz * 10) / 10, r: Math.round(area.r * 10) / 10 });
           audio.play('confirm');
           this.markCmd([silo.i], area.cx, area.cz, true);
+        }
+      }
+      else if (this.rMode === 'reparea' && area && area.r >= 1) {
+        // assign the selected engineers an auto-repair zone
+        const engs = this.myUnitIds().filter(id => UNITS[this.byId.get(id)?.t]?.repair);
+        if (engs.length) {
+          this.game.issue({ k: 'repairzone', p: this.game.me, ids: engs, cx: Math.round(area.cx * 10) / 10, cz: Math.round(area.cz * 10) / 10, r: Math.round(area.r * 10) / 10 });
+          audio.play('confirm');
+          this.markCmd(engs, area.cx, area.cz, false);
         }
       }
       else if (this.rMode === 'form' && path && path.length >= 2) this.issueFormation(path, e.shiftKey);
@@ -1496,10 +1523,10 @@ class GameClient {
           }
         }
         this.renderer.setFormationPath(this.formPath);
-      } else if ((this.rMode === 'aatk' || this.rMode === 'silo') && this.areaDrag) {
-        // attack / strike circle grows with the drag
+      } else if ((this.rMode === 'aatk' || this.rMode === 'silo' || this.rMode === 'reparea') && this.areaDrag) {
+        // attack / strike / repair-zone circle grows with the drag
         const g = this.renderer.groundPoint(this.mouse.x / window.innerWidth, this.mouse.y / window.innerHeight);
-        if (g) this.areaDrag.r = Math.min(this.rMode === 'silo' ? 20 : 14, Math.hypot(g.x - this.areaDrag.cx, g.z - this.areaDrag.cz));
+        if (g) this.areaDrag.r = Math.min(this.rMode === 'silo' ? 20 : this.rMode === 'reparea' ? 24 : 14, Math.hypot(g.x - this.areaDrag.cx, g.z - this.areaDrag.cz));
       }
     }
 
@@ -1585,7 +1612,7 @@ class GameClient {
     }
     // no selection box while drawing a patrol route or drag-placing a structure
     // line (walls / tank barriers) — those drags aren't a selection
-    const dragRect = this.mouse.dragging && !this.patrolMode && !this.ui.placing
+    const dragRect = this.mouse.dragging && !this.patrolMode && !this.ui.placing && !this.terraMode
       ? { x0: this.mouse.downX, y0: this.mouse.downY, x1: this.mouse.x, y1: this.mouse.y }
       : null;
 
@@ -1649,6 +1676,12 @@ class GameClient {
     // live attack/strike-circle while dragging
     if (this.mouse.rDragging && (this.rMode === 'aatk' || this.rMode === 'silo') && this.areaDrag && this.areaDrag.r > 0.5)
       circles.push({ x: this.areaDrag.cx, z: this.areaDrag.cz, r: this.areaDrag.r, atk: true, fill: true } as any);
+    // live engineer repair-zone circle while dragging (green)
+    if (this.mouse.rDragging && this.rMode === 'reparea' && this.areaDrag && this.areaDrag.r > 0.5)
+      circles.push({ x: this.areaDrag.cx, z: this.areaDrag.cz, r: this.areaDrag.r, atk: false, kind: 'place' } as any);
+    // standing repair zones on my selected engineers (green)
+    for (const v of views) if (v.rzr && v.o === this.game.me && this.selection.has(v.i))
+      circles.push({ x: v.rzx, z: v.rzz, r: v.rzr, atk: false, kind: 'place' } as any);
     // standing missile-strike zones on my silos (red)
     for (const v of views) if (v.kr && v.o === this.game.me)
       circles.push({ x: v.kx, z: v.kz, r: v.kr, atk: true, fill: true } as any);
@@ -2383,5 +2416,20 @@ if (!glOk) {
   rollCallsign();
   renderAiIntel();
   syncIntelFromServer();
+  showBuildInfo();
   try { ($('claudeKey') as HTMLInputElement).value = localStorage.getItem('ae_claude_key') || ''; } catch { /* no storage */ }
+}
+
+// version stamp on the menu: revision auto-increments with every commit; the
+// hash links the running build to its exact source on GitHub
+function showBuildInfo() {
+  const el = document.getElementById('buildInfo');
+  if (!el) return;
+  const rev = (typeof __APP_REV__ !== 'undefined' && __APP_REV__) || '0';
+  const hash = (typeof __APP_HASH__ !== 'undefined' && __APP_HASH__) || 'dev';
+  let date = '';
+  try { date = new Date(__BUILD_TIME__).toLocaleString(undefined, { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }); } catch { /* ignore */ }
+  const repo = 'https://github.com/alikeiri/AlisEarth';
+  const link = hash === 'dev' ? `${repo}/commits/main` : `${repo}/commit/${hash}`;
+  el.innerHTML = `v${rev} · <a href="${link}" target="_blank" rel="noopener" style="color:#7392a8;text-decoration:none">${hash}</a>${date ? ' · ' + date : ''}`;
 }
