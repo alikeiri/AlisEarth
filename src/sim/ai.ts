@@ -379,6 +379,23 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
     }
   }
 
+  // counter a submarine raid on the base: a cloaked sub harassing the buildings
+  // can only be answered with sonar — rush idle Sub Hunters / Destroyers / a Heli
+  // at it (they detect + depth-charge/rocket it). Checked ~once a second.
+  if (sim.tickN % 10 === 0) {
+    let lurker: Entity | null = null;
+    for (const e of sim.ents.values()) {
+      if (e.b || e.type !== 'sub' || e.hp <= 0 || !sim.foe(e.owner, p) || !sim.players[e.owner].alive) continue;
+      for (const t in myB) { for (const b of myB[t]) if (sim.distToEnt(e.x, e.z, b) < 9) { lurker = e; break; } if (lurker) break; }
+      if (lurker) break;
+    }
+    if (lurker) {
+      const hunters = [...(myU['subhunter'] || []), ...(myU['destroyer'] || []), ...(myU['heli'] || [])]
+        .filter(u => u.hp > 0 && (!u.orders.length || u.orders[0].k !== 'attack' || sim.ents.get(u.orders[0].tgt!)?.type !== 'sub'));
+      if (hunters.length) cmds.push({ k: 'attack', p, ids: hunters.slice(0, 4).map(u => u.id), tgt: lurker.id, x: lurker.x, z: lurker.z });
+    }
+  }
+
   // missile silo: keep one warhead cooking, launch at the best target when armed
   const silo = (myB['silo'] || []).find(b => b.progress >= b.total);
   if (silo && !silo.storedMissile && !silo.queue.length && pl.credits > 2400) {
