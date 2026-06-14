@@ -2014,7 +2014,7 @@ function buildTeamRow() {
 }
 
 function show(id: string) {
-  for (const s of ['menu', 'lobby', 'endScreen']) $(s).classList.toggle('hidden', s !== id);
+  for (const s of ['menu', 'mpLobby', 'lobby', 'endScreen']) $(s).classList.toggle('hidden', s !== id);
   if (id === 'menu') { rollCallsign(); renderAiIntel(); } // fresh name + AI study readout
 }
 
@@ -2078,7 +2078,7 @@ function rollCallsign() {
   inp.value = pick;
 }
 function hideAll() {
-  for (const s of ['menu', 'lobby', 'endScreen']) $(s).classList.add('hidden');
+  for (const s of ['menu', 'mpLobby', 'lobby', 'endScreen']) $(s).classList.add('hidden');
 }
 
 function buildFactionCards() {
@@ -2477,6 +2477,29 @@ async function requestLesson(r: any) {
   } catch { /* offline — no lesson this time */ }
 }
 
+// render the global lobby: who's online and which games can be joined
+function renderMpLobby(m: any) {
+  const users = m.users || [], games = m.games || [];
+  $('mpUserCount').textContent = String(users.length);
+  $('mpUsers').innerHTML = users.length
+    ? users.map((u: any) => `<div>${FACTIONS[u.faction]?.flag || '🏳'} ${escapeHtml(u.name)}` +
+      `${u.inGame ? ' <span style="color:#5f7384">· in game</span>' : ''}</div>`).join('')
+    : '<div style="color:#5f7384">No one else online yet</div>';
+  const sizes: Record<number, string> = { 112: 'Medium', 136: 'Large', 160: 'Huge', 72: 'Small', 96: 'Medium', 128: 'Large' };
+  const diffs = ['Easy', 'Normal', 'Hard', 'Brutal'];
+  $('mpGames').innerHTML = games.length
+    ? games.map((g: any) => `<div style="display:flex;align-items:center;gap:6px;padding:3px 0;border-bottom:1px solid #243240">` +
+      `<span style="flex:1;min-width:0">${escapeHtml(g.host)}'s game · ${g.players}/${g.max} · ${sizes[g.size] || g.size} · ${diffs[g.diff] || ''}</span>` +
+      `<button class="mbtn" data-join="${g.code}" style="padding:4px 10px;font-size:12px;width:auto">JOIN</button></div>`).join('')
+    : '<div style="color:#5f7384">No open games — create one!</div>';
+  $('mpGames').querySelectorAll('[data-join]').forEach(b =>
+    b.addEventListener('click', () => {
+      $('mpErr').textContent = '';
+      net?.send({ t: 'join', code: (b as HTMLElement).getAttribute('data-join'), name: playerName(), faction: selFaction });
+    }));
+}
+function escapeHtml(s: string) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+
 async function connectNet(): Promise<Net> {
   const n = new Net();
   await n.connect();
@@ -2501,7 +2524,8 @@ async function connectNet(): Promise<Net> {
     const g = new NetGame(n, m.seed, m.players.length, m.you, m.players);
     startGame(g);
   });
-  n.on('err', (m: any) => { $('menuErr').textContent = m.msg || 'Server error'; show('menu'); });
+  n.on('lobby', (m: any) => renderMpLobby(m));
+  n.on('err', (m: any) => { $('mpErr').textContent = m.msg || 'Server error'; });
   n.on('_close', () => {
     if (!client) { $('menuErr').textContent = 'Connection lost'; show('menu'); }
   });
@@ -2613,26 +2637,38 @@ function initMenus() {
       }));
     } catch { list.innerHTML = 'Replays live on the game server — open the deployed site to browse them.'; }
   });
-  $('btnCreate').addEventListener('click', async () => {
+  // MULTIPLAYER → connect and enter the shared global lobby (presence + games)
+  $('btnMulti').addEventListener('click', async () => {
     $('menuErr').textContent = '';
     fogEnabled = ($('fogChk') as HTMLInputElement)?.checked ?? true; // per-client visual choice
     try {
-      net = await connectNet();
-      net.send({ t: 'create', name: playerName(), faction: selFaction, size: selSize, diff: selDiff });
+      if (!net) net = await connectNet();
+      $('mpErr').textContent = '';
+      $('mpUsers').innerHTML = '<div style="color:#5f7384">Connecting…</div>';
+      $('mpGames').innerHTML = '';
+      net.send({ t: 'hello', name: playerName(), faction: selFaction });
+      show('mpLobby');
     } catch (e: any) { $('menuErr').textContent = e.message + ' — is the Node server running?'; }
   });
-  $('btnJoin').addEventListener('click', async () => {
-    $('menuErr').textContent = '';
-    fogEnabled = ($('fogChk') as HTMLInputElement)?.checked ?? true;
-    const code = ($('joinCode') as HTMLInputElement).value.trim().toUpperCase();
-    if (code.length !== 4) { $('menuErr').textContent = 'Enter a 4-letter room code'; return; }
-    try {
-      net = await connectNet();
-      net.send({ t: 'join', code, name: playerName(), faction: selFaction });
-    } catch (e: any) { $('menuErr').textContent = e.message + ' — is the Node server running?'; }
+  // create a game others can see and join from the lobby
+  $('btnMpCreate').addEventListener('click', () => {
+    $('mpErr').textContent = '';
+    net?.send({ t: 'create', name: playerName(), faction: selFaction, size: selSize, diff: selDiff });
   });
+  $('btnMpJoinCode').addEventListener('click', () => {
+    $('mpErr').textContent = '';
+    const code = ($('mpJoinCode') as HTMLInputElement).value.trim().toUpperCase();
+    if (code.length !== 4) { $('mpErr').textContent = 'Enter a 4-letter room code'; return; }
+    net?.send({ t: 'join', code, name: playerName(), faction: selFaction });
+  });
+  // BACK leaves the lobby entirely (drops the connection)
+  $('btnMpBack').addEventListener('click', () => { net?.close(); net = null; show('menu'); });
   $('btnStart').addEventListener('click', () => net?.send({ t: 'start' }));
-  $('btnLeave').addEventListener('click', () => { net?.close(); net = null; show('menu'); });
+  // LEAVE a room lobby returns to the global lobby (stay connected)
+  $('btnLeave').addEventListener('click', () => {
+    if (net) { net.send({ t: 'leaveRoom' }); show('mpLobby'); }
+    else show('menu');
+  });
   $('btnAgain').addEventListener('click', () => location.reload());
   // Exit → choice popup: Surrender (a defeat), Just Exit (no result), or Cancel
   const exitMenu = $('exitMenu');

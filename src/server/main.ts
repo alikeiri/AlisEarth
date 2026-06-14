@@ -152,7 +152,7 @@ const http = createServer(async (req, res) => {
   }
 });
 
-interface Client { ws: WebSocket; name: string; faction: string; slot: number; lastChat?: number }
+interface Client { ws: WebSocket; name: string; faction: string; slot: number; lastChat?: number; room?: Room | null }
 interface Room {
   code: string; clients: Client[]; started: boolean;
   sim: Sim | null; timer: ReturnType<typeof setInterval> | null; cmdQ: any[];
@@ -161,6 +161,30 @@ interface Room {
   lastReport?: any; replaySaved?: boolean;
 }
 const rooms = new Map<string, Room>();
+// every connected client that has entered the multiplayer lobby (whether idle in
+// the lobby or inside a room) — drives the shared presence + open-games browser
+const online = new Set<Client>();
+
+// games that can still be joined: not yet started and with a free slot
+function openGames() {
+  return [...rooms.values()]
+    .filter(r => !r.started && r.clients.length < 4)
+    .map(r => ({ code: r.code, host: r.clients[0]?.name || '?', players: r.clients.length, max: 4, size: r.size, diff: r.diff }));
+}
+function lobbyState() {
+  return {
+    t: 'lobby',
+    users: [...online].map(c => ({ name: c.name, faction: c.faction, inGame: !!c.room })),
+    games: openGames(),
+  };
+}
+// push the latest presence + open-games list to everyone NOT currently in a match
+// (clients in a started game are busy playing and ignore lobby updates anyway)
+function broadcastLobby() {
+  const s = JSON.stringify(lobbyState());
+  for (const c of online)
+    if ((!c.room || !c.room.started) && c.ws.readyState === WebSocket.OPEN) c.ws.send(s);
+}
 
 function makeCode(): string {
   const A = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
@@ -368,27 +392,52 @@ wss.on('connection', ws => {
     let m: any;
     try { m = JSON.parse(String(raw)); } catch { return; }
 
-    if (m.t === 'create') {
+    if (m.t === 'hello') {
+      // enter the global lobby: register presence and send the current snapshot
+      if (!me) me = { ws, name: String(m.name || 'Player').slice(0, 14), faction: String(m.faction || 'usa'), slot: -1, room: null };
+      else { me.name = String(m.name || me.name).slice(0, 14); me.faction = String(m.faction || me.faction); }
+      online.add(me);
+      send(ws, lobbyState());
+      broadcastLobby();
+    } else if (m.t === 'create') {
       const code = makeCode();
-      me = { ws, name: String(m.name || 'Host').slice(0, 14), faction: String(m.faction || 'usa'), slot: 0 };
+      if (!me) me = { ws, name: String(m.name || 'Host').slice(0, 14), faction: String(m.faction || 'usa'), slot: 0, room: null };
+      me.slot = 0; me.name = String(m.name || me.name).slice(0, 14); me.faction = String(m.faction || me.faction);
+      online.add(me);
       room = {
         code, clients: [me], started: false, sim: null, timer: null, cmdQ: [], aiSlots: [],
         size: [72, 96, 128].includes(m.size) ? m.size : 96,
         diff: Number.isInteger(m.diff) && m.diff >= 0 && m.diff <= 3 ? m.diff : 1,
       };
+      me.room = room;
       rooms.set(code, room);
       sendRoom(room);
+      broadcastLobby();
     } else if (m.t === 'join') {
       const r = rooms.get(String(m.code || '').toUpperCase());
       if (!r) { send(ws, { t: 'err', msg: 'Room not found' }); return; }
       if (r.started) { send(ws, { t: 'err', msg: 'Game already started' }); return; }
       if (r.clients.length >= 4) { send(ws, { t: 'err', msg: 'Room is full' }); return; }
-      me = { ws, name: String(m.name || 'Player').slice(0, 14), faction: String(m.faction || 'usa'), slot: r.clients.length };
+      if (!me) me = { ws, name: String(m.name || 'Player').slice(0, 14), faction: String(m.faction || 'usa'), slot: 0, room: null };
+      me.slot = r.clients.length; me.name = String(m.name || me.name).slice(0, 14); me.faction = String(m.faction || me.faction);
+      online.add(me);
       r.clients.push(me);
-      room = r;
+      room = r; me.room = r;
       sendRoom(r);
+      broadcastLobby();
+    } else if (m.t === 'leaveRoom') {
+      // back out of a room lobby to the global lobby (only before the game starts)
+      if (room && me && !room.started) {
+        const idx = room.clients.indexOf(me);
+        if (idx >= 0) room.clients.splice(idx, 1);
+        if (!room.clients.length) { if (room.timer) clearInterval(room.timer); rooms.delete(room.code); }
+        else { room.clients.forEach((c, i) => { c.slot = i; }); sendRoom(room); }
+        me.room = null; room = null;
+        send(ws, lobbyState());
+        broadcastLobby();
+      }
     } else if (m.t === 'start') {
-      if (room && me && me.slot === 0) startRoom(room);
+      if (room && me && me.slot === 0) { startRoom(room); broadcastLobby(); }
     } else if (m.t === 'chat') {
       if (!room || !me) return;
       const now = Date.now();
@@ -413,7 +462,8 @@ wss.on('connection', ws => {
   });
 
   ws.on('close', () => {
-    if (!room || !me) return;
+    if (me) online.delete(me);                  // drop from the presence list
+    if (!room || !me) { broadcastLobby(); return; }
     const leaverSlot = me.slot;
     const idx = room.clients.indexOf(me);
     if (idx >= 0) room.clients.splice(idx, 1);
@@ -433,6 +483,7 @@ wss.on('connection', ws => {
       // human if one is still here, otherwise disband it — never a team defeat
       departMidGame(room, leaverSlot);
     }
+    broadcastLobby();                           // open-games list may have changed
   });
 });
 
