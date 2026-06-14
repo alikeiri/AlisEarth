@@ -10,7 +10,7 @@ const B_ICONS: Record<string, string> = {
   cannon: '\u{1F4A5}', tesla: '⚡', irondome: '\u{1F6E1}️',
 };
 const U_ICONS: Record<string, string> = {
-  rifle: '\u{1FA96}', rocket: '\u{1F680}', tank: '\u{1F699}', heavy: '\u{1F69B}', ifv: '\u{1F6FB}', aatank: '\u{1F3AF}', flak: '\u{1F4A5}', harv: '\u{1F69C}', engineer: '\u{1F527}',
+  rifle: '\u{1FA96}', rocket: '\u{1F680}', melody: '\u{1F483}', tank: '\u{1F699}', heavy: '\u{1F69B}', ifv: '\u{1F6FB}', aatank: '\u{1F3AF}', flak: '\u{1F4A5}', harv: '\u{1F69C}', engineer: '\u{1F527}',
   fueltruck: '\u{1F6E2}️', cmissile: '\u{1F680}', bbmissile: '\u{1F4A3}', chemissile: '\u{2623}️',
   hive: '\u{1F41D}', recon: '\u{1F6F8}', strike: '\u{1F6F0}️', msldrone: '☄️', mlrs: '\u{1F9E8}',
   chemtrooper: '\u{2623}️', chemtank: '\u{2623}️', chemdrone: '\u{2623}️',
@@ -35,7 +35,7 @@ const UPG_INFO: Record<string, string> = {
   airforce: '+25% production speed',
   shipyard: '+25% production speed',
 };
-export const U_LIST = ['rifle', 'rocket', 'hive', 'tank', 'heavy', 'ifv', 'aatank', 'flak', 'patriot', 'fueltruck', 'harv', 'engineer', 'mcv', 'dozer', 'mlrs', 'recon', 'strike', 'msldrone',
+export const U_LIST = ['rifle', 'rocket', 'melody', 'hive', 'tank', 'heavy', 'ifv', 'aatank', 'flak', 'patriot', 'fueltruck', 'harv', 'engineer', 'mcv', 'dozer', 'mlrs', 'recon', 'strike', 'msldrone',
   'chemtrooper', 'chemtank', 'chemdrone', 'biotrooper', 'biotank', 'biodrone', 'stealthtank',
   'gunboat', 'destroyer', 'sub', 'subhunter', 'mslcruiser', 'flakship', 'navdrone', 'fighter', 'bomber', 'dbomber', 'heli', 'helidrone',
   'cmissile', 'bbmissile', 'chemissile'];
@@ -85,6 +85,7 @@ const DESCRIPTIONS: Record<string, string> = {
   // units
   rifle: 'Rifle Squad: cheap infantry, strong vs other infantry. Can fortify (F).',
   rocket: 'Rocket Team: anti-armor infantry — cracks tanks and buildings, weak vs infantry.',
+  melody: 'Melody: elite operative (one at a time). Sniper one-shots infantry at long range; right-click a vehicle to launch a homing drone at it; right-click a building to plant demolition charges. 25% faster than other infantry.',
   hive: 'Drone Hive: fortifies into a tower that launches swarms of suicide mini-drones.',
   tank: 'Battle Tank: the workhorse armored unit; duels other vehicles.',
   heavy: 'Heavy Tank: slow, heavily armored bruiser with big guns.',

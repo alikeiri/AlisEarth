@@ -45,11 +45,19 @@ export interface UnitDef {
   trigger?: number;                              // mine trigger radius (cells)
   sonar?: number;                                // reveals cloaked enemies (subs) within this radius
   siegeRange?: number;                           // longer reach against BUILDINGS only (sub cruise missiles)
+  commando?: boolean;                            // hero operative (Melody): snipes infantry, launches an
+                                                 // anti-vehicle drone, and plants demolition charges on buildings
+  droneVs?: string;                              // commando: unit type launched at enemy vehicles
+  demoCharge?: number;                           // commando: flat damage dealt when planting explosives on a building
 }
 
 export const UNITS: Record<string, UnitDef> = {
   rifle:  { name: 'Rifle Squad',  cost: 100,  hp: 90,  speed: 2.0, range: 4.0, dmg: 7,  rof: 0.8, builtAt: 'barracks', buildTime: 5,  kind: 'inf', fortify: true },
   rocket: { name: 'Rocket Team',  cost: 300,  hp: 80,  speed: 1.8, range: 5.5, dmg: 24, rof: 2.2, builtAt: 'barracks', buildTime: 8,  kind: 'inf', fortify: true },
+  // Melody: elite female operative. Sniper rifle one-shots infantry from afar;
+  // launches a homing drone at enemy vehicles; plants demolition charges that
+  // wreck buildings. 25% faster than other infantry. Unique (one at a time).
+  melody: { name: 'Melody',       cost: 1500, hp: 220, speed: 2.5, range: 9.0, dmg: 95, rof: 2.6, builtAt: 'barracks', buildTime: 18, kind: 'inf', fortify: true, commando: true, droneVs: 'melodydrone', demoCharge: 1400 },
   tank:   { name: 'Battle Tank',  cost: 800,  hp: 340, speed: 2.6, range: 5.5, dmg: 34, rof: 1.6, builtAt: 'factory',  buildTime: 12, kind: 'veh' },
   heavy:  { name: 'Heavy Tank',   cost: 1250, hp: 640, speed: 2.0, range: 6.0, dmg: 58, rof: 2.2, builtAt: 'factory',  buildTime: 17, kind: 'veh' },
   harv:   { name: 'Harvester',    cost: 900,  hp: 450, speed: 1.6, range: 0,   dmg: 0,  rof: 1,   builtAt: 'factory',  buildTime: 14, kind: 'veh', cargo: 400 },
@@ -72,6 +80,8 @@ export const UNITS: Record<string, UnitDef> = {
   dozer:  { name: 'Bulldozer',    cost: 1400, hp: 420, speed: 1.3, range: 0,   dmg: 0,  rof: 1,   builtAt: 'factory',  buildTime: 12, kind: 'veh', terra: true, amphibious: true },
   hive:    { name: 'Drone Hive',  cost: 1500, hp: 900, speed: 1.1, range: 13,  dmg: 0,  rof: 1,   builtAt: 'barracks', buildTime: 16, kind: 'inf', fortify: true, emits: 'minidrone' },
   minidrone: { name: 'Mini Drone', cost: 0,   hp: 40,  speed: 4.2, range: 4.0, dmg: 200, rof: 1, builtAt: '',         buildTime: 0,  kind: 'air', fly: true, alt: 1.6, ephemeral: 26, internal: true, kamikaze: true },
+  // Melody's anti-vehicle drone: fast homing kamikaze, big shaped-charge hit
+  melodydrone: { name: 'Strike Drone', cost: 0, hp: 30, speed: 5.0, range: 4.0, dmg: 320, rof: 1, builtAt: '',       buildTime: 0,  kind: 'air', fly: true, alt: 1.8, ephemeral: 16, internal: true, kamikaze: true },
   // naval (Ship Factory, water only)
   gunboat:   { name: 'Gunboat',     cost: 700,  hp: 300, speed: 2.8, range: 5.5, dmg: 22, rof: 1.2, builtAt: 'shipyard', buildTime: 10, kind: 'sea', move: 'sea' },
   // armored gun ship: duels other warships and bombards the coast (long reach).
@@ -288,6 +298,11 @@ export function dmgMul(attType: string, tgtIsBuilding: boolean, tgtKind: string,
   if (attType === 'recon')  return tgtIsBuilding ? 0.4 : (tgtKind === 'inf' ? 1.2 : 0.5);
   if (attType === 'strike') return tgtIsBuilding ? 1.2 : (tgtKind === 'veh' ? 1.8 : 0.55);
   if (attType === 'rocket') return tgtIsBuilding ? 1.8 : (tgtKind === 'veh' ? 2.2 : 0.45);
+  // Melody's sniper: lethal to infantry, feeble vs armour/structures (she uses
+  // her drone and demolition charges for those instead)
+  if (attType === 'melody') return tgtIsBuilding ? 0.15 : (tgtKind === 'inf' ? 1.8 : 0.25);
+  // her launched drone is a dedicated tank-killer
+  if (attType === 'melodydrone') return tgtIsBuilding ? 0.5 : (tgtKind === 'veh' || tgtKind === 'sea' ? 1.6 : 1.0);
   if (attType === 'rifle')  return tgtIsBuilding ? 0.35 : (tgtKind === 'veh' ? 0.35 : 1.35);
   if (attType === 'ifv')    return tgtIsBuilding ? 0.5 : (tgtKind === 'inf' ? 2.2 : 0.5);
   if (attType === 'aatank') return 0.25; // AA missiles are wasted on ground targets

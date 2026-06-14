@@ -292,6 +292,13 @@ export class Sim {
       if (!b || !b.b || b.owner !== c.p || !def || (def.builtAt !== b.type && def.altBuiltAt !== b.type)) return;
       if (def.tech && !pl.tech[def.tech]) return; // not yet researched
       if (def.internal) return;
+      // the commando is a hero unit: only one alive (or in production) at a time
+      if (def.commando) {
+        let have = 0;
+        for (const e of this.ents.values()) if (e.owner === c.p && e.type === c.type && e.hp > 0) have++;
+        for (const bb of this.ents.values()) if (bb.b && bb.owner === c.p) for (const it of bb.queue) if (it.type === c.type) have++;
+        if (have >= 1) return;
+      }
       // silo stockpiles up to MISSILE_CAP armed missiles (stock + in-build)
       if (def.missile && ((b.missileStock?.length || 0) + b.queue.length) >= MISSILE_CAP) return;
       if (b.progress < b.total || b.queue.length >= 6) return;
@@ -988,6 +995,27 @@ export class Sim {
     this.events.push(ev);
   }
 
+  // commando (Melody) special engagement: against a building she plants a heavy
+  // demolition charge (big flat damage, ignores her feeble structure multiplier);
+  // against a vehicle/ship she launches a homing kamikaze drone that chases it down
+  private commandoSpecial(u: Entity, tgt: Entity, def: any) {
+    if (tgt.b) {
+      const wasAlive = tgt.hp > 0;
+      tgt.hp -= def.demoCharge || 1200;                 // C4 cuts through any armour
+      if (wasAlive && tgt.hp <= 0 && tgt.type !== 'wall' && tgt.type !== 'barrier' && u.owner !== tgt.owner)
+        this.stats.destB[u.owner]++;
+      u.cd = 5;                                         // time to set the next charge
+      this.events.push({ e: 'boom', x: tgt.x, z: tgt.z, big: true });
+    } else {
+      // launch the anti-vehicle drone — it homes onto and detonates on the target
+      const drone = this.spawnUnit(u.owner, def.droneVs || 'melodydrone', u.x, u.z);
+      drone.orders = [{ k: 'attack', tgt: tgt.id, keep: true }];
+      drone.stance = 1;
+      u.cd = 4;                                         // reload between drones
+      this.events.push({ e: 'shot', x: u.x, z: u.z, tx: tgt.x, tz: tgt.z, w: 4, f: 1 });
+    }
+  }
+
   // ---------- buildings ----------
   private tickBuilding(b: Entity) {
     const pl = this.players[b.owner];
@@ -1475,6 +1503,18 @@ export class Sim {
       }
       const d = this.distToEnt(u.x, u.z, tgt);
       const speed = def.speed * this.players[u.owner].fac.speedMul;
+      // commando (Melody): demolition charge on buildings (point-blank), homing
+      // drone on vehicles/ships (mid-range), sniper rifle on infantry/air
+      if (def.commando) {
+        const veh = !tgt.b && (UNITS[tgt.type]?.kind === 'veh' || UNITS[tgt.type]?.kind === 'sea');
+        if (tgt.b || veh) {
+          const reach = tgt.b ? 1.8 : 10;
+          if (d <= reach) { u.path = null; if (u.cd <= 0) this.commandoSpecial(u, tgt, def); }
+          else this.moveToward(u, tgt.x, tgt.z, def);
+          return;
+        }
+        // infantry / aircraft: fall through to the normal sniper-fire path below
+      }
       if (def.kamikaze) {
         // one-way suicide drone: dive straight at the target, detonate on contact
         if (d <= 0.9) {

@@ -310,7 +310,7 @@ function archGeo(rad: number, len: number): THREE.BufferGeometry {
 function unitGeoSmooth(type: string): [THREE.BufferGeometry, THREE.BufferGeometry] {
   // new unit types reuse an existing procedural shape (GLB models load over them)
   const ALIAS: Record<string, string> = {
-    hive: 'harv', minidrone: 'recon', chemtrooper: 'rifle', biotrooper: 'rifle',
+    hive: 'harv', minidrone: 'recon', melodydrone: 'recon', chemtrooper: 'rifle', biotrooper: 'rifle',
     chemtank: 'tank', biotank: 'tank', stealthtank: 'tank', chemdrone: 'recon', biodrone: 'recon',
     mcv: 'harv', dozer: 'harv',
   };
@@ -329,6 +329,20 @@ function unitGeoSmooth(type: string): [THREE.BufferGeometry, THREE.BufferGeometr
     if (type === 'rocket') B.push(part(new THREE.CylinderGeometry(0.05, 0.05, 0.52, 8), 0x49505a, { rx: Math.PI / 2, x: 0.13, y: 0.6, z: -0.04 }));
     else B.push(part(new THREE.CylinderGeometry(0.018, 0.018, 0.42, 6), gun, { rx: Math.PI / 2, x: 0.12, y: 0.46, z: 0.12 }));
     A.push(part(new THREE.SphereGeometry(0.128, 10, 6), 0xffffff, { y: 0.52, sy: 0.4 }));            // team band
+  } else if (type === 'melody') {
+    // elite female operative: slim build, beret + ponytail, long scoped sniper rifle
+    const suit = 0x2f3447, hair = 0x6b4422, beret = 0x7a1f3d;
+    B.push(part(new THREE.CapsuleGeometry(0.092, 0.21, 3, 8), suit, { y: 0.42 }));                   // slim torso
+    B.push(part(new THREE.SphereGeometry(0.068, 10, 8), skin, { y: 0.63 }));                         // head
+    B.push(part(new THREE.SphereGeometry(0.084, 10, 8), beret, { y: 0.665, sy: 0.5 }));              // beret
+    B.push(part(new THREE.CapsuleGeometry(0.05, 0.13, 2, 6), hair, { rx: 0.6, y: 0.57, z: -0.085 }));// ponytail down the back
+    B.push(part(new THREE.CapsuleGeometry(0.04, 0.18, 2, 6), 0x20242f, { x: -0.055, y: 0.14 }));     // legs
+    B.push(part(new THREE.CapsuleGeometry(0.04, 0.18, 2, 6), 0x20242f, { x: 0.055, y: 0.14 }));
+    B.push(part(new THREE.CapsuleGeometry(0.032, 0.16, 2, 6), suit, { rz: 0.45, x: -0.14, y: 0.45 }));// arms
+    B.push(part(new THREE.CapsuleGeometry(0.032, 0.16, 2, 6), suit, { rz: -0.45, x: 0.14, y: 0.45 }));
+    B.push(part(new THREE.CylinderGeometry(0.016, 0.016, 0.66, 6), gun, { rx: Math.PI / 2, x: 0.12, y: 0.47, z: 0.22 })); // long barrel
+    B.push(part(new THREE.BoxGeometry(0.045, 0.05, 0.14), 0x111316, { x: 0.12, y: 0.51, z: 0.30 }));  // scope
+    A.push(part(new THREE.SphereGeometry(0.118, 10, 6), 0xffffff, { y: 0.50, sy: 0.42 }));            // team band
   } else if (type === 'tank' || type === 'heavy') {
     const s = type === 'heavy' ? 1.22 : 1.0;
     B.push(hull(1.28 * s, 0.74 * s, 0.36 * s, metal));
@@ -952,9 +966,9 @@ export class Renderer {
     this.scene.add(this.gemMesh);
 
     // unit instancing: procedural models first, external GLBs swap in async
-    for (const t of ['rifle', 'rocket', 'tank', 'heavy', 'harv', 'engineer', 'recon', 'strike', 'msldrone', 'mlrs',
+    for (const t of ['rifle', 'rocket', 'melody', 'tank', 'heavy', 'harv', 'engineer', 'recon', 'strike', 'msldrone', 'mlrs',
       'gunboat', 'destroyer', 'sub', 'navdrone', 'fighter', 'bomber', 'dbomber', 'heli', 'helidrone',
-      'hive', 'minidrone', 'chemtrooper', 'chemtank', 'chemdrone', 'biotrooper', 'biotank', 'biodrone', 'stealthtank']) {
+      'hive', 'minidrone', 'melodydrone', 'chemtrooper', 'chemtank', 'chemdrone', 'biotrooper', 'biotank', 'biodrone', 'stealthtank']) {
       const [body, accent] = unitGeoSmooth(t);
       const bm = new THREE.InstancedMesh(body, new THREE.MeshStandardMaterial({ vertexColors: true, map: armorTex(), roughness: 0.72, metalness: 0.2 }), MAX_INST);
       const am = new THREE.InstancedMesh(accent, new THREE.MeshStandardMaterial({ color: 0xffffff, map: detailTex(), roughness: 0.5, metalness: 0.25 }), MAX_INST);
