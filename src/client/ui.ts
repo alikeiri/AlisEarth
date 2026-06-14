@@ -67,12 +67,100 @@ const TIP_NOTES: Record<string, string> = {
   mslcruiser: 'Missile Cruiser: long-range shore bombardment — flattens coastal bases. Fragile hull; keep it screened.',
   flakship: 'Flak Cruiser: dedicated fleet air-defence. Shreds aircraft and drones, useless against ships.',
 };
+// plain-language descriptions for everything without a hand-written TIP_NOTE,
+// so every build button has a real explanation (not just strong/weak lines)
+const DESCRIPTIONS: Record<string, string> = {
+  // buildings
+  power: 'Power Plant: supplies power to the base. Build more as the power bar fills.',
+  refinery: 'Ore Refinery: harvesters drop ore here for credits. Comes with a free harvester.',
+  barracks: 'Barracks: trains infantry. Unlocks walls, barriers and defensive turrets.',
+  factory: 'War Factory: builds vehicles — tanks, artillery, support, MCV.',
+  turret: 'Defense Turret: anti-ground gun emplacement.',
+  sam: 'Missile Battery: anti-air defense — downs planes and drones; weak vs ground.',
+  dronefac: 'Drone Works: builds aerial drones (recon, strike, missile).',
+  shipyard: 'Ship Factory: builds naval units. Place on the coast (needs water nearby).',
+  airforce: 'Aircraft Plant: builds aircraft. Each plane needs an Airfield slot.',
+  airfield: 'Airfield: parks and rearms aircraft; each one adds aircraft capacity.',
+  lab: 'Research Lab: unlocks technologies (chem, bio, stealth) and the Missile Silo.',
+  // units
+  rifle: 'Rifle Squad: cheap infantry, strong vs other infantry. Can fortify (F).',
+  rocket: 'Rocket Team: anti-armor infantry — cracks tanks and buildings, weak vs infantry.',
+  hive: 'Drone Hive: fortifies into a tower that launches swarms of suicide mini-drones.',
+  tank: 'Battle Tank: the workhorse armored unit; duels other vehicles.',
+  heavy: 'Heavy Tank: slow, heavily armored bruiser with big guns.',
+  ifv: 'IFV: fast autocannon carrier — shreds infantry, can pepper aircraft.',
+  harv: 'Harvester: gathers ore and returns it to a refinery. Unarmed.',
+  mcv: 'Construction Vehicle: deploys (F) into a new Construction Yard for a forward base.',
+  dozer: 'Bulldozer: reshapes terrain (T) — raise/lower ground, build land bridges.',
+  recon: 'Recon Drone: cheap, fast scout with a light weapon and good vision.',
+  strike: 'Strike Drone: anti-vehicle attack drone.',
+  msldrone: 'Missile Drone: long-range anti-armor attack drone.',
+  chemtrooper: 'Chem Trooper: gas infantry, devastating vs infantry.',
+  chemtank: 'Chem Tank: sprays corrosive gas — strong vs infantry and buildings.',
+  chemdrone: 'Chem Drone: airborne gas attacker.',
+  biotrooper: 'Bio Trooper: viral infantry, brutal against other infantry.',
+  biotank: 'Bio Tank: spreads bio-agents — strong vs infantry and buildings.',
+  biodrone: 'Bio Drone: airborne bio attacker.',
+  stealthtank: 'Stealth Tank: cloaked raider, invisible until it fires or you get close.',
+  gunboat: 'Gunboat: cheap, fast warship for skirmishing and scouting the coast.',
+  navdrone: 'Naval Drone: cheap, expendable sea drone.',
+  fighter: 'Fighter: air-superiority jet. Hunts drones and bombers; near-useless vs ground.',
+  bomber: 'Bomber: heavy payload vs buildings — flies over, drops its stick, returns to rearm.',
+  dbomber: 'Drone Bomber: unmanned heavy bomber with a large payload.',
+  heli: 'Helicopter: versatile gunship — rockets vs armor, guns vs infantry.',
+  helidrone: 'Helidrone: cheap, light attack helicopter.',
+};
+
+// flag-derived special-ability lines for a unit
+function unitAbilities(u: any): string[] {
+  const a: string[] = [];
+  if (u.amphibious) a.push('Amphibious (crosses water)');
+  if (u.fly) a.push('Flies over terrain');
+  if (u.cloak) a.push('Cloaked / stealth');
+  if (u.sonar) a.push(`Sonar ${u.sonar} (reveals submarines)`);
+  if (u.siegeRange) a.push(`Cruise missiles vs buildings (range ${u.siegeRange})`);
+  if (u.deploys) a.push(`Deploys (F) into a ${BUILDINGS[u.deploys]?.name || u.deploys}`);
+  if (u.terra) a.push('Terraforms terrain (T)');
+  if (u.repair) a.push('Repairs units & builds roads');
+  if (u.lays) a.push(`Lays proximity mines (F, carries ${u.mines || 0})`);
+  if (u.emits) a.push('Fortifies (F) → launches suicide drones');
+  else if (u.fortify) a.push('Can fortify / dig in (F)');
+  if (u.intercept) a.push('Intercepts incoming silo missiles');
+  if (u.kamikaze || u.bombTruck) a.push('One-way: explodes on contact');
+  if (u.payload) a.push(`Limited sorties (${u.payload}) — rearms at an airfield`);
+  else if (u.pad) a.push('Needs an Airfield slot');
+  if (u.cargo) a.push('Collects ore');
+  if (u.tech) a.push(`Requires ${u.tech} research`);
+  return a;
+}
+
 export function counterTip(t: string): string {
-  const d = UNITS[t] || BUILDINGS[t];
+  const u = UNITS[t], b = BUILDINGS[t];
+  const d: any = u || b;
   if (!d) return '';
   const lines: string[] = [];
+  // 1. description
   if (TIP_NOTES[t]) lines.push(TIP_NOTES[t]);
-  const dmg = (d as any).dmg ?? (d as any).attack?.dmg ?? 0;
+  else if (DESCRIPTIONS[t]) lines.push(DESCRIPTIONS[t]);
+  // 2. core stats
+  if (u) {
+    const s = [`HP ${u.hp}`];
+    if (u.dmg > 0) s.push(`DMG ${u.dmg}`);
+    if (u.range > 0) s.push(`Range ${u.range}`);
+    if (u.speed) s.push(`Speed ${u.speed}`);
+    lines.push(s.join(' · '));
+    const ab = unitAbilities(u);
+    if (ab.length) lines.push(ab.join(' · '));
+  } else if (b) {
+    const s = [`HP ${b.hp}`];
+    if (b.attack) s.push(`DMG ${b.attack.dmg} · Range ${b.attack.range}`);
+    if (b.intercept) s.push(`Intercept range ${b.intercept.range}`);
+    s.push(b.power > 0 ? `+${b.power} power` : b.power < 0 ? `${b.power} power` : 'no power draw');
+    lines.push(s.join(' · '));
+    if (b.prereq) lines.push(`Requires: ${BUILDINGS[b.prereq]?.name || b.prereq}`);
+  }
+  // 3. strong / weak matrix (damage dealers only)
+  const dmg = u ? (u.dmg || 0) : (b?.attack?.dmg || 0);
   if (dmg > 0) {
     const cats: [string, boolean, string][] = [
       ['infantry', false, 'inf'], ['vehicles', false, 'veh'], ['aircraft', false, 'air'],
@@ -84,13 +172,9 @@ export function counterTip(t: string): string {
       if (m >= 1.3) strong.push(label);
       else if (m <= 0.7) weak.push(label);
     }
-    if ((d as any).kamikaze) lines.push('One-way suicide drone');
     if (strong.length) lines.push('Strong vs ' + strong.join(', '));
     if (weak.length) lines.push('Weak vs ' + weak.join(', '));
-    if (!strong.length && !weak.length) lines.push('All-round weapon');
-  } else if ((d as any).cargo) lines.push('Collects ore — no weapons');
-  else if ((d as any).repair) lines.push('Repairs units, builds roads — no weapons');
-  else if ((d as any).emits) lines.push('Fortifies, then launches suicide drones');
+  }
   return lines.join('\n');
 }
 
@@ -237,7 +321,7 @@ export class UI {
     if (selection && selection.size === 1) {
       const id = [...selection][0];
       const v = views.find(x => x.i === id);
-      if (v && v.b && v.o === me && v.pr >= 1 && v.t !== 'conyard' && (v.lv || 1) < UPG_MAX) {
+      if (v && v.b && v.o === me && v.pr >= 1 && v.t !== 'conyard' && v.t !== 'wall' && v.t !== 'barrier' && (v.lv || 1) < UPG_MAX) {
         const cost = upgCost(v.t, v.lv || 1, fac.costMul);
         this.upgTarget = id;
         const gain = UPG_INFO[v.t] || 'improved performance';
@@ -559,12 +643,16 @@ export class UI {
         }
         if (anyOk) {
           const prev = (c as any).preview;
+          const kind = (c as any).kind;
           if ((c as any).fill) { // area-attack / strike circle: filled for visibility
             ctx.closePath();
             ctx.fillStyle = prev ? 'rgba(255,200,60,0.14)' : 'rgba(255,90,70,0.18)';
             ctx.fill();
           }
-          ctx.strokeStyle = prev ? 'rgba(255,200,60,0.85)' : 'rgba(255,90,70,0.5)';
+          // sonar bubble = blue, placement max-range preview = green, else red attack
+          ctx.strokeStyle = kind === 'sonar' ? 'rgba(80,170,255,0.7)'
+            : kind === 'place' ? 'rgba(110,230,140,0.9)'
+            : prev ? 'rgba(255,200,60,0.85)' : 'rgba(255,90,70,0.5)';
           ctx.lineWidth = (c as any).fill ? 2 : 1.4;
           ctx.setLineDash([5, 4]);
           ctx.stroke();

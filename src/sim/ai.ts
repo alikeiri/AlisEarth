@@ -125,7 +125,15 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
   if (mem.landCheckT === undefined || sim.tickN >= mem.landCheckT) {
     mem.landCheckT = sim.tickN + 45 * TICKS_PER_SEC;
     const en = nearestEnemyBuilding(sim, p);
-    mem.landOk = !en || !!findPath(sim.map, pl.spawn.x, pl.spawn.z, en.x, en.z, 16000, false);
+    let reach = !en || !!findPath(sim.map, pl.spawn.x, pl.spawn.z, en.x, en.z, 16000, false);
+    // a walled-in enemy is NOT an island: if we can march up to one of their
+    // walls/barriers, the ground army can simply breach its way in. Only true
+    // water-separation (no reachable wall either) counts as an island.
+    if (!reach && en) {
+      const w = nearestEnemyWall(sim, p);
+      if (w && findPath(sim.map, pl.spawn.x, pl.spawn.z, w.x, w.z, 16000, false)) reach = true;
+    }
+    mem.landOk = reach;
   }
   const island = mem.landOk === false;
   if (island) refs = Math.min(refs, 2); // a small island can't feed 3+ refineries
@@ -670,6 +678,19 @@ function nearestEnemyBuilding(sim: Sim, p: number): Entity | null {
   let best: Entity | null = null, bd = 1e9;
   for (const e of sim.ents.values()) {
     if (!e.b || !sim.foe(e.owner, p) || !sim.players[e.owner].alive) continue;
+    const d = (e.x - s.x) ** 2 + (e.z - s.z) ** 2;
+    if (d < bd) { bd = d; best = e; }
+  }
+  return best;
+}
+
+// nearest enemy wall / tank barrier — a breachable way into a walled-off base
+function nearestEnemyWall(sim: Sim, p: number): Entity | null {
+  const s = sim.players[p].spawn;
+  let best: Entity | null = null, bd = 1e9;
+  for (const e of sim.ents.values()) {
+    if (!e.b || (e.type !== 'wall' && e.type !== 'barrier') || e.hp <= 0) continue;
+    if (!sim.foe(e.owner, p) || !sim.players[e.owner].alive) continue;
     const d = (e.x - s.x) ** 2 + (e.z - s.z) ** 2;
     if (d < bd) { bd = d; best = e; }
   }

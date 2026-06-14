@@ -3,7 +3,7 @@
 
 import { Sim } from '../sim/sim';
 import { aiTick } from '../sim/ai';
-import { FACTIONS, BUILDINGS, UNITS, PLAYER_COLORS, SIM_VERSION } from '../sim/data';
+import { FACTIONS, BUILDINGS, UNITS, PLAYER_COLORS, SIM_VERSION, UPG_MAX } from '../sim/data';
 import { GameMap, genMap, setMapSize, W, H, MAXD, SEA } from '../sim/map';
 import { Renderer } from './render';
 import { UI } from './ui';
@@ -336,12 +336,15 @@ function canPlaceClient(map: GameMap, views: any[], me: number, type: string, cx
   // prerequisite building must exist and be finished (else placement fails server-side)
   if (def.prereq && !views.some(v => v.b && v.o === me && v.t === def.prereq && (v.pr ?? 1) >= 1)) return false;
   let near = false;
+  const reach = onWater ? 24 : 14;
   for (const v of views) {
     if (!v.b) continue;
     if (v.cx < cx + s && v.cx + v.sz > cx && v.cz < cz + s && v.cz + v.sz > cz) return false;
-    if (v.o === me) {
+    // walls / tank barriers don't anchor placement — can't creep the base out
+    // with a chain of cheap walls; a real structure must be within reach
+    if (v.o === me && v.t !== 'wall' && v.t !== 'barrier') {
       const d = Math.sqrt((v.x - (cx + s / 2)) ** 2 + (v.z - (cz + s / 2)) ** 2);
-      if (d <= (onWater ? 22 : 11)) near = true; // shipyards reach out to the coast
+      if (d <= reach) near = true; // shipyards reach out to the coast
     }
   }
   return near;
@@ -385,6 +388,9 @@ class GameClient {
   private groups: Record<number, number[]> = {};
   private lastGroupTap = { n: 0, t: 0 };
   private lastHover: { x: number; y: number } | null = null;
+  private tipEl: HTMLDivElement | null = null;  // delayed name+HP hover tooltip
+  private tipEntId = -1;
+  private tipSince = 0;
   private showRanges = true;
   private cmdFx: { fx: number; fz: number; tx: number; tz: number; t: number; atk: boolean }[] = [];
   private lastClick = { t: 0, x: 0, y: 0 };
@@ -624,13 +630,9 @@ class GameClient {
     }
     const bar = document.getElementById('touchBar');
     if (!bar) return;
-    // show on touch devices or narrow screens; re-check when the window changes
-    const refresh = () => {
-      const show = matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window || window.innerWidth <= 820;
-      bar.classList.toggle('hidden', !show);
-    };
-    refresh();
-    on(window, 'resize', refresh);
+    // the command quickbar is useful with a mouse too — keep it visible on all
+    // widths (it tucks into the bottom-left and stays out of the way)
+    bar.classList.remove('hidden');
     const tap = (act: string, btn: HTMLElement) => {
       const ids = this.myUnitIds();
       if (act === 'box') { this.touch.boxToggle = !this.touch.boxToggle; btn.classList.toggle('on', this.touch.boxToggle); }
@@ -1093,7 +1095,7 @@ class GameClient {
       const area = this.areaDrag;
       this.areaDrag = null;
       this.renderer.setFormationPath(null);
-      if (!wasDrag) this.contextCommand(e.clientX, e.clientY, e.shiftKey); // quick right-click = order
+      if (!wasDrag) this.contextCommand(e.clientX, e.clientY, e.shiftKey, e.ctrlKey); // quick right-click = order (Ctrl = force-fire)
       else if (this.rMode === 'aatk' && area && area.r >= 1) {
         // area attack: everything inside the circle becomes a target
         const ids = this.myUnitIds();
@@ -1259,10 +1261,23 @@ class GameClient {
     }
   }
 
-  private contextCommand(sx: number, sy: number, queue: boolean) {
+  private contextCommand(sx: number, sy: number, queue: boolean, force = false) {
     const me = this.game.me;
     const g = this.renderer.groundPoint(sx / window.innerWidth, sy / window.innerHeight);
     if (!g) return;
+
+    // CTRL+right-click: force-fire at the exact spot or entity under the cursor,
+    // even a friendly unit/building or empty ground (artillery suppression etc.)
+    if (force) {
+      const ids0 = this.myUnitIds();
+      if (ids0.length) {
+        const tgt = this.pickView(sx, sy, () => true);
+        this.game.issue({ k: 'forcefire', p: me, ids: ids0, tgt: tgt ? tgt.i : undefined, x: g.x, z: g.z });
+        audio.ack(this.dominantType(ids0), 'attack');
+        this.markCmd(ids0, tgt ? tgt.x : g.x, tgt ? tgt.z : g.z, true);
+        return;
+      }
+    }
 
     // single selected production building → rally point (armed silo → LAUNCH)
     const sel = [...this.selection].map(id => this.byId.get(id)).filter(Boolean);
@@ -1361,6 +1376,39 @@ class GameClient {
   private camQuad(): { x: number; z: number }[] {
     const pts = [[0.04, 0.08], [0.96, 0.08], [0.96, 0.92], [0.04, 0.92]];
     return pts.map(([nx, ny]) => this.renderer.groundPoint(nx, ny) || { x: this.renderer.camX, z: this.renderer.camZ });
+  }
+
+  // delayed hover tooltip: after the cursor rests on an entity (own OR enemy)
+  // for ~0.4s, show its name and current HP near the pointer
+  private updateEntTip(now: number) {
+    if (!this.tipEl) {
+      const el = document.createElement('div');
+      el.id = 'entTip';
+      el.style.cssText = 'position:fixed;pointer-events:none;z-index:30;display:none;padding:3px 7px;'
+        + 'background:rgba(12,16,20,0.92);border:1px solid rgba(255,255,255,0.18);border-radius:4px;'
+        + 'font:600 12px system-ui,sans-serif;color:#e8eef2;white-space:nowrap;box-shadow:0 2px 8px rgba(0,0,0,0.5)';
+      document.body.appendChild(el);
+      this.tipEl = el;
+    }
+    const blocked = this.ui.placing || this.patrolMode || this.terraMode || this.mouse.dragging
+      || this.mouse.rDragging || this.mouse.x > window.innerWidth - 240;
+    const v = blocked ? null : this.pickView(this.mouse.x, this.mouse.y, () => true);
+    const id = v ? v.i : -1;
+    if (id !== this.tipEntId) { this.tipEntId = id; this.tipSince = now; this.tipEl.style.display = 'none'; return; }
+    if (id < 0) { this.tipEl.style.display = 'none'; return; }
+    if (now - this.tipSince < 420) return; // dwell delay before it appears
+    const def: any = UNITS[v.t] || BUILDINGS[v.t];
+    const name = def?.name || v.t;
+    const hp = Math.max(0, Math.round(v.h)), max = Math.round(v.m);
+    const mine = v.o === this.game.me, ally = this.allies.has(v.o);
+    const who = mine ? '' : ally ? ' (ally)' : ' (enemy)';
+    const col = mine ? '#7ee787' : ally ? '#79c0ff' : '#ff7b72';
+    let label = `<span style="color:${col}">${name}${who}</span> · ${hp}/${max} HP`;
+    if (v.b && v.pr < 1) label += ` · ${Math.round(v.pr * 100)}% built`;
+    this.tipEl.innerHTML = label;
+    this.tipEl.style.left = (this.mouse.x + 14) + 'px';
+    this.tipEl.style.top = (this.mouse.y + 16) + 'px';
+    this.tipEl.style.display = 'block';
   }
 
   private loop = (t: number) => {
@@ -1559,6 +1607,9 @@ class GameClient {
       }
       this.lastHover = hover;
     }
+    // delayed name + HP tooltip for whatever entity sits under the cursor
+    this.updateEntTip(t);
+
     // a selected missile silo turns the whole map into a strike-target reticle
     const siloAiming = this.selection.size === 1 && this.byId.get([...this.selection][0])?.t === 'silo'
       && this.byId.get([...this.selection][0])?.o === this.game.me;
@@ -1577,6 +1628,22 @@ class GameClient {
         if (v.b) { const a = BUILDINGS[v.t]?.attack; if (a) r = a.range + 0.8 * ((v.lv || 1) - 1); }
         else { const d = UNITS[v.t]; if (d && d.dmg > 0) r = d.range; }
         if (r > 0) circles.push({ x: v.x, z: v.z, r, atk: true });
+        // sonar-capable ships (Destroyer / Sub Hunter) show their detection
+        // bubble as a separate blue circle
+        const sd = !v.b ? UNITS[v.t]?.sonar : 0;
+        if (sd) circles.push({ x: v.x, z: v.z, r: sd, atk: false, kind: 'sonar' } as any);
+      }
+    }
+    // while placing a defensive structure, preview its FULLY-UPGRADED max range
+    // (green) so you can position it before committing
+    if (this.ui.placing && this.lastGhost) {
+      const def = BUILDINGS[this.ui.placing];
+      let r = 0;
+      if (def.attack) r = def.attack.range + 0.8 * (UPG_MAX - 1);
+      else if (def.intercept) r = def.intercept.range;
+      if (r > 0) {
+        const cx = this.lastGhost.cx + def.size / 2, cz = this.lastGhost.cz + def.size / 2;
+        circles.push({ x: cx, z: cz, r, atk: false, kind: 'place' } as any);
       }
     }
     // live attack/strike-circle while dragging

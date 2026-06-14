@@ -241,11 +241,13 @@ export class Sim {
     }
     // must be near an existing friendly building OR a friendly road tile.
     // shipyards get extra reach so they can stretch out to a coast that isn't
-    // right next to the base (otherwise they were impossible to place)
-    const reach = type === 'shipyard' ? 22 : 11;
+    // right next to the base (otherwise they were impossible to place).
+    // walls and tank barriers are NOT anchors — you can't creep the base
+    // outward with a chain of cheap walls; a real structure must be in reach.
+    const reach = type === 'shipyard' ? 24 : 14;
     const mx = cx + def.size / 2, mz = cz + def.size / 2;
     for (const e of this.ents.values()) {
-      if (!e.b || e.owner !== p) continue;
+      if (!e.b || e.owner !== p || e.type === 'wall' || e.type === 'barrier') continue;
       const d = Math.sqrt((e.x - mx) ** 2 + (e.z - mz) ** 2);
       if (d <= reach) return true;
     }
@@ -378,6 +380,7 @@ export class Sim {
     if (c.k === 'upg') {
       const b = this.ents.get(c.bid);
       if (!b || !b.b || b.owner !== c.p || b.type === 'conyard') return;
+      if (b.type === 'wall' || b.type === 'barrier') return; // walls/barriers can't be upgraded
       if (b.progress < b.total || b.lvl >= UPG_MAX) return;
       const cost = Math.round(upgCost(b.type, b.lvl, pl.fac.costMul) * pl.bonusCost);
       if (pl.credits < cost) return;
@@ -567,6 +570,10 @@ export class Sim {
         if (!t2) return;
         if (UNITS[u.type].repair) ord = { k: 'repair', tgt: c.tgt };
         else { const o = FORM[Math.min(idx, FORM.length - 1)]; ord = { k: 'move', x: t2.x + o.x, z: t2.z + o.z }; }
+      } else if (c.k === 'forcefire') {
+        // force-fire at a point or entity, ignoring allegiance (armed units only)
+        if (UNITS[u.type].dmg > 0 && (c.tgt != null || c.x != null))
+          ord = { k: 'force', tgt: c.tgt, x: c.x, z: c.z, keep: true };
       }
       if (!ord) return;
       u.cmdT = this.tickN; // explicit order — shield it from auto-reactions
@@ -769,7 +776,9 @@ export class Sim {
       if (!e.b || e.hp <= 0 || (e.type !== 'wall' && e.type !== 'barrier')) continue;
       if (!this.foe(e.owner, u.owner) || !this.players[e.owner].alive) continue;
       const dx = e.x - u.x, dz = e.z - u.z, d2 = dx * dx + dz * dz;
-      if (d2 > 18 * 18) continue;                        // only nearby walls
+      // reach far enough that an army staged at base will still march to the
+      // wall line sealing off the objective (it paths to the wall's open edge)
+      if (d2 > 120 * 120) continue;
       if ((dx * dxT + dz * dzT) / dl < -1) continue;     // not the ones behind us
       if (d2 < bd) { bd = d2; best = e; }
     }
@@ -820,8 +829,8 @@ export class Sim {
     return best;
   }
 
-  private dealDamage(att: Entity, tgt: Entity, base: number) {
-    if (!this.foe(att.owner, tgt.owner)) return; // no friendly fire between allies / self
+  private dealDamage(att: Entity, tgt: Entity, base: number, force = false) {
+    if (!force && !this.foe(att.owner, tgt.owner)) return; // no friendly fire — unless force-fired
     // submarines are immune to everything but dedicated anti-submarine warfare:
     // only a sonar-equipped ship (Destroyer / Sub Hunter) can actually hurt one
     if (!tgt.b && UNITS[tgt.type]?.cloak && UNITS[tgt.type]?.move === 'sea' && !UNITS[att.type]?.sonar) return;
@@ -867,11 +876,11 @@ export class Sim {
     this.dmgLog.push({ vOwner: tgt.owner, victim: tgt.id, by: att.id, x: tgt.x, z: tgt.z, b: tgt.b });
   }
 
-  private fire(att: Entity, tgt: Entity, dmg: number, rof: number): boolean {
+  private fire(att: Entity, tgt: Entity, dmg: number, rof: number, force = false): boolean {
     if (att.cd > 0) return false;
     att.cd = rof;
     att.aimX = tgt.x; att.aimZ = tgt.z;
-    this.dealDamage(att, tgt, dmg);
+    this.dealDamage(att, tgt, dmg, force);
     const ud = UNITS[att.type];
     // weapon class: 0 mg, 1 rocket, 2 cannon, 3 drone zap, 4 missile salvo
     const tgtInf = !tgt.b && UNITS[tgt.type]?.kind === 'inf';
@@ -1231,6 +1240,34 @@ export class Sim {
 
     if (ord.k === 'move') {
       if (this.moveToward(u, ord.x!, ord.z!, def)) { u.orders.shift(); u.path = null; }
+    } else if (ord.k === 'force') {
+      // force-fire at a fixed point (or a tracked entity), hitting friend OR foe
+      let px = ord.x!, pz = ord.z!;
+      const te = ord.tgt != null ? this.ents.get(ord.tgt) : null;
+      if (ord.tgt != null) {
+        if (!te || te.hp <= 0) { u.orders.shift(); u.path = null; return; } // target destroyed → done
+        px = te.x; pz = te.z;
+      }
+      const range = (te?.b && def.siegeRange) ? def.siegeRange : def.range;
+      const d = Math.hypot(px - u.x, pz - u.z);
+      if (d <= range) {
+        u.path = null;
+        if (u.cd <= 0) {
+          // resolve whatever sits at the point (explicit target preferred), any owner
+          let hit: Entity | null = te && te.hp > 0 ? te : null;
+          if (!hit) {
+            let hd = 1.8;
+            for (const o of this.nearbyUnits(px, pz, 2.4)) { if (o.hp <= 0 || o.id === u.id) continue; const dd = Math.hypot(o.x - px, o.z - pz); if (dd < hd) { hd = dd; hit = o; } }
+            for (const o of this.ents.values()) { if (!o.b || o.hp <= 0) continue; const dd = this.distToEnt(px, pz, o); if (dd < hd) { hd = dd; hit = o; } }
+          }
+          if (hit) this.fire(u, hit, def.dmg, def.rof, true); // force = bypass allegiance
+          else { // empty ground: suppressive shot at the spot
+            u.cd = def.rof; u.aimX = px; u.aimZ = pz;
+            const w = u.type === 'sub' ? 7 : UNITS[u.type]?.kind === 'air' ? 3 : 2;
+            this.events.push({ e: 'shot', x: u.x, z: u.z, tx: px, tz: pz, w, f: def.fly ? 1 : undefined });
+          }
+        }
+      } else this.moveToward(u, px, pz, def); // close into weapon range
     } else if (ord.k === 'road') {
       // engineer paves the cell it stands on, then drives to the target
       const ci = Math.floor(u.z) * W + Math.floor(u.x);

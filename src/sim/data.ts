@@ -151,8 +151,8 @@ export const BUILDINGS: Record<string, BuildingDef> = {
   lab:      { name: 'Research Lab',       cost: 2000, hp: 850,  power: -50,  buildTime: 14, size: 2, prereq: 'factory' },
   silo:     { name: 'Missile Silo',       cost: 2500, hp: 900,  power: -60,  buildTime: 16, size: 2, prereq: 'lab' },
   radar:    { name: 'Radar Dome',         cost: 900,  hp: 600,  power: -40,  buildTime: 9,  size: 2, prereq: 'refinery' },
-  wall:     { name: 'Wall',               cost: 60,   hp: 1200, power: 0,    buildTime: 2,  size: 1, prereq: 'barracks' },
-  barrier:  { name: 'Tank Barrier',       cost: 90,   hp: 600,  power: 0,    buildTime: 2,  size: 1, prereq: 'barracks' },
+  wall:     { name: 'Wall',               cost: 100,  hp: 1200, power: 0,    buildTime: 2,  size: 1, prereq: 'barracks' },
+  barrier:  { name: 'Tank Barrier',       cost: 50,   hp: 600,  power: 0,    buildTime: 2,  size: 1, prereq: 'barracks' },
 };
 
 // Researchable technologies (at the Research Lab). Each unlocks tech-gated units.
