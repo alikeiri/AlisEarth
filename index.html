@@ -121,7 +121,9 @@
   .selChip .n { color: var(--accent); font-weight: 700; }
   .chipHp { height: 3px; background: #15202a; border-radius: 2px; margin-top: 4px; overflow: hidden; }
   .chipHpFill { height: 100%; border-radius: 2px; background: var(--good); }
-  #chatLog { position: absolute; left: 12px; bottom: 92px; width: 360px; z-index: 7;
+  /* sit clear of the command quickbar (52px buttons at left:8px) so the buttons
+     never cover chat messages */
+  #chatLog { position: absolute; left: 74px; bottom: 92px; width: min(360px, calc(100vw - 92px)); z-index: 7;
     display: flex; flex-direction: column; gap: 3px; pointer-events: none; }
   .chatMsg { background: rgba(10, 14, 18, 0.78); border-left: 3px solid #3a5260; border-radius: 3px;
     padding: 4px 8px; font-size: 12px; color: #cfd8dc; }
@@ -132,7 +134,7 @@
      history stays readable over the battlefield */
   #chatLog.typing { bottom: 92px; padding: 6px; border-radius: 6px;
     background: rgba(6, 10, 14, 0.55); }
-  #chatBar { position: absolute; left: 12px; bottom: 60px; width: 360px; z-index: 8;
+  #chatBar { position: absolute; left: 74px; bottom: 60px; width: min(360px, calc(100vw - 92px)); z-index: 8;
     display: flex; gap: 6px; }
   #chatTo { background: #10171d; border: 1px solid #3a5260; color: #eceff1; border-radius: 4px;
     font-size: 12px; padding: 6px; }
