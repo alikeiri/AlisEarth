@@ -643,7 +643,12 @@ class GameClient {
         if (msg && this.game.sendChat) {
           const sel = document.getElementById('chatTo') as HTMLSelectElement;
           const raw = sel.value;
-          this.game.sendChat(/^\d+$/.test(raw) ? parseInt(raw, 10) : raw, msg);
+          const to = /^\d+$/.test(raw) ? parseInt(raw, 10) : raw;
+          this.game.sendChat(to, msg);
+          // show our own line immediately — the server only relays to others, so
+          // the sender never depends on a round-trip to see what they typed
+          const myName = this.game.players?.()[this.game.me]?.n || 'You';
+          this.appendChat({ name: myName, to, msg });
         }
         this.closeChat();
       } else if (e.code === 'Escape') this.closeChat();

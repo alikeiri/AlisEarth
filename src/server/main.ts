@@ -524,13 +524,14 @@ wss.on('connection', ws => {
       const msg = String(m.msg || '').slice(0, 120).trim();
       if (!msg) return;
       const payload = { t: 'chat', from: me.slot, name: me.name, to: m.to, msg };
+      // the sender shows their own line locally (instant, latency-proof), so we
+      // only deliver to the OTHER players here — no self-echo (avoids both the
+      // "my message never came back" failure and double-printing)
       if (typeof m.to === 'number') {
         const dest = room.clients.find(c2 => c2.slot === m.to);
-        if (dest) send(dest.ws, payload);
-        send(me.ws, payload); // echo to sender
+        if (dest && dest !== me) send(dest.ws, payload);
       } else {
-        // 'all' and 'allies' both reach every human in the room (AI can't read)
-        broadcast(room, payload);
+        for (const c of room.clients) if (c !== me && c.ws.readyState === WebSocket.OPEN) c.ws.send(JSON.stringify(payload));
       }
     } else if (m.t === 'cmd') {
       if (room && room.started && room.sim && me && m.cmd && m.cmd.p === me.slot) {
