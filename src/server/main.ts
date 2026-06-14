@@ -8,6 +8,7 @@ import { readFileSync, writeFileSync, mkdirSync, unlinkSync } from 'fs';
 import { extname, join, normalize } from 'path';
 import { fileURLToPath } from 'url';
 import { WebSocketServer, WebSocket } from 'ws';
+import { performance } from 'perf_hooks';
 import { Sim } from '../sim/sim';
 import { aiTick } from '../sim/ai';
 import { FACTIONS } from '../sim/data';
@@ -27,6 +28,15 @@ function logErr(where: string, e: any) {
 }
 process.on('uncaughtException', e => logErr('uncaughtException', e));
 process.on('unhandledRejection', e => logErr('unhandledRejection', e));
+
+// performance telemetry: goes to stdout (so `docker logs` / deploy/logs.mjs
+// can read it after a match) and a persistent file on the mounted volume
+const PERF_LOG = join(fileURLToPath(new URL('.', import.meta.url)), 'server-perf.log');
+function perfLog(msg: string) {
+  const line = `[${new Date().toISOString()}] [PERF] ${msg}`;
+  try { console.log(line); } catch { /* noop */ }
+  try { appendFileSync(PERF_LOG, line + '\n'); } catch { /* read-only fs */ }
+}
 
 const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -354,16 +364,48 @@ function startRoom(room: Room) {
     send(c.ws, { t: 'start', seed, size: room.size, you: i, players: specs.map(s => ({ name: s.name, faction: s.faction, isAI: !!s.isAI })) }));
 
   let tickErrs = 0;
+  // --- performance monitoring: time each tick's work and watch for the loop
+  // falling behind, so a future "performance got bad" report can be traced to
+  // a server-side sim/broadcast hotspot vs. a client-side one ---
+  let lastFire = performance.now();
+  let pSum = 0, pMax = 0, pN = 0, slow50 = 0, slow100 = 0, driftMax = 0, lastSlow = 0, lastSummary = 0;
   room.timer = setInterval(() => {
+    const fireT = performance.now();
+    const drift = fireT - lastFire - 100; // how late this tick fired vs its 100ms slot
+    lastFire = fireT;
+    if (drift > driftMax) driftMax = drift;
     try {
       const sim = room.sim!;
       const cmds = room.cmdQ;
       room.cmdQ = [];
       for (const slot of room.aiSlots) cmds.push(...aiTick(sim, slot));
       if (cmds.length && room.rec) room.rec.cmds.push({ k: sim.tickN, c: cmds }); // replay: full cmd stream incl. AI
+      const tSim = performance.now();
       sim.tick(cmds);
+      const simMs = performance.now() - tSim;
       for (const ev of sim.events) if (ev.e === 'aiReport') { room.lastReport = ev.r; if (!ev.r.cheated) saveAiReport(ev.r); }
-      broadcast(room, { t: 'snap', ...sim.snapshot() });
+      const snap = sim.snapshot();
+      const tBc = performance.now();
+      broadcast(room, { t: 'snap', ...snap });
+      const bcMs = performance.now() - tBc;
+      const total = performance.now() - fireT;
+      // roll up the window
+      pSum += total; pN++; if (total > pMax) pMax = total;
+      if (total > 50) slow50++; if (total > 100) slow100++;
+      // a single slow tick (over ~60% of the 100ms budget): log it now, throttled
+      if (total > 60 && fireT - lastSlow > 1000) {
+        lastSlow = fireT;
+        const kb = (JSON.stringify(snap).length / 1024).toFixed(1);
+        perfLog(`room ${room.code} SLOW tick #${sim.tickN} ${total.toFixed(0)}ms (sim ${simMs.toFixed(0)}, bcast ${bcMs.toFixed(0)}, fired ${drift.toFixed(0)}ms late) ents=${sim.ents.size} clients=${room.clients.length} snap=${kb}KB`);
+      }
+      // baseline summary every ~30s so a healthy match still leaves a trail
+      if (sim.tickN - lastSummary >= 300) {
+        lastSummary = sim.tickN;
+        const kb = (JSON.stringify(snap).length / 1024).toFixed(1);
+        const rssMb = (process.memoryUsage().rss / 1048576).toFixed(0); // vs the 300MB container cap
+        perfLog(`room ${room.code} @#${sim.tickN} avg ${(pSum / Math.max(1, pN)).toFixed(1)}ms max ${pMax.toFixed(0)}ms slow>50:${slow50} >100:${slow100} driftMax ${driftMax.toFixed(0)}ms ents=${sim.ents.size} snap=${kb}KB rss=${rssMb}MB clients=${room.clients.length}`);
+        pSum = pN = pMax = slow50 = slow100 = driftMax = 0;
+      }
       if (sim.done) {
         broadcast(room, { t: 'end', winner: sim.winner });
         clearInterval(room.timer!);

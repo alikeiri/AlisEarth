@@ -3,6 +3,9 @@
 export class Net {
   ws: WebSocket | null = null;
   private handlers = new Map<string, ((m: any) => void)[]>();
+  // lightweight receive telemetry for the perf overlay (bytes are UTF-16 string
+  // length — fine as a relative measure of bandwidth and snapshot growth)
+  stats = { bytes: 0, msgs: 0, lastT: 0, lastSize: 0, snapBytes: 0, snaps: 0 };
 
   static url(): string {
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
@@ -18,8 +21,12 @@ export class Net {
       ws.onopen = () => res();
       ws.onerror = () => rej(new Error('Cannot reach the game server'));
       ws.onmessage = ev => {
+        const sz = typeof ev.data === 'string' ? ev.data.length : 0;
+        this.stats.bytes += sz; this.stats.msgs++;
+        this.stats.lastT = performance.now(); this.stats.lastSize = sz;
         let m: any;
         try { m = JSON.parse(ev.data); } catch { return; }
+        if (m.t === 'snap') { this.stats.snapBytes += sz; this.stats.snaps++; }
         for (const fn of this.handlers.get(m.t) || []) fn(m);
       };
       ws.onclose = () => { for (const fn of this.handlers.get('_close') || []) fn({}); };

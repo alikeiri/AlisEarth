@@ -336,6 +336,10 @@ class NetGame implements GameLike {
   issue(cmd: any) { this.net.send({ t: 'cmd', cmd }); }
   status() { return this.end; }
   leave() { this.net.close(); }
+  // perf overlay telemetry: snapshot timing + the socket's receive counters
+  netStats() {
+    return { ...this.net.stats, sinceSnap: this.tCur ? performance.now() - this.tCur : 0, interpSpan: this.tCur - this.tPrev };
+  }
 }
 
 // ---------------- Game client (render + input loop) ----------------
@@ -409,6 +413,11 @@ class GameClient {
   private tipEntId = -1;
   private tipSince = 0;
   private showRanges = true;
+  // perf overlay (toggle F3): smoothed FPS + per-frame work/render/sim timing
+  private perfOn = false;
+  private perfEl: HTMLDivElement | null = null;
+  private fps = 60; private renderMs = 0; private updateMs = 0; private workMs = 0;
+  private perfRx = { bytes: 0, t: 0 };
   private cmdFx: { fx: number; fz: number; tx: number; tz: number; t: number; atk: boolean }[] = [];
   private wpTrail: { x: number; z: number; atk: boolean }[] = []; // shift-queued waypoint chain (visual)
   private lastClick = { t: 0, x: 0, y: 0 };
@@ -501,6 +510,7 @@ class GameClient {
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
       if (e.code === 'Enter' && this.game.isNet) { this.openChat(); e.preventDefault(); return; }
+      if (e.code === 'F3') { this.togglePerf(); e.preventDefault(); return; } // perf overlay
       this.keys.add(e.code);
       // cheat code buffer
       if (/^[a-zA-Z]$/.test(e.key)) {
@@ -778,6 +788,7 @@ class GameClient {
     this.closeChat();
     this.chatHistory = [];
     document.getElementById('chatLog')!.innerHTML = '';
+    if (this.perfEl) { this.perfEl.remove(); this.perfEl = null; }
     this.game.leave();
   }
 
@@ -1547,8 +1558,12 @@ class GameClient {
     this.raf = requestAnimationFrame(this.loop);
     const dt = Math.min(0.1, (t - this.lastT) / 1000 || 0.016);
     this.lastT = t;
+    const _w0 = this.perfOn ? performance.now() : 0;
+    this.fps += (1 / Math.max(dt, 1e-3) - this.fps) * 0.1; // smoothed frame rate
 
+    const _u0 = this.perfOn ? performance.now() : 0;
     this.game.update(dt * 1000);
+    if (this.perfOn) this.updateMs += (performance.now() - _u0 - this.updateMs) * 0.2;
 
     // camera: keys + edge pan + rotation
     const pan = 22 * (this.renderer.dist / 28) * dt;
@@ -1710,7 +1725,9 @@ class GameClient {
       this.renderer.setGhost(false);
     }
 
+    const _r0 = this.perfOn ? performance.now() : 0;
     this.renderer.render(dt);
+    if (this.perfOn) this.renderMs += (performance.now() - _r0 - this.renderMs) * 0.2;
 
     const players = this.game.players();
     this.ui.update(this.game.me, players, views, this.game.tickN, this.selection);
@@ -1862,7 +1879,49 @@ class GameClient {
         : meDead ? (players.find((p: any, i: number) => i !== this.game.me && p.a)?.n || 'The enemy') : 'Nobody';
       this.onEnd(!meDead && st.winner === this.game.me, wn);
     }
+
+    if (this.perfOn) { this.workMs += (performance.now() - _w0 - this.workMs) * 0.2; if (this.frame % 6 === 0) this.updatePerfHud(); }
+    else if (this.perfEl) { this.perfEl.style.display = 'none'; }
   };
+
+  // F3 perf overlay: frame rate + where each frame's time goes, plus (for a
+  // multiplayer match) the snapshot stream — rate, size and arrival latency.
+  // This is what diagnoses "performance got bad": a low FPS with high render
+  // time is the client GPU/CPU; healthy FPS but stale snapshots is the network
+  // or a server tick falling behind.
+  private updatePerfHud() {
+    if (!this.perfEl) {
+      const el = document.createElement('div');
+      el.id = 'perfHud';
+      el.style.cssText = 'position:fixed;top:60px;right:10px;z-index:30;background:rgba(6,10,14,0.82);'
+        + 'border:1px solid #2c3e50;border-radius:6px;padding:7px 10px;font:11px/1.5 ui-monospace,monospace;'
+        + 'color:#bfe3c8;white-space:pre;pointer-events:none;text-shadow:0 1px 2px #000';
+      document.body.appendChild(el);
+      this.perfEl = el;
+    }
+    this.perfEl.style.display = 'block';
+    const ents = this.lastViews.length;
+    const fpsCol = this.fps < 30 ? '#ff6b5e' : this.fps < 50 ? '#ffc940' : '#7be08a';
+    let s = `<span style="color:${fpsCol}">FPS ${this.fps.toFixed(0)}</span>  frame ${this.workMs.toFixed(1)}ms\n`
+      + `render ${this.renderMs.toFixed(1)}ms  sim ${this.updateMs.toFixed(1)}ms\n`
+      + `entities ${ents}  selected ${this.selection.size}`;
+    const ns = (this.game as any).netStats?.();
+    if (ns) {
+      const now = performance.now();
+      if (!this.perfRx.t) this.perfRx = { bytes: ns.bytes, t: now };
+      const win = (now - this.perfRx.t) / 1000;
+      const kbps = win > 0.5 ? ((ns.bytes - this.perfRx.bytes) / 1024 / win) : 0;
+      if (win > 1) this.perfRx = { bytes: ns.bytes, t: now };
+      const snapRate = ns.interpSpan > 0 ? (1000 / ns.interpSpan) : 0;
+      const stale = ns.sinceSnap;
+      const staleCol = stale > 400 ? '#ff6b5e' : stale > 200 ? '#ffc940' : '#7bdcff';
+      s += `\n<span style="color:#7bdcff">net</span>  ${snapRate.toFixed(1)} snap/s  ${(ns.lastSize / 1024).toFixed(1)}KB`
+        + `\n<span style="color:${staleCol}">last snap ${stale.toFixed(0)}ms ago</span>  ${kbps.toFixed(0)}KB/s`;
+    }
+    this.perfEl.innerHTML = s;
+  }
+
+  togglePerf() { this.perfOn = !this.perfOn; if (!this.perfOn && this.perfEl) this.perfEl.style.display = 'none'; }
 }
 
 // ---------------- Menus ----------------

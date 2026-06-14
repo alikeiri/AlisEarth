@@ -36,6 +36,12 @@ conn.on('ready', async () => {
     const restarts = await exec(`docker inspect -f '{{.RestartCount}} restarts; started {{.State.StartedAt}}; oomkilled={{.State.OOMKilled}}; exitcode={{.State.ExitCode}}' fractured-earth 2>&1`);
     console.log('===== container health =====');
     console.log(restarts.out.trim());
+    const mem = await exec(`docker stats --no-stream --format '{{.MemUsage}} ({{.MemPerc}}) cpu {{.CPUPerc}}' fractured-earth 2>&1`);
+    console.log('===== live resource use (cap 300MB) =====');
+    console.log(mem.out.trim());
+    const perf = await exec(`tail -n ${TAIL} /opt/fractured-earth/server-perf.log 2>/dev/null || echo '(no perf log yet)'`);
+    console.log('===== server-perf.log (tail ' + TAIL + ') =====');
+    console.log(perf.out.trim());
   } catch (e) {
     console.error('ERR:', e.message);
   } finally {
