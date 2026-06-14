@@ -251,6 +251,10 @@ class AudioMan {
   private lastAck = 0;
   private static VOICE: Record<string, { move: string[]; attack: string[]; pitch: number; rate: number }> = {
     inf:  { move: ['Moving out!', 'On my way.', 'Yes sir!'], attack: ['Engaging!', 'Open fire!', 'Attacking!'], pitch: 1.15, rate: 1.15 },
+    // Melody: elite operative, Aussie flavour (spoken in an en-AU voice)
+    melody: { move: ['On me way, mate!', 'Too easy!', 'Righto, movin’!', 'No worries!'],
+              attack: ['Let’s give ’em hell!', 'Have a go at this!', 'Lock and load, mate!', 'She’ll be right — fire!'],
+              pitch: 1.25, rate: 1.05 },
     tank: { move: ['Rolling out.', 'Tank moving.', 'Convoy underway.'], attack: ['Target acquired.', 'Firing main gun!', 'Engaging armor!'], pitch: 0.65, rate: 0.95 },
     harv: { move: ['Harvester rolling.', 'Back to work.'], attack: ['Harvester rolling.'], pitch: 0.8, rate: 1.0 },
     eng:  { move: ['Repairs on the way.', 'Engineering, moving.'], attack: ['Engineering, moving.'], pitch: 1.05, rate: 1.1 },
@@ -267,7 +271,8 @@ class AudioMan {
     this.lastAck = now;
     const droneTypes = ['recon', 'strike', 'msldrone', 'helidrone', 'navdrone'];
     if (droneTypes.includes(unitType)) { this.play('ackBeep'); return; }
-    const grp = unitType === 'rifle' || unitType === 'rocket' ? 'inf'
+    const grp = unitType === 'melody' ? 'melody'
+      : unitType === 'rifle' || unitType === 'rocket' ? 'inf'
       : unitType === 'tank' || unitType === 'heavy' || unitType === 'mlrs' ? 'tank'
       : unitType === 'harv' ? 'harv'
       : unitType === 'engineer' ? 'eng'
@@ -284,8 +289,30 @@ class AudioMan {
       u.volume = 0.5;
       u.pitch = vc.pitch;
       u.rate = vc.rate;
+      // Melody speaks with an Australian accent: pin the locale and pick an
+      // en-AU (preferably female) system voice when one is available
+      if (grp === 'melody') {
+        u.lang = 'en-AU';
+        const av = this.ausVoice();
+        if (av) u.voice = av;
+      }
       window.speechSynthesis.speak(u);
     } catch { this.play('confirm'); }
+  }
+
+  // resolve (and cache) the best Australian voice the browser offers — voices
+  // load asynchronously, so leave it unresolved until the list is populated
+  private _ausVoice?: SpeechSynthesisVoice | null;
+  private ausVoice(): SpeechSynthesisVoice | null {
+    if (this._ausVoice !== undefined) return this._ausVoice;
+    try {
+      const vs = window.speechSynthesis.getVoices();
+      if (!vs.length) return null; // not loaded yet — retry on the next ack
+      const au = vs.filter(v => /en[-_]AU/i.test(v.lang) || /australia/i.test(v.name));
+      const fem = au.find(v => /female|woman|karen|catherine|nicole|olivia|aria|zira/i.test(v.name));
+      this._ausVoice = fem || au[0] || null;
+      return this._ausVoice;
+    } catch { return null; }
   }
 
   // ---------- generative music ----------
