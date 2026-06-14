@@ -165,6 +165,8 @@ class LocalGame implements GameLike {
         }
         if (e.sd > 0) v.sd = Math.ceil(e.sd); // self-destruct countdown
         if (e.rzr && e.rzr > 0) { v.rzx = e.rzx; v.rzz = e.rzz; v.rzr = e.rzr; } // engineer repair zone
+        if (e.holdFire) v.hf = 1;                       // weapons-hold
+        if (e.orders[0]?.k === 'patrol') v.pa = 1;      // currently patrolling
       }
       out.push(v);
     }
@@ -505,7 +507,12 @@ class GameClient {
         this.terraMode = ''; this.terraRect = null; this.renderer.setTerraPreview(null);
         this.renderer.setFormationPath(null);
       }
-      if (e.code === 'KeyH') this.issueToUnits({ k: 'stop' });
+      if (e.code === 'KeyS') this.issueToUnits({ k: 'stop' });
+      // H: weapons-hold toggle (don't fire even when attacked)
+      if (e.code === 'KeyH') {
+        const ids = this.myUnitIds();
+        if (ids.length) { const anyFiring = ids.some(id => !this.byId.get(id)?.hf); this.game.issue({ k: 'holdfire', p: this.game.me, ids, on: anyFiring }); audio.play('confirm'); }
+      }
       // +/- game speed (skirmish only — multiplayer is server-paced)
       if (e.code === 'Equal' || e.code === 'NumpadAdd') this.changeSpeed(1);
       if (e.code === 'Minus' || e.code === 'NumpadSubtract') this.changeSpeed(-1);
@@ -644,9 +651,9 @@ class GameClient {
     bar.classList.remove('hidden');
     const tap = (act: string, btn: HTMLElement) => {
       const ids = this.myUnitIds();
-      if (act === 'box') { this.touch.boxToggle = !this.touch.boxToggle; btn.classList.toggle('on', this.touch.boxToggle); }
-      else if (act === 'stop') this.issueToUnits({ k: 'stop' });
+      if (act === 'stop') this.issueToUnits({ k: 'stop' });
       else if (act === 'hold') { if (ids.length) { const anyAgg = ids.some(id => !this.byId.get(id)?.st); this.game.issue({ k: 'stance', p: this.game.me, ids, stance: anyAgg ? 1 : 0 }); } }
+      else if (act === 'holdfire') { if (ids.length) { const anyFiring = ids.some(id => !this.byId.get(id)?.hf); this.game.issue({ k: 'holdfire', p: this.game.me, ids, on: anyFiring }); } }
       else if (act === 'patrol') { if (ids.length || this.selectedProdBuilding()) { this.patrolMode = !this.patrolMode; this.patrolDraw = null; } }
       else if (act === 'fortify') { const f = ids.filter(id => UNITS[this.byId.get(id)?.t]?.fortify); if (f.length) this.game.issue({ k: 'fortify', p: this.game.me, ids: f }); }
       else if (act === 'ranges') { this.showRanges = !this.showRanges; btn.classList.toggle('on', this.showRanges); }
@@ -1444,6 +1451,23 @@ class GameClient {
     this.tipEl.style.display = 'block';
   }
 
+  // reflect each toggleable command's state on its quickbar button: lit when the
+  // whole selection has it set (Hold Position, Hold Fire, Patrol, Fortify), plus
+  // the global Show-Ranges toggle
+  private updateCmdToggles() {
+    const vs = this.myUnitIds().map(id => this.byId.get(id)).filter(Boolean) as any[];
+    const all = (pred: (v: any) => boolean) => vs.length > 0 && vs.every(pred);
+    const set = (act: string, on: boolean) => {
+      const b = document.querySelector(`#touchBar [data-act="${act}"]`);
+      if (b) b.classList.toggle('on', !!on);
+    };
+    set('hold', all(v => v.st === 1));
+    set('holdfire', all(v => v.hf === 1));
+    set('patrol', this.patrolMode || all(v => v.pa === 1));
+    set('fortify', all(v => v.fo === 1));
+    set('ranges', this.showRanges);
+  }
+
   private loop = (t: number) => {
     this.raf = requestAnimationFrame(this.loop);
     const dt = Math.min(0.1, (t - this.lastT) / 1000 || 0.016);
@@ -1642,6 +1666,7 @@ class GameClient {
     }
     // delayed name + HP tooltip for whatever entity sits under the cursor
     this.updateEntTip(t);
+    if (this.frame % 4 === 0) this.updateCmdToggles(); // command-button toggle states
 
     // a selected missile silo turns the whole map into a strike-target reticle
     const siloAiming = this.selection.size === 1 && this.byId.get([...this.selection][0])?.t === 'silo'

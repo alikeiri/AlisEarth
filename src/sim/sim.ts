@@ -50,6 +50,7 @@ export interface Entity {
   stunT?: number; // EMP stun: seconds the unit is frozen (can't move or fire)
   mineStock?: number; // engineer: proximity mines left to lay
   rzx?: number; rzz?: number; rzr?: number; // engineer: assigned auto-repair zone (centre + radius)
+  holdFire?: boolean; // weapons-hold: never fires, even when attacked, until toggled off
 }
 
 export interface PlayerState {
@@ -551,6 +552,12 @@ export class Sim {
       for (const u of units) if (UNITS[u.type]?.repair) { u.rzx = c.cx; u.rzz = c.cz; u.rzr = c.r; }
       return;
     }
+    if (c.k === 'holdfire') {
+      // weapons-hold toggle: when set, the unit never fires (even when attacked)
+      const on = c.on !== undefined ? !!c.on : !units.every(u => u.holdFire);
+      for (const u of units) u.holdFire = on;
+      return;
+    }
     if (c.k === 'patrol' && Array.isArray(c.pts) && c.pts.length) {
       this.assignPatrol(units, c.pts, !!c.q);
       return;
@@ -606,13 +613,20 @@ export class Sim {
       }
       return bi;
     };
-    if (pts.length < 2 || units.length === 1) {
-      units.forEach((u, idx) => {
-        const o = FORM[Math.min(idx, FORM.length - 1)];
-        const my = pts.map(p => ({ x: p.x + o.x * 0.5, z: p.z + o.z * 0.5 }));
-        const ord: Order = { k: 'patrol', pts: my, i: 0, dir: 1, loop };
+    if (pts.length < 2) {
+      // a single chosen point: each unit patrols between ITS OWN current position
+      // and that point, bouncing back and forth until given new orders
+      const tgt = pts[0];
+      units.forEach(u => {
+        const ord: Order = { k: 'patrol', pts: [{ x: u.x, z: u.z }, { x: tgt.x, z: tgt.z }], i: 0, dir: 1, loop: false };
         if (q) u.orders.push(ord); else { u.orders = [ord]; u.path = null; }
       });
+      return;
+    }
+    if (units.length === 1) {
+      const u = units[0];
+      const ord: Order = { k: 'patrol', pts: pts.map(p => ({ x: p.x, z: p.z })), i: 0, dir: 1, loop };
+      if (q) u.orders.push(ord); else { u.orders = [ord]; u.path = null; }
       return;
     }
     // evenly spaced arc-length slots along the route
@@ -917,6 +931,7 @@ export class Sim {
   }
 
   private fire(att: Entity, tgt: Entity, dmg: number, rof: number, force = false): boolean {
+    if (att.holdFire && !force) return false; // weapons-hold: never fires on its own
     if (att.cd > 0) return false;
     att.cd = rof;
     att.aimX = tgt.x; att.aimZ = tgt.z;
@@ -1209,7 +1224,9 @@ export class Sim {
     // ---- stance reactions (run even mid-order) ----
     if (u.reactCd > 0) u.reactCd--;
     const recentlyHit = this.tickN - u.lastHitT < 30;
-    if (def.dmg > 0) {
+    if (def.dmg > 0 && u.holdFire) {
+      // weapons-hold: don't auto-engage, return fire, or chase — just hold
+    } else if (def.dmg > 0) {
       const cur = u.orders[0];
       const busy = cur && (cur.k === 'attack' || cur.k === 'patrol');
       if (u.stance === 1) {
