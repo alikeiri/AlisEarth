@@ -286,6 +286,7 @@ class NetGame implements GameLike {
   private end: { over: boolean; winner: number } = { over: false, winner: -2 };
 
   isNet = true;
+  endData: any = null; // final {players, stats} delivered with the end message
   private chatQ: any[] = [];
   private roster: { name: string; isAI: boolean }[] = [];
 
@@ -294,7 +295,12 @@ class NetGame implements GameLike {
     this.me = me;
     this.roster = roster || [];
     net.on('snap', m => this.onSnap(m));
-    net.on('end', m => { this.end = { over: true, winner: m.winner }; });
+    net.on('end', m => {
+      this.end = { over: true, winner: m.winner };
+      // the server bundles the final stats with the end signal — keep them so the
+      // post-game report can render (a NetGame has no local sim of its own)
+      if (m.stats && m.players) this.endData = { players: m.players, stats: m.stats };
+    });
     net.on('chat', m => { if (this.chatQ.length < 50) this.chatQ.push(m); });
   }
 
@@ -1560,6 +1566,8 @@ class GameClient {
     this.lastT = t;
     const _w0 = this.perfOn ? performance.now() : 0;
     this.fps += (1 / Math.max(dt, 1e-3) - this.fps) * 0.1; // smoothed frame rate
+    // top-bar FPS + (multiplayer) server ping readout, refreshed twice a second
+    if (this.frame % 30 === 0) this.updateTopStat();
 
     const _u0 = this.perfOn ? performance.now() : 0;
     this.game.update(dt * 1000);
@@ -1922,6 +1930,22 @@ class GameClient {
   }
 
   togglePerf() { this.perfOn = !this.perfOn; if (!this.perfOn && this.perfEl) this.perfEl.style.display = 'none'; }
+
+  // compact top-bar readout: frame rate always, plus server ping in multiplayer
+  private updateTopStat() {
+    const el = document.getElementById('perfStat');
+    if (!el) return;
+    const fps = Math.round(this.fps);
+    const fpsCol = fps < 30 ? '#ff6b5e' : fps < 50 ? '#ffc940' : '#7be08a';
+    let html = `<span style="color:${fpsCol}">${fps} fps</span>`;
+    const ns = (this.game as any).netStats?.();
+    if (ns) {
+      const ping = Math.round(ns.ping || 0);
+      const pCol = ping > 200 ? '#ff6b5e' : ping > 120 ? '#ffc940' : '#7bdcff';
+      html += `  <span style="color:${pCol}">${ping} ms</span>`;
+    }
+    el.innerHTML = html;
+  }
 }
 
 // ---------------- Menus ----------------
@@ -2262,7 +2286,9 @@ function updateSpeedInd(speed: number) {
 // ---- post-game battle report: production/kill/loss table + time-series chart ----
 function renderEndStats(game: GameLike) {
   const box = document.getElementById('endStats')!;
-  const sim: any = (game as any).sim;
+  // skirmish/replay carry a local sim; a multiplayer NetGame gets its final
+  // stats bundle from the server instead
+  const sim: any = (game as any).sim || (game as any).endData;
   if (!sim || !sim.stats || !sim.stats.series || !sim.players) { box.classList.add('hidden'); return; }
   const players: any[] = sim.players;
   const s = sim.stats;
@@ -2541,8 +2567,9 @@ function renderMpLobby(m: any) {
   const users = m.users || [], games = m.games || [];
   $('mpUserCount').textContent = String(users.length);
   $('mpUsers').innerHTML = users.length
-    ? users.map((u: any) => `<div>${FACTIONS[u.faction]?.flag || '🏳'} ${escapeHtml(u.name)}` +
-      `${u.inGame ? ' <span style="color:#5f7384">· in game</span>' : ''}</div>`).join('')
+    ? users.map((u: any) => `<div style="display:flex;align-items:center;gap:6px">` +
+      `<span style="flex:1;min-width:0">${FACTIONS[u.faction]?.flag || '🏳'} ${escapeHtml(u.name)}` +
+      `${u.inGame ? ' <span style="color:#5f7384">· in game</span>' : ''}</span>${pingBadge(u.ping)}</div>`).join('')
     : '<div style="color:#5f7384">No one else online yet</div>';
   const sizes: Record<number, string> = { 112: 'Medium', 136: 'Large', 160: 'Huge', 72: 'Small', 96: 'Medium', 128: 'Large' };
   const diffs = ['Easy', 'Normal', 'Hard', 'Brutal'];
@@ -2558,6 +2585,12 @@ function renderMpLobby(m: any) {
     }));
 }
 function escapeHtml(s: string) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+// small coloured ping pill (green/amber/red) — blank until a round-trip lands
+function pingBadge(ping: number | null | undefined): string {
+  if (ping == null) return '';
+  const col = ping > 200 ? '#ff6b5e' : ping > 120 ? '#ffc940' : '#7be08a';
+  return `<span style="color:${col};font-size:11px;font-variant-numeric:tabular-nums">${ping}ms</span>`;
+}
 
 async function connectNet(): Promise<Net> {
   const n = new Net();
@@ -2571,8 +2604,9 @@ async function connectNet(): Promise<Net> {
       const row = document.createElement('div');
       row.className = 'lpRow';
       row.innerHTML = `<div class="lpDot" style="background:${colors[i]}"></div>
-        <span>${FACTIONS[p.faction]?.flag || ''} ${p.name}</span>
-        <span style="color:#78909c;font-size:12px">${i === 0 ? 'HOST' : ''}</span>`;
+        <span style="flex:1">${FACTIONS[p.faction]?.flag || ''} ${escapeHtml(p.name)}</span>
+        ${pingBadge(p.ping)}
+        <span style="color:#78909c;font-size:12px;margin-left:6px">${i === 0 ? 'HOST' : ''}</span>`;
       list.appendChild(row);
     });
     $('btnStart').classList.toggle('hidden', m.you !== 0);

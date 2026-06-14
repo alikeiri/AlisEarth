@@ -11,7 +11,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { performance } from 'perf_hooks';
 import { Sim } from '../sim/sim';
 import { aiTick } from '../sim/ai';
-import { FACTIONS } from '../sim/data';
+import { FACTIONS, SIM_VERSION } from '../sim/data';
 import { setMapSize } from '../sim/map';
 
 const PORT = Number(process.env.PORT) || 8080;
@@ -162,7 +162,7 @@ const http = createServer(async (req, res) => {
   }
 });
 
-interface Client { ws: WebSocket; name: string; faction: string; slot: number; lastChat?: number; room?: Room | null }
+interface Client { ws: WebSocket; name: string; faction: string; slot: number; lastChat?: number; room?: Room | null; ping?: number }
 interface Room {
   code: string; clients: Client[]; started: boolean;
   sim: Sim | null; timer: ReturnType<typeof setInterval> | null; cmdQ: any[];
@@ -184,7 +184,7 @@ function openGames() {
 function lobbyState() {
   return {
     t: 'lobby',
-    users: [...online].map(c => ({ name: c.name, faction: c.faction, inGame: !!c.room })),
+    users: [...online].map(c => ({ name: c.name, faction: c.faction, inGame: !!c.room, ping: c.ping ?? null })),
     games: openGames(),
   };
 }
@@ -275,7 +275,7 @@ function saveReplay(room: Room) {
       report: room.lastReport || null,
     };
     writeFileSync(join(REPLAY_DIR, id + '.json'),
-      JSON.stringify({ meta, seed: room.rec.seed, size: room.rec.size, cmds: room.rec.cmds }));
+      JSON.stringify({ meta, ver: SIM_VERSION, seed: room.rec.seed, size: room.rec.size, cmds: room.rec.cmds }));
     let idx: any[] = [];
     try { idx = JSON.parse(readFileSync(REPLAY_INDEX, 'utf8')); } catch { /* first replay */ }
     idx.unshift(meta);
@@ -314,7 +314,7 @@ function broadcast(room: Room, obj: any) {
   for (const c of room.clients) if (c.ws.readyState === WebSocket.OPEN) c.ws.send(s);
 }
 function roomState(room: Room) {
-  return { t: 'room', code: room.code, players: room.clients.map(c => ({ name: c.name, faction: c.faction })) };
+  return { t: 'room', code: room.code, players: room.clients.map(c => ({ name: c.name, faction: c.faction, ping: c.ping ?? null })) };
 }
 function sendRoom(room: Room) {
   room.clients.forEach((c, i) => send(c.ws, { ...roomState(room), you: i }));
@@ -407,7 +407,12 @@ function startRoom(room: Room) {
         pSum = pN = pMax = slow50 = slow100 = driftMax = 0;
       }
       if (sim.done) {
-        broadcast(room, { t: 'end', winner: sim.winner });
+        // send the final battle report with the end signal so each client can
+        // render the post-game stats (NetGame has no local sim to read them from)
+        broadcast(room, {
+          t: 'end', winner: sim.winner, stats: sim.stats,
+          players: sim.players.map(p => ({ name: p.name, fac: { flag: p.fac.flag } })),
+        });
         clearInterval(room.timer!);
         room.timer = null;
         if (!sim.cheated) saveReplay(room);
@@ -434,6 +439,13 @@ wss.on('connection', ws => {
     let m: any;
     try { m = JSON.parse(String(raw)); } catch { return; }
 
+    if (m.t === 'ping') {
+      // echo for the client's RTT measurement; remember its reported ping so we
+      // can show it to others in the lobby / room
+      send(ws, { t: 'pong', ts: m.ts });
+      if (me && typeof m.rtt === 'number') me.ping = Math.max(0, Math.round(m.rtt));
+      return;
+    }
     if (m.t === 'hello') {
       // enter the global lobby: register presence and send the current snapshot
       if (!me) me = { ws, name: String(m.name || 'Player').slice(0, 14), faction: String(m.faction || 'usa'), slot: -1, room: null };
@@ -528,6 +540,13 @@ wss.on('connection', ws => {
     broadcastLobby();                           // open-games list may have changed
   });
 });
+
+// refresh presence views every few seconds so live ping values keep updating in
+// the global lobby and in any waiting room (cheap — only idle/lobby clients)
+setInterval(() => {
+  if (online.size) broadcastLobby();
+  for (const r of rooms.values()) if (!r.started && r.clients.length) sendRoom(r);
+}, 3000);
 
 http.listen(PORT, () => {
   console.log(`ALI'S EARTH server: http://localhost:${PORT} (HTTP + WebSocket)`);
