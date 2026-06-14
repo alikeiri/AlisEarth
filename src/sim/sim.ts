@@ -58,6 +58,7 @@ export interface PlayerState {
   name: string; faction: string; fac: Faction; isAI: boolean; aiLvl: number;
   team: number;                            // allies share a team; FFA = unique per player
   credits: number; alive: boolean;
+  left?: boolean;                          // departed via "Just Exit" — not a defeat
   powerMade: number; powerUsed: number; pf: number;
   bonusCost: number; bonusIncome: number; // brutal-AI handicaps
   godmode?: boolean;                       // cheat: instant builds (taints the game)
@@ -813,6 +814,17 @@ export class Sim {
   // and a player is always allied with itself)
   foe(a: number, b: number): boolean {
     return a !== b && this.players[a]?.team !== this.players[b]?.team;
+  }
+
+  // hand everything a departing player owns to a teammate (used when a human
+  // "Just Exits" and an allied human is still in the match) — the leaver is
+  // marked gone but their forces fight on under the new owner
+  transferOwnership(from: number, to: number): void {
+    for (const e of this.ents.values()) if (e.owner === from) e.owner = to;
+    if (this.players[from]) {
+      this.players[from].alive = false;
+      this.players[from].left = true;            // departed, not defeated
+    }
   }
 
   // can this attacker actually deal damage to this target? encodes the submarine

@@ -408,6 +408,7 @@ class GameClient {
   private lastT = 0;
   private frame = 0;
   private over = false;
+  private spectating = false; // surrendered but the match continues — watch on
   private overlayCtx: CanvasRenderingContext2D;
   private cleanups: (() => void)[] = [];
 
@@ -1463,6 +1464,17 @@ class GameClient {
     this.tipEl.style.display = 'block';
   }
 
+  // surrender: scuttle our forces (a defeat). If other players are still
+  // fighting, keep watching as a spectator with the fog lifted; the end screen
+  // and stats only appear once the match actually finishes.
+  surrender() {
+    if (this.over || this.spectating) return;
+    this.game.issue({ k: 'surrender', p: this.game.me });
+    audio.play('cancel');
+    this.spectating = true;
+    if (this.fog) { this.fog.fill(2); this.renderer.setFog(this.fog); this.renderer.setTreeFog(this.fog); }
+  }
+
   // reflect each toggleable command's state on its quickbar button: lit when the
   // whole selection has it set (Hold Position, Hold Fire, Patrol, Fortify), plus
   // the global Show-Ranges toggle
@@ -1582,7 +1594,7 @@ class GameClient {
     // fog of war for human players (spectator/replay modes see everything;
     // disabled when the player unchecked it on the start screen)
     let views = allViews;
-    if (!(this.game as any).isSim && fogEnabled && !this.over) {
+    if (!(this.game as any).isSim && fogEnabled && !this.over && !this.spectating) {
       if (!this.fog) this.fog = new Uint8Array(W * H);
       if (this.frame % 3 === 0) this.updateFog(allViews);
       const f = this.fog;
@@ -1758,7 +1770,9 @@ class GameClient {
     // wiped out first, call defeat immediately instead of forcing them to
     // spectate the survivors fight it out
     const meDead = !(this.game as any).isSim && players[this.game.me] && players[this.game.me].a === false;
-    if ((st.over || meDead) && !this.over) {
+    // a surrendered spectator stays in until the match itself ends (st.over);
+    // only an unexpected wipe-out (meDead while NOT spectating) ends early
+    if ((st.over || (meDead && !this.spectating)) && !this.over) {
       this.over = true;
       // the battle is decided — lift the fog so the whole map is revealed
       if (this.fog) { this.fog.fill(2); this.renderer.setFog(this.fog); this.renderer.setTreeFog(this.fog); }
@@ -2435,13 +2449,23 @@ function initMenus() {
   $('btnStart').addEventListener('click', () => net?.send({ t: 'start' }));
   $('btnLeave').addEventListener('click', () => { net?.close(); net = null; show('menu'); });
   $('btnAgain').addEventListener('click', () => location.reload());
-  $('exitBtn').addEventListener('click', () => {
-    if (!client) return;
-    if (!confirm('Exit to main menu? The current game will end.')) return;
-    simQueue = null; // cancel any queued simulation runs
-    client.destroy(); client = null;
-    if (net) { net.close(); net = null; }
+  // Exit → choice popup: Surrender (a defeat), Just Exit (no result), or Cancel
+  const exitMenu = $('exitMenu');
+  const closeExitMenu = () => exitMenu.classList.add('hidden');
+  $('exitBtn').addEventListener('click', () => { if (client) exitMenu.classList.remove('hidden'); });
+  $('exMenuCancel').addEventListener('click', closeExitMenu);
+  $('exMenuJustExit').addEventListener('click', () => {
+    closeExitMenu();
+    // leave with no result: a human teammate inherits the forces (server side),
+    // and the game ends if no human remains. No stats, not counted as a defeat.
+    if (net) { net.send({ t: 'leave' }); net.close(); net = null; }
+    simQueue = null;
+    if (client) { client.destroy(); client = null; }
     show('menu');
+  });
+  $('exMenuSurrender').addEventListener('click', () => {
+    closeExitMenu();
+    if (client) client.surrender();
   });
 }
 

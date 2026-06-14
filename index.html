@@ -298,6 +298,15 @@
     </div>
   </div>
 
+  <div id="exitMenu" class="hidden" style="position:fixed;inset:0;z-index:50;display:flex;align-items:center;justify-content:center;background:rgba(4,8,12,0.66)">
+    <div style="background:#121a22;border:1px solid #2c3e50;border-radius:10px;padding:22px 24px;width:300px;text-align:center;box-shadow:0 8px 40px rgba(0,0,0,0.6)">
+      <div style="font-size:17px;font-weight:700;color:#dfe9f0;margin-bottom:4px">Leave the battle?</div>
+      <div style="font-size:12px;color:#8aa0b2;margin-bottom:16px;line-height:1.5">Surrender counts as a defeat and scuttles your forces.<br>Just Exit leaves with no result recorded.</div>
+      <button class="mbtn" id="exMenuSurrender" style="width:100%;margin-bottom:8px;background:#3a1d1d;border-color:#7d3c3c;color:#ff9a8a">⚑ Surrender</button>
+      <button class="mbtn" id="exMenuJustExit" style="width:100%;margin-bottom:8px">↩ Just Exit</button>
+      <button class="mbtn primary" id="exMenuCancel" style="width:100%">Cancel</button>
+    </div>
+  </div>
   <div id="endScreen" class="screen hidden">
     <div class="title" id="endTitle">VICTORY</div>
     <div class="subtitle" id="endSub"></div>

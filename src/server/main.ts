@@ -286,6 +286,28 @@ function sendRoom(room: Room) {
   room.clients.forEach((c, i) => send(c.ws, { ...roomState(room), you: i }));
 }
 
+// a human left an in-progress match (Just Exit button, or simply disconnected).
+// it's NOT a defeat: if an allied human is still connected we hand them the
+// leaver's whole army; if no human remains at all the match is over; otherwise
+// the leaver simply vanishes and their forces disband. `me` is already spliced
+// out of room.clients by the caller, so room.clients == the players still here.
+function departMidGame(room: Room, leaverSlot: number) {
+  const sim = room.sim;
+  if (!room.started || !sim || sim.done) return;
+  // no humans left watching at all -> end the match (don't run AI-vs-AI forever)
+  if (!room.clients.length) return; // ws.close path handles room teardown
+  const team = sim.players[leaverSlot]?.team;
+  const ally = room.clients.find(c =>
+    c.slot !== leaverSlot && sim.players[c.slot]?.alive && sim.players[c.slot]?.team === team);
+  if (ally) {
+    sim.transferOwnership(leaverSlot, ally.slot);
+  } else {
+    // no allied human to inherit: the leaver is simply gone, disband their forces
+    sim.transferOwnership(leaverSlot, leaverSlot); // marks left + alive=false
+    for (const e of sim.ents.values()) if (e.owner === leaverSlot) e.hp = 0;
+  }
+}
+
 function startRoom(room: Room) {
   if (room.started || !room.clients.length) return;
   room.started = true;
@@ -392,16 +414,24 @@ wss.on('connection', ws => {
 
   ws.on('close', () => {
     if (!room || !me) return;
+    const leaverSlot = me.slot;
     const idx = room.clients.indexOf(me);
     if (idx >= 0) room.clients.splice(idx, 1);
     if (!room.clients.length) {
       if (room.timer) clearInterval(room.timer);
-      // abandoned mid-game: still keep the replay if it ran long enough
-      if (room.started && room.sim && room.sim.tickN > 600 && !room.sim.cheated) saveReplay(room);
+      // last human gone mid-game: end the match (no AI-vs-AI grind), keep replay
+      if (room.started && room.sim && !room.sim.done) {
+        if (room.sim.tickN > 600 && !room.sim.cheated) saveReplay(room);
+      }
       rooms.delete(room.code);
     } else if (!room.started) {
+      // still in the lobby: compact the slots so the remaining players reindex
       room.clients.forEach((c, i) => { c.slot = i; });
       sendRoom(room);
+    } else {
+      // a human left an in-progress match: transfer their army to an allied
+      // human if one is still here, otherwise disband it — never a team defeat
+      departMidGame(room, leaverSlot);
     }
   });
 });
