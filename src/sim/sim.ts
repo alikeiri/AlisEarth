@@ -1001,6 +1001,12 @@ export class Sim {
             } else {
               u.orders = [{ k: 'move', x: b.rallyX, z: b.rallyZ }];
             }
+          } else if (!UNITS[it.type].cargo && !UNITS[it.type].fly && u.orders.length === 0) {
+            // no rally/patrol set: drive a couple of cells clear of the building
+            // so the new unit is visible instead of hidden in the doorway
+            const sx = c.x + 0.5, sz = c.z + 0.5;
+            const dx = sx - b.x, dz = sz - b.z, dl = Math.hypot(dx, dz) || 1;
+            u.orders = [{ k: 'move', x: sx + (dx / dl) * 2.5, z: sz + (dz / dl) * 2.5 }];
           }
           b.queue.shift();
           this.events.push({ e: 'ready', p: b.owner });

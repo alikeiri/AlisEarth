@@ -807,6 +807,7 @@ export class Renderer {
   private vTmp = new THREE.Vector3();
   private rotorMesh!: THREE.InstancedMesh;
   private sandbagMesh!: THREE.InstancedMesh;
+  private radarDishMesh!: THREE.InstancedMesh;
   // baked skeletal poses for infantry: [aim, runFrame1..N] — instances are
   // written into the pose set matching their state each frame
   private posedParts: Record<string, { mesh: THREE.InstancedMesh; mode: number }[][]> = {};
@@ -1093,6 +1094,23 @@ export class Renderer {
     );
     this.sandbagMesh.frustumCulled = false; this.sandbagMesh.castShadow = true; this.sandbagMesh.count = 0;
     this.scene.add(this.sandbagMesh);
+
+    // small deployable radar dish shown over a fortified Patriot: mast + tilted dish
+    const dishParts: THREE.BufferGeometry[] = [];
+    const mast = new THREE.CylinderGeometry(0.045, 0.06, 0.6, 6).toNonIndexed(); mast.translate(0, 0.3, 0);
+    dishParts.push(mast);
+    const dish = new THREE.SphereGeometry(0.26, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2.6).toNonIndexed();
+    dish.scale(1, 0.45, 1); dish.rotateX(-Math.PI / 3); dish.translate(0, 0.66, 0.05);
+    dishParts.push(dish);
+    const horn = new THREE.CylinderGeometry(0.02, 0.02, 0.16, 5).toNonIndexed(); horn.rotateX(-Math.PI / 3); horn.translate(0, 0.7, 0.18);
+    dishParts.push(horn);
+    this.radarDishMesh = new THREE.InstancedMesh(
+      mergeGeometries(dishParts)!,
+      new THREE.MeshStandardMaterial({ color: 0xc4ccd2, roughness: 0.55, metalness: 0.35 }),
+      MAX_INST
+    );
+    this.radarDishMesh.frustumCulled = false; this.radarDishMesh.castShadow = true; this.radarDishMesh.count = 0;
+    this.scene.add(this.radarDishMesh);
 
     this.resize();
   }
@@ -1736,7 +1754,7 @@ export class Renderer {
     for (const t in this.unitParts) counts[t] = 0;
     for (const t in this.posedParts) this.poseCounts[t] = this.posedParts[t].map(() => 0);
     const seen = new Set<number>();
-    let selN = 0, rotN = 0, bagN = 0;
+    let selN = 0, rotN = 0, bagN = 0, dishN = 0;
     let rallyV: any = null;
 
     for (const v of views) {
@@ -1900,6 +1918,15 @@ export class Renderer {
         this.dummy.updateMatrix();
         this.sandbagMesh.setMatrixAt(bagN++, this.dummy.matrix);
       }
+      // deployed radar dish on a fortified Patriot
+      if (v.t === 'patriot' && (v.fo || v.ft) && dishN < MAX_INST) {
+        this.dummy.position.set(v.x, gy + 0.5, v.z);
+        const s = v.ft ? 0.6 : 1; // rising into place while deploying
+        this.dummy.rotation.set(0, this.time * 0.9 + v.i, 0); // slow radar sweep
+        this.dummy.scale.set(s, s, s);
+        this.dummy.updateMatrix();
+        this.radarDishMesh.setMatrixAt(dishN++, this.dummy.matrix);
+      }
       seen.add(v.i);
     }
 
@@ -1927,6 +1954,8 @@ export class Renderer {
     this.sandbagMesh.count = bagN;
     this.sandbagMesh.instanceMatrix.needsUpdate = true;
     this.rotorMesh.instanceMatrix.needsUpdate = true;
+    this.radarDishMesh.count = dishN;
+    this.radarDishMesh.instanceMatrix.needsUpdate = true;
 
     // rally marker for the selected production building
     if (rallyV) {

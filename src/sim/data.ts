@@ -63,7 +63,7 @@ export const UNITS: Record<string, UnitDef> = {
   aatank: { name: 'AA Vehicle',   cost: 950,  hp: 280, speed: 3.0, range: 8.0, dmg: 42, rof: 1.6, builtAt: 'factory',  buildTime: 11, kind: 'veh' },
   flak:   { name: 'Flak Gun',     cost: 650,  hp: 240, speed: 2.6, range: 6.5, dmg: 16, rof: 0.45, builtAt: 'factory', buildTime: 9,  kind: 'veh' },
   engineer: { name: 'Engineer',   cost: 600,  hp: 200, speed: 2.2, range: 0,   dmg: 0,  rof: 1,   builtAt: 'factory',  buildTime: 10, kind: 'veh', repair: true, road: true, lays: 'mine', mines: 4 },
-  patriot:  { name: 'Patriot SAM', cost: 1100, hp: 200, speed: 2.4, range: 0,  dmg: 0,  rof: 1,   builtAt: 'factory',  buildTime: 12, kind: 'veh', intercept: { range: 11, cd: 4 } },
+  patriot:  { name: 'Patriot SAM', cost: 1100, hp: 200, speed: 2.4, range: 0,  dmg: 0,  rof: 1,   builtAt: 'factory',  buildTime: 12, kind: 'veh', intercept: { range: 11, cd: 4 }, fortify: true },
   mine:     { name: 'Land Mine',  cost: 0,    hp: 1,   speed: 0,   range: 0,   dmg: 150, rof: 1,  builtAt: '',         buildTime: 0,  kind: 'veh', internal: true, mine: true, trigger: 1.5, blastR: 2.4 },
   // Construction Vehicle: slow, defenceless; press F to deploy it into a forward
   // construction yard (enables building structures around the new spot)

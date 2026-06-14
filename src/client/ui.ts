@@ -59,7 +59,7 @@ const TIP_NOTES: Record<string, string> = {
   cannon: 'Heavy Cannon: long-range, hard-hitting anti-armor emplacement. Outranges most attackers; cannot hit aircraft.',
   tesla: 'Tesla Coil: high-damage bolt that briefly EMP-freezes the unit it hits. Power-hungry; needs a Research Lab.',
   irondome: 'Iron Dome: shoots down incoming silo missiles aimed inside its shield. One kill per reload — a heavy salvo can still overwhelm a single dome. Needs a Radar Dome.',
-  patriot: 'Patriot SAM: mobile missile interceptor. Park it over what you want protected — it downs incoming silo missiles. No offensive weapon.',
+  patriot: 'Patriot SAM: mobile missile interceptor. Park it over what you want protected — it downs incoming silo missiles. No offensive weapon. Fortify (F) to dig in and deploy its own radar: wide vision + early-warning detection of incoming enemies.',
   engineer: 'Repairs units, builds roads, and lays proximity mines (press F to lay one from its stock of 4).',
   destroyer: 'Armored gun ship: duels other warships and bombards the coast. Its sonar also detects and depth-charges submarines.',
   sub: 'Submarine: cloaked until a sonar ship (Destroyer / Sub Hunter) pings it or you get very close. Devastating ambush torpedoes, but a thin hull.',
@@ -766,6 +766,22 @@ export class UI {
         ctx.fillRect(p.x - w / 2 - 1, p.y + 2, w + 2, 4);
         ctx.fillStyle = '#3da5ff';
         ctx.fillRect(p.x - w / 2, p.y + 3, w * Math.min(1, v.pr), 2);
+      }
+    }
+    // "packing up" indicator: a pulsing amber up-chevron above any unit that is
+    // un-fortifying (pulling up stakes), so it reads clearly as leaving its dig-in
+    {
+      const pulse = (0.5 + 0.5 * Math.abs(Math.sin(performance.now() / 280))).toFixed(2);
+      for (const v of views) {
+        if (v.ft !== 2) continue;
+        const p = project(v.x, v.z, 1.7);
+        if (!p.ok) continue;
+        ctx.strokeStyle = `rgba(255,190,70,${pulse})`;
+        ctx.lineWidth = 2.2;
+        ctx.beginPath();
+        ctx.moveTo(p.x - 6, p.y + 1); ctx.lineTo(p.x, p.y - 5); ctx.lineTo(p.x + 6, p.y + 1);
+        ctx.moveTo(p.x - 6, p.y + 6); ctx.lineTo(p.x, p.y); ctx.lineTo(p.x + 6, p.y + 6);
+        ctx.stroke();
       }
     }
     if (dragRect) {

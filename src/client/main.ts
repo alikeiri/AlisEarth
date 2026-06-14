@@ -157,7 +157,7 @@ class LocalGame implements GameLike {
       } else {
         if (e.stance) v.st = e.stance;
         if (e.fortified) v.fo = 1;
-        if (e.fortT > 0) v.ft = 1; // deploying / packing
+        if (e.fortT > 0) v.ft = e.fortGoal ? 1 : 2; // 1 = digging in, 2 = packing up
         if (UNITS[e.t]?.cloak || UNITS[e.type]?.cloak) v.ck = 1;
         if (e.cd > 0 && UNITS[e.type]?.dmg > 0) {
           v.fr = 1; // firing — drives infantry aim pose
@@ -1209,7 +1209,8 @@ class GameClient {
     for (const v of allViews) {
       if (!this.allies.has(v.o)) continue; // my team (incl. allies) grants vision
       const def = (UNITS as any)[v.t] || (BUILDINGS as any)[v.t];
-      const sight = v.b ? 7 : Math.max(5, (def?.range || 4) + 3);
+      let sight = v.b ? 7 : Math.max(5, (def?.range || 4) + 3);
+      if (!v.b && v.t === 'patriot' && v.fo) sight = 16; // fortified Patriot deploys a radar — wide eyes
       const cx = Math.floor(v.x), cz = Math.floor(v.z), r = Math.ceil(sight);
       for (let dz = -r; dz <= r; dz++) for (let dx = -r; dx <= r; dx++) {
         if (dx * dx + dz * dz > sight * sight) continue;
@@ -1225,10 +1226,15 @@ class GameClient {
     const me = this.game.me;
     const players = this.game.players?.() || [];
     const myBuildings = allViews.filter(v => v.b && v.o === me);
-    const hasRadar = myBuildings.some(v => v.t === 'radar' && (v.pr ?? 1) >= 1);
     const powered = !players[me] || (players[me].pm ?? 1) >= (players[me].pu ?? 0); // radar needs power
+    // radar sources: powered Radar Domes PLUS any fortified Patriot (its own
+    // deployed radar works off-grid, no power needed)
+    const sources = [
+      ...(powered ? myBuildings.filter(v => v.t === 'radar' && (v.pr ?? 1) >= 1) : []),
+      ...allViews.filter(v => !v.b && v.o === me && v.t === 'patriot' && v.fo),
+    ];
     const warn = document.getElementById('radarWarn');
-    if (!hasRadar || !powered || !myBuildings.length) {
+    if (!sources.length) {
       this.radarBlips = [];
       if (warn && !warn.classList.contains('hidden')) warn.classList.add('hidden');
       return;
@@ -1239,14 +1245,14 @@ class GameClient {
       if (this.allies.has(v.o) || v.b) continue; // allied units aren't threats
       if (!(UNITS[v.t]?.dmg > 0) && v.t !== 'fueltruck') continue; // only attackers
       let near = false;
-      for (const b of myBuildings) if ((b.x - v.x) ** 2 + (b.z - v.z) ** 2 < RANGE2) { near = true; break; }
+      for (const b of sources) if ((b.x - v.x) ** 2 + (b.z - v.z) ** 2 < RANGE2) { near = true; break; }
       if (near) threats.push(v);
     }
     this.radarBlips = threats;
     if (!threats.length) { if (warn && !warn.classList.contains('hidden')) warn.classList.add('hidden'); return; }
-    // base centroid → bearing to the threat cluster, for a compass hint
-    let bx = 0, bz = 0; for (const b of myBuildings) { bx += b.x; bz += b.z; }
-    bx /= myBuildings.length; bz /= myBuildings.length;
+    // source centroid → bearing to the threat cluster, for a compass hint
+    let bx = 0, bz = 0; for (const b of sources) { bx += b.x; bz += b.z; }
+    bx /= sources.length; bz /= sources.length;
     let tx = 0, tz = 0; for (const t of threats) { tx += t.x; tz += t.z; }
     tx /= threats.length; tz /= threats.length;
     // camera yaw 0: +Z is up-screen (N), +X is left-screen (W)
@@ -1836,6 +1842,9 @@ function renderAiIntel() {
 // but never clobber a name the player typed themselves
 function rollCallsign() {
   const inp = $('nameInput') as HTMLInputElement;
+  // a name the player saved on a previous visit wins over a random callsign
+  let saved = ''; try { saved = (localStorage.getItem('fe_name') || '').trim(); } catch { /* no storage */ }
+  if (saved) { inp.value = saved; return; }
   const cur = (inp.value || '').trim();
   if (cur && !FUNNY_NAMES.includes(cur)) return;
   let pick = FUNNY_NAMES[Math.floor(Math.random() * FUNNY_NAMES.length)];
@@ -2125,6 +2134,8 @@ const FUNNY_NAMES = [
 ];
 function playerName(): string {
   const typed = (($('nameInput') as HTMLInputElement).value || '').trim();
+  // a name the player chose (not a random funny one) is remembered for next time
+  if (typed && !FUNNY_NAMES.includes(typed)) { try { localStorage.setItem('fe_name', typed.slice(0, 18)); } catch { /* no storage */ } }
   return (typed || FUNNY_NAMES[Math.floor(Math.random() * FUNNY_NAMES.length)]).slice(0, 18);
 }
 
@@ -2417,6 +2428,14 @@ if (!glOk) {
   renderAiIntel();
   syncIntelFromServer();
   showBuildInfo();
+  // remember a name the player types (skip the random funny placeholders)
+  try {
+    const nm = $('nameInput') as HTMLInputElement;
+    nm.addEventListener('change', () => {
+      const v = (nm.value || '').trim();
+      try { if (v && !FUNNY_NAMES.includes(v)) localStorage.setItem('fe_name', v.slice(0, 18)); } catch { /* no storage */ }
+    });
+  } catch { /* no input */ }
   try { ($('claudeKey') as HTMLInputElement).value = localStorage.getItem('ae_claude_key') || ''; } catch { /* no storage */ }
 }
 
