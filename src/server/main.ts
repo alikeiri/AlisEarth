@@ -175,6 +175,18 @@ const rooms = new Map<string, Room>();
 // the lobby or inside a room) — drives the shared presence + open-games browser
 const online = new Set<Client>();
 
+// global lobby chat: a small rolling history so anyone entering (or returning
+// from a match) sees the recent conversation and match results
+const lobbyChat: { name: string; msg: string; sys?: boolean }[] = [];
+function pushLobbyChat(name: string, msg: string, sys = false) {
+  const m = { name: String(name).slice(0, 14), msg: String(msg).slice(0, 160), sys };
+  lobbyChat.push(m);
+  if (lobbyChat.length > 30) lobbyChat.shift();
+  const s = JSON.stringify({ t: 'lobbymsg', ...m });
+  for (const c of online)
+    if ((!c.room || !c.room.started) && c.ws.readyState === WebSocket.OPEN) c.ws.send(s);
+}
+
 // games that can still be joined: not yet started and with a free slot
 function openGames() {
   return [...rooms.values()]
@@ -186,6 +198,7 @@ function lobbyState() {
     t: 'lobby',
     users: [...online].map(c => ({ name: c.name, faction: c.faction, inGame: !!c.room, ping: c.ping ?? null })),
     games: openGames(),
+    chat: lobbyChat,
   };
 }
 // push the latest presence + open-games list to everyone NOT currently in a match
@@ -413,6 +426,10 @@ function startRoom(room: Room) {
           t: 'end', winner: sim.winner, stats: sim.stats,
           players: sim.players.map(p => ({ name: p.name, fac: { flag: p.fac.flag } })),
         });
+        // announce the result in the lobby so it greets players on their return
+        const wn = sim.winner >= 0 ? (room.rec?.players[sim.winner]?.name || 'Someone') : 'Nobody';
+        const roster = (room.rec?.players || []).filter((p: any) => !p.isAI).map((p: any) => p.name).join(' vs ') || 'players';
+        pushLobbyChat('', `🏁 ${wn} won — ${roster} (${Math.round(sim.tickN / 600)}m)`, true);
         clearInterval(room.timer!);
         room.timer = null;
         if (!sim.cheated) saveReplay(room);
@@ -453,6 +470,13 @@ wss.on('connection', ws => {
       online.add(me);
       send(ws, lobbyState());
       broadcastLobby();
+    } else if (m.t === 'lobbychat') {
+      if (!me) return;
+      const now = Date.now();
+      if (me.lastChat && now - me.lastChat < 400) return; // flood guard
+      me.lastChat = now;
+      const msg = String(m.msg || '').slice(0, 160).trim();
+      if (msg) pushLobbyChat(me.name, msg);
     } else if (m.t === 'create') {
       const code = makeCode();
       if (!me) me = { ws, name: String(m.name || 'Host').slice(0, 14), faction: String(m.faction || 'usa'), slot: 0, room: null };

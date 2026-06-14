@@ -1967,6 +1967,7 @@ let selTeams = [1, 2, 3, 4]; // team per player slot (You, AI1, AI2, AI3); FFA b
 let client: GameClient | null = null;
 let net: Net | null = null;
 let tutCtl: TutorialController | null = null;
+let endReturnsToLobby = false; // a finished multiplayer match sends players back to the lobby
 
 // One guided step. `target` is a CSS selector to spotlight; `done` is an optional
 // predicate over the live game that auto-advances when satisfied — every step
@@ -2375,6 +2376,7 @@ function startGame(game: GameLike) {
     const isSim = (game as any).isSim;
     audio.play(won || isSim ? 'win' : 'lose');
     renderEndStats(game); // battle report table + chart (skirmish/sim/replay)
+    endReturnsToLobby = false; $('btnAgain').textContent = 'BACK TO MENU'; // default; net path overrides
     if ((game as any).isReplay) {
       $('endTitle').textContent = 'REPLAY OVER';
       ($('endTitle') as HTMLElement).style.color = '#ffc940';
@@ -2419,10 +2421,15 @@ function startGame(game: GameLike) {
     $('endTitle').textContent = won ? 'VICTORY' : 'DEFEAT';
     ($('endTitle') as HTMLElement).style.color = won ? '#57d977' : '#ff5043';
     let sub = won ? 'All enemy structures destroyed.' : `${winnerName} controls the region.`;
-    try {
-      const prof = JSON.parse(localStorage.getItem('ae_aiprofile') || 'null');
-      if (prof?.games) sub += ` The AI studied this match — ${prof.games} game${prof.games > 1 ? 's' : ''} learned.`;
-    } catch { /* no profile */ }
+    // a multiplayer match (started from the lobby) returns everyone to the lobby
+    endReturnsToLobby = !!(game as any).isNet;
+    $('btnAgain').textContent = endReturnsToLobby ? 'BACK TO LOBBY' : 'BACK TO MENU';
+    if (!endReturnsToLobby) {
+      try {
+        const prof = JSON.parse(localStorage.getItem('ae_aiprofile') || 'null');
+        if (prof?.games) sub += ` The AI studied this match — ${prof.games} game${prof.games > 1 ? 's' : ''} learned.`;
+      } catch { /* no profile */ }
+    }
     $('endSub').textContent = sub;
     show('endScreen');
   });
@@ -2584,8 +2591,30 @@ function renderMpLobby(m: any) {
       $('mpErr').textContent = '';
       net?.send({ t: 'join', code: (b as HTMLElement).getAttribute('data-join'), name: playerName(), faction: selFaction });
     }));
+  renderLobbyChat(m.chat);
 }
 function escapeHtml(s: string) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+// ---- global lobby chat ----
+function lobbyChatLine(m: any): string {
+  if (m.sys) return `<div style="color:#ffc940">${escapeHtml(m.msg)}</div>`;
+  return `<div><span style="color:var(--accent);font-weight:600">${escapeHtml(m.name)}:</span> ${escapeHtml(m.msg)}</div>`;
+}
+function renderLobbyChat(chat: any[]) {
+  const log = document.getElementById('lobbyChatLog');
+  if (!log) return;
+  log.innerHTML = (chat || []).length
+    ? (chat as any[]).slice(-30).map(lobbyChatLine).join('')
+    : '<div style="color:#5f7384">No messages yet — say hello!</div>';
+  log.scrollTop = log.scrollHeight;
+}
+function appendLobbyChat(m: any) {
+  const log = document.getElementById('lobbyChatLog');
+  if (!log) return;
+  if (!log.querySelector('span,div[style*="ffc940"]')) log.innerHTML = ''; // clear the placeholder
+  log.insertAdjacentHTML('beforeend', lobbyChatLine(m));
+  while (log.children.length > 60) log.removeChild(log.firstChild!);
+  log.scrollTop = log.scrollHeight;
+}
 // small coloured ping pill (green/amber/red) — blank until a round-trip lands
 function pingBadge(ping: number | null | undefined): string {
   if (ping == null) return '';
@@ -2619,6 +2648,7 @@ async function connectNet(): Promise<Net> {
     startGame(g);
   });
   n.on('lobby', (m: any) => renderMpLobby(m));
+  n.on('lobbymsg', (m: any) => appendLobbyChat(m));
   n.on('err', (m: any) => { $('mpErr').textContent = m.msg || 'Server error'; });
   n.on('_close', () => {
     if (!client) { $('menuErr').textContent = 'Connection lost'; show('menu'); }
@@ -2757,13 +2787,30 @@ function initMenus() {
   });
   // BACK leaves the lobby entirely (drops the connection)
   $('btnMpBack').addEventListener('click', () => { net?.close(); net = null; show('menu'); });
+  // lobby chat: send on click or Enter
+  const sendLobbyChat = () => {
+    const inp = $('lobbyChatInput') as HTMLInputElement;
+    const msg = inp.value.trim();
+    if (msg && net) { net.send({ t: 'lobbychat', msg }); inp.value = ''; }
+  };
+  $('lobbyChatSend').addEventListener('click', sendLobbyChat);
+  $('lobbyChatInput').addEventListener('keydown', e => { if ((e as KeyboardEvent).key === 'Enter') { e.preventDefault(); sendLobbyChat(); } });
   $('btnStart').addEventListener('click', () => net?.send({ t: 'start' }));
   // LEAVE a room lobby returns to the global lobby (stay connected)
   $('btnLeave').addEventListener('click', () => {
     if (net) { net.send({ t: 'leaveRoom' }); show('mpLobby'); }
     else show('menu');
   });
-  $('btnAgain').addEventListener('click', () => location.reload());
+  // after a match: multiplayer players return to the lobby (reconnect for a clean
+  // socket + fresh handlers); single-player/replay just reloads to the menu
+  $('btnAgain').addEventListener('click', async () => {
+    if (endReturnsToLobby) {
+      endReturnsToLobby = false;
+      if (client) { client.destroy(); client = null; } // also closes the old socket
+      try { net = await connectNet(); net.send({ t: 'hello', name: playerName(), faction: selFaction }); show('mpLobby'); }
+      catch { location.reload(); }
+    } else location.reload();
+  });
   // Exit → choice popup: Surrender (a defeat), Just Exit (no result), or Cancel
   const exitMenu = $('exitMenu');
   const closeExitMenu = () => exitMenu.classList.add('hidden');
