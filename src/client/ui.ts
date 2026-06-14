@@ -316,22 +316,33 @@ export class UI {
     if (!pl) return;
     const fac = FACTIONS[pl.f] || FACTIONS.usa;
 
-    // upgrade panel: one own, completed, upgradable building selected
+    // upgrade panel: one own, completed building selected (shows progress while
+    // an upgrade is running, the upgrade button otherwise)
     this.upgTarget = -1;
+    let upgShown = false;
     if (selection && selection.size === 1) {
       const id = [...selection][0];
       const v = views.find(x => x.i === id);
-      if (v && v.b && v.o === me && v.pr >= 1 && v.t !== 'conyard' && v.t !== 'wall' && v.t !== 'barrier' && (v.lv || 1) < UPG_MAX) {
-        const cost = upgCost(v.t, v.lv || 1, fac.costMul);
-        this.upgTarget = id;
-        const gain = UPG_INFO[v.t] || 'improved performance';
-        this.upgBtn.innerHTML =
-          `⬆ Upgrade ${BUILDINGS[v.t].name} → Lv${(v.lv || 1) + 1}  $${cost}` +
-          `<span class="upgInfo">${gain} · +20% HP</span>`;
-        this.upgBtn.classList.toggle('noafford', pl.c < cost);
+      if (v && v.b && v.o === me && v.t !== 'conyard' && v.t !== 'wall' && v.t !== 'barrier') {
+        if (v.up !== undefined) {
+          // upgrade in progress — show a progress bar, no click (upgTarget stays -1)
+          const pct = Math.round(v.up * 100);
+          this.upgBtn.innerHTML = `⬆ Upgrading ${BUILDINGS[v.t].name}… ${pct}%<div class="prog" style="width:${pct}%"></div>`;
+          this.upgBtn.classList.remove('noafford');
+          upgShown = true;
+        } else if (v.pr >= 1 && (v.lv || 1) < UPG_MAX) {
+          const cost = upgCost(v.t, v.lv || 1, fac.costMul);
+          this.upgTarget = id;
+          const gain = UPG_INFO[v.t] || 'improved performance';
+          this.upgBtn.innerHTML =
+            `⬆ Upgrade ${BUILDINGS[v.t].name} → Lv${(v.lv || 1) + 1}  $${cost}` +
+            `<span class="upgInfo">${gain} · +20% HP</span>`;
+          this.upgBtn.classList.toggle('noafford', pl.c < cost);
+          upgShown = true;
+        }
       }
     }
-    this.upgBtn.classList.toggle('hidden', this.upgTarget < 0);
+    this.upgBtn.classList.toggle('hidden', !upgShown);
 
     // track single selected building (for the research panel)
     this.selTargetBid = -1;

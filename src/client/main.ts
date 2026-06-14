@@ -150,6 +150,7 @@ class LocalGame implements GameLike {
         if (e.rpt) v.rp = 1;
         if (e.primary) v.pm = 1;
         if (e.research) { v.rs = e.research.tech; v.rsf = 1 - e.research.t / e.research.t0; }
+        if (e.upg) v.up = 1 - e.upg.t / e.upg.t0; // upgrade progress 0..1
         if (e.storedMissile) v.ms = e.storedMissile;
         if (e.missileStock && e.missileStock.length) v.msn = e.missileStock.length;
         if (e.strikeR && e.strikeR > 0) { v.kx = e.strikeX; v.kz = e.strikeZ; v.kr = e.strikeR; }
@@ -1283,7 +1284,7 @@ class GameClient {
   private changeSpeed(dir: number) {
     const g: any = this.game;
     if (g.speed === undefined) return; // networked game: server keeps the clock
-    const S = g.isSim ? [0.5, 1, 2, 4, 8, 16, 32] : [0.5, 1, 2, 4, 8];
+    const S = g.isSim ? [0, 0.25, 0.5, 1, 2, 4, 8, 16, 32] : [0, 0.25, 0.5, 1, 2, 4, 8];
     let i = S.indexOf(g.speed);
     if (i < 0) i = 1;
     i = Math.max(0, Math.min(S.length - 1, i + dir));
@@ -1590,7 +1591,7 @@ class GameClient {
         const fv = f[Math.floor(v.z) * W + Math.floor(v.x)] || 0;
         return v.b ? fv >= 1 : fv === 2; // buildings stay on the map once scouted
       });
-      if (this.frame % 6 === 0) this.renderer.setFog(f);
+      if (this.frame % 6 === 0) { this.renderer.setFog(f); this.renderer.setTreeFog(f); }
     }
     if (!(this.game as any).isSim && this.frame % 6 === 0) this.scanRadar(allViews);
     this.lastViews = views;
@@ -1760,7 +1761,7 @@ class GameClient {
     if ((st.over || meDead) && !this.over) {
       this.over = true;
       // the battle is decided — lift the fog so the whole map is revealed
-      if (this.fog) { this.fog.fill(2); this.renderer.setFog(this.fog); }
+      if (this.fog) { this.fog.fill(2); this.renderer.setFog(this.fog); this.renderer.setTreeFog(this.fog); }
       const wn = st.over && st.winner >= 0 && players[st.winner] ? players[st.winner].n
         : meDead ? (players.find((p: any, i: number) => i !== this.game.me && p.a)?.n || 'The enemy') : 'Nobody';
       this.onEnd(!meDead && st.winner === this.game.me, wn);
@@ -2005,7 +2006,7 @@ let simQueue: { left: number; total: number; speed: number } | null = null;
 function updateSpeedInd(speed: number) {
   const el = document.getElementById('speedInd');
   if (el) {
-    el.textContent = speed + '× SPEED';
+    el.textContent = speed === 0 ? '⏸ PAUSED' : speed + '× SPEED';
     el.classList.toggle('hidden', speed === 1);
   }
 }

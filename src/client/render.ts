@@ -818,6 +818,10 @@ export class Renderer {
   private fogTex: THREE.DataTexture | null = null;
   private fogMesh: THREE.Mesh | null = null;
   private fogGeo: THREE.PlaneGeometry | null = null;
+  private treeTrunks: THREE.InstancedMesh | null = null;
+  private treeLeaves: THREE.InstancedMesh | null = null;
+  private treeBaseMat: Float32Array | null = null;
+  private treeN = 0;
   gpuName = 'unknown';
 
   constructor(canvas: HTMLCanvasElement, map: GameMap) {
@@ -1532,6 +1536,27 @@ export class Renderer {
     trunks.instanceMatrix.needsUpdate = leaves.instanceMatrix.needsUpdate = true;
     if (leaves.instanceColor) leaves.instanceColor.needsUpdate = true;
     this.scene.add(trunks, leaves);
+    // keep references so the fog can hide trees in unexplored cells (like units)
+    this.treeTrunks = trunks; this.treeLeaves = leaves; this.treeN = k;
+    this.treeBaseMat = (trunks.instanceMatrix.array as Float32Array).slice(0, k * 16);
+  }
+
+  // hide trees that sit in still-unexplored cells (fog 0); show them once the
+  // ground has been scouted (fog >= 1), matching how buildings persist
+  setTreeFog(fog: Uint8Array | null) {
+    if (!this.treeTrunks || !this.treeBaseMat) return;
+    const base = this.treeBaseMat;
+    const ta = this.treeTrunks.instanceMatrix.array as Float32Array;
+    const la = this.treeLeaves.instanceMatrix.array as Float32Array;
+    for (let i = 0; i < this.treeN; i++) {
+      const o = i * 16;
+      // tree's ground cell = the translation columns (m12, m14 in column-major)
+      const cx = Math.floor(base[o + 12]), cz = Math.floor(base[o + 14]);
+      const seen = !fog || (cx >= 0 && cz >= 0 && cx < W && cz < H && fog[cz * W + cx] >= 1);
+      for (let j = 0; j < 16; j++) { const v = seen ? base[o + j] : 0; ta[o + j] = v; la[o + j] = v; }
+    }
+    this.treeTrunks.instanceMatrix.needsUpdate = true;
+    this.treeLeaves.instanceMatrix.needsUpdate = true;
   }
 
   resize() {

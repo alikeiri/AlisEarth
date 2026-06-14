@@ -46,6 +46,7 @@ export interface Entity {
   strikeX?: number; strikeZ?: number; strikeR?: number; // silo: persistent strike zone
   terraPath?: { x: number; z: number }[]; terraI?: number; terraH?: number; // bulldozer job
   burnT?: number; burnPs?: number; // building on fire: seconds left, damage/s
+  upg?: { t: number; t0: number }; // building upgrade in progress: seconds left, total
   icd?: number; // interceptor (Iron Dome / Patriot): reload cooldown between missile kills
   stunT?: number; // EMP stun: seconds the unit is frozen (can't move or fire)
   mineStock?: number; // engineer: proximity mines left to lay
@@ -384,14 +385,14 @@ export class Sim {
       const b = this.ents.get(c.bid);
       if (!b || !b.b || b.owner !== c.p || b.type === 'conyard') return;
       if (b.type === 'wall' || b.type === 'barrier') return; // walls/barriers can't be upgraded
-      if (b.progress < b.total || b.lvl >= UPG_MAX) return;
+      if (b.progress < b.total || b.lvl >= UPG_MAX || b.upg) return; // maxed or already upgrading
       const cost = Math.round(upgCost(b.type, b.lvl, pl.fac.costMul) * pl.bonusCost);
       if (pl.credits < cost) return;
       pl.credits -= cost;
-      b.lvl++;
-      b.maxHp = Math.round(b.maxHp * 1.2);
-      b.hp = Math.min(b.maxHp, b.hp + Math.round(b.maxHp * 0.2));
-      this.events.push({ e: 'done', x: b.x, z: b.z });
+      // upgrades now take TIME, scaled by the target level and the building's
+      // original build time (so a bigger building / higher tier takes longer)
+      const dur = Math.max(3, BUILDINGS[b.type].buildTime * 0.6 * (b.lvl + 1));
+      b.upg = { t: dur, t0: dur };
       return;
     }
     if (c.k === 'cancel') {
@@ -999,6 +1000,19 @@ export class Sim {
         if (b.type === 'refinery') this.spawnFreeHarvester(b);
       }
       return;
+    }
+
+    // building upgrade in progress: tick it down, then apply the level (and the
+    // HP/level bonuses) when it completes. power shortage slows it like a build.
+    if (b.upg) {
+      b.upg.t -= TICK * rate;
+      if (b.upg.t <= 0) {
+        b.upg = undefined;
+        b.lvl++;
+        b.maxHp = Math.round(b.maxHp * 1.2);
+        b.hp = Math.min(b.maxHp, b.hp + Math.round(b.maxHp * 0.2));
+        this.events.push({ e: 'done', x: b.x, z: b.z });
+      }
     }
 
     // research lab progresses one technology at a time
@@ -2024,6 +2038,7 @@ export class Sim {
         if (e.rpt) v.rp = 1;
         if (e.primary) v.pm = 1;
         if (e.research) { v.rs = e.research.tech; v.rsf = 1 - e.research.t / e.research.t0; }
+        if (e.upg) v.up = Math.round((1 - e.upg.t / e.upg.t0) * 100) / 100;
         if (e.storedMissile) v.ms = e.storedMissile;
         if (e.missileStock && e.missileStock.length) v.msn = e.missileStock.length;
         if (e.strikeR && e.strikeR > 0) { v.kx = e.strikeX; v.kz = e.strikeZ; v.kr = e.strikeR; }
