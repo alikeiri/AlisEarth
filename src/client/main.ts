@@ -1350,6 +1350,17 @@ class GameClient {
         return;
       }
     }
+    // right-click a friendly unit (not one of the selected ones) with combat
+    // units selected → escort it: follow it and engage anything that threatens it
+    if (ids.some(id => UNITS[this.byId.get(id)?.t]?.dmg > 0)) {
+      const friend = this.pickView(sx, sy, v => this.allies.has(v.o) && !v.b && !ids.includes(v.i));
+      if (friend) {
+        this.game.issue({ k: 'escort', p: me, ids, tgt: friend.i });
+        audio.play('confirm'); audio.ack(this.dominantType(ids), 'move');
+        this.markCmd(ids, friend.x, friend.z, false);
+        return;
+      }
+    }
     const enemy = this.pickView(sx, sy, v => !this.allies.has(v.o));
     if (enemy) {
       this.game.issue({ k: 'attack', p: me, ids, tgt: enemy.i, x: enemy.x, z: enemy.z, q: queue });

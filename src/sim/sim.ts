@@ -126,8 +126,9 @@ export class Sim {
         name: s.name, faction: fac.id, fac, isAI: !!s.isAI, aiLvl: lvl,
         team: s.team ?? i, // default: everyone on their own team (free-for-all)
         credits: START_CREDITS, alive: true, powerMade: 0, powerUsed: 0, pf: 1,
-        bonusCost: s.isAI && lvl >= 3 ? 0.85 : 1,
-        bonusIncome: s.isAI && lvl >= 3 ? 1.3 : 1,
+        // Brutal gets a leg up; Easy gets a handicap (pricier builds, less income)
+        bonusCost: s.isAI ? (lvl >= 3 ? 0.85 : lvl === 0 ? 1.25 : 1) : 1,
+        bonusIncome: s.isAI ? (lvl >= 3 ? 1.3 : lvl === 0 ? 0.8 : 1) : 1,
         tech: {},
         spawn: this.map.spawns[i],
       });
@@ -558,6 +559,13 @@ export class Sim {
       for (const u of units) u.holdFire = on;
       return;
     }
+    if (c.k === 'escort') {
+      // follow a (friendly) unit and engage anything that threatens it
+      for (const u of units) if (UNITS[u.type]?.dmg > 0 && c.tgt !== u.id) {
+        u.orders = [{ k: 'escort', tgt: c.tgt }]; u.path = null; u.cmdT = this.tickN;
+      }
+      return;
+    }
     if (c.k === 'patrol' && Array.isArray(c.pts) && c.pts.length) {
       this.assignPatrol(units, c.pts, !!c.q);
       return;
@@ -835,6 +843,20 @@ export class Sim {
       if (d2 > 55 * 55) continue;
       if ((dx * dxT + dz * dzT) / dl < -1) continue;     // not the ones behind us
       if (d2 < bd) { bd = d2; best = e; }
+    }
+    return best;
+  }
+
+  // nearest enemy that has wandered within range of an ESCORTED unit and that
+  // the escort can actually hurt (used by the escort/guard order)
+  private escortThreat(u: Entity, t: Entity, r: number): Entity | null {
+    let best: Entity | null = null, bd = r * r;
+    for (const o of this.nearbyUnits(t.x, t.z, r + 1)) {
+      if (!this.foe(o.owner, u.owner) || o.hp <= 0 || !this.players[o.owner]?.alive) continue;
+      if (!this.canHarm(u, o)) continue;
+      if (UNITS[o.type]?.fly && dmgMul(u.type, false, 'air', o.type) <= 0) continue;
+      const d2 = (o.x - t.x) ** 2 + (o.z - t.z) ** 2;
+      if (d2 < bd) { bd = d2; best = o; }
     }
     return best;
   }
@@ -1311,6 +1333,16 @@ export class Sim {
 
     if (ord.k === 'move') {
       if (this.moveToward(u, ord.x!, ord.z!, def)) { u.orders.shift(); u.path = null; }
+    } else if (ord.k === 'escort') {
+      // shadow a friendly unit and engage anything that threatens it
+      const t = this.ents.get(ord.tgt!);
+      if (!t || t.hp <= 0) { u.orders.shift(); u.path = null; return; }
+      if (def.dmg > 0 && !u.holdFire) {
+        const threat = this.escortThreat(u, t, def.range + 6);
+        if (threat) { u.orders.unshift({ k: 'attack', tgt: threat.id }); u.path = null; return; }
+      }
+      const d = Math.hypot(t.x - u.x, t.z - u.z);
+      if (d > 3.2) this.moveToward(u, t.x, t.z, def); else u.path = null; // hold near it when close
     } else if (ord.k === 'force') {
       // force-fire at a fixed point (or a tracked entity), hitting friend OR foe
       let px = ord.x!, pz = ord.z!;
@@ -1999,8 +2031,11 @@ export class Sim {
       } else {
         if (e.stance) v.st = e.stance;
         if (e.fortified) v.fo = 1;
-        if (e.fortT > 0) v.ft = 1; // deploying / packing (vulnerable)
+        if (e.fortT > 0) v.ft = e.fortGoal ? 1 : 2; // 1 = digging in, 2 = packing up
         if (UNITS[e.type]?.cloak) v.ck = 1;
+        if (e.holdFire) v.hf = 1;
+        if (e.orders[0]?.k === 'patrol') v.pa = 1;
+        if (e.rzr && e.rzr > 0) { v.rzx = e.rzx; v.rzz = e.rzz; v.rzr = e.rzr; }
         if (e.cd > 0 && UNITS[e.type]?.dmg > 0) {
           v.fr = 1; // mid-reload = in a firefight (drives aim pose)
           if (e.aimX !== undefined) { v.ax = Math.round(e.aimX * 10) / 10; v.az = Math.round(e.aimZ! * 10) / 10; }
@@ -2014,7 +2049,7 @@ export class Sim {
       e: ents,
       p: this.players.map(pl => ({
         c: Math.round(pl.credits), a: pl.alive, pm: Math.round(pl.powerMade), pu: Math.round(pl.powerUsed),
-        n: pl.name, f: pl.faction, tech: Object.keys(pl.tech).filter(k => pl.tech[k]),
+        n: pl.name, f: pl.faction, tm: pl.team, ai: pl.isAI, tech: Object.keys(pl.tech).filter(k => pl.tech[k]),
       })),
       ev: this.events,
     };

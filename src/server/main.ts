@@ -16,6 +16,18 @@ import { setMapSize } from '../sim/map';
 const PORT = Number(process.env.PORT) || 8080;
 const DIST = join(fileURLToPath(new URL('.', import.meta.url)), 'dist');
 
+// persistent crash/error log on the mounted volume (survives container restarts)
+// so a freeze or exception during a live match can be inspected afterwards.
+const ERR_LOG = join(fileURLToPath(new URL('.', import.meta.url)), 'server-error.log');
+import { appendFileSync } from 'fs';
+function logErr(where: string, e: any) {
+  const line = `[${new Date().toISOString()}] ${where}: ${e?.stack || e?.message || e}\n`;
+  try { appendFileSync(ERR_LOG, line); } catch { /* read-only fs */ }
+  try { console.error(line.trimEnd()); } catch { /* noop */ }
+}
+process.on('uncaughtException', e => logErr('uncaughtException', e));
+process.on('unhandledRejection', e => logErr('unhandledRejection', e));
+
 const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'application/javascript; charset=utf-8',
@@ -295,21 +307,32 @@ function startRoom(room: Room) {
   room.clients.forEach((c, i) =>
     send(c.ws, { t: 'start', seed, size: room.size, you: i, players: specs.map(s => ({ name: s.name, faction: s.faction, isAI: !!s.isAI })) }));
 
+  let tickErrs = 0;
   room.timer = setInterval(() => {
-    const sim = room.sim!;
-    const cmds = room.cmdQ;
-    room.cmdQ = [];
-    for (const slot of room.aiSlots) cmds.push(...aiTick(sim, slot));
-    if (cmds.length && room.rec) room.rec.cmds.push({ k: sim.tickN, c: cmds }); // replay: full cmd stream incl. AI
-    sim.tick(cmds);
-    for (const ev of sim.events) if (ev.e === 'aiReport') { room.lastReport = ev.r; if (!ev.r.cheated) saveAiReport(ev.r); }
-    broadcast(room, { t: 'snap', ...sim.snapshot() });
-    if (sim.done) {
-      broadcast(room, { t: 'end', winner: sim.winner });
-      clearInterval(room.timer!);
-      room.timer = null;
-      if (!sim.cheated) saveReplay(room);
-      // room stays so players can read the result; it dies when they disconnect
+    try {
+      const sim = room.sim!;
+      const cmds = room.cmdQ;
+      room.cmdQ = [];
+      for (const slot of room.aiSlots) cmds.push(...aiTick(sim, slot));
+      if (cmds.length && room.rec) room.rec.cmds.push({ k: sim.tickN, c: cmds }); // replay: full cmd stream incl. AI
+      sim.tick(cmds);
+      for (const ev of sim.events) if (ev.e === 'aiReport') { room.lastReport = ev.r; if (!ev.r.cheated) saveAiReport(ev.r); }
+      broadcast(room, { t: 'snap', ...sim.snapshot() });
+      if (sim.done) {
+        broadcast(room, { t: 'end', winner: sim.winner });
+        clearInterval(room.timer!);
+        room.timer = null;
+        if (!sim.cheated) saveReplay(room);
+        // room stays so players can read the result; it dies when they disconnect
+      }
+    } catch (e) {
+      // a sim exception must NOT silently freeze the match: log it (persistently)
+      // and tell the clients instead of leaving them staring at a frozen field
+      logErr(`room ${room.code} tick ${room.sim?.tickN}`, e);
+      if (++tickErrs >= 5) {
+        broadcast(room, { t: 'end', winner: -1 });
+        if (room.timer) { clearInterval(room.timer); room.timer = null; }
+      }
     }
   }, 100);
 }

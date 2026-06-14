@@ -26,7 +26,7 @@ interface AiMem {
 }
 
 const LVL = [
-  { cad: 4.0, peace: 360, waveEvery: 110, w0: 6,  wInc: 3, cap: 18, turrets: 2, sams: 0, harv: 3, barracks: 1, factories: 1, refs: 2, air: false, siege: 0, raid: 0 },
+  { cad: 5.5, peace: 480, waveEvery: 150, w0: 4,  wInc: 2, cap: 11, turrets: 2, sams: 0, harv: 2, barracks: 1, factories: 1, refs: 2, air: false, siege: 0, raid: 0 },
   { cad: 2.0, peace: 240, waveEvery: 60,  w0: 10, wInc: 4, cap: 32, turrets: 3, sams: 1, harv: 4, barracks: 1, factories: 2, refs: 3, air: false, siege: 1, raid: 0 },
   { cad: 1.0, peace: 150, waveEvery: 40,  w0: 16, wInc: 6, cap: 48, turrets: 4, sams: 2, harv: 5, barracks: 2, factories: 2, refs: 4, air: true,  siege: 2, raid: 45 },
   { cad: 1.0, peace: 90,  waveEvery: 30,  w0: 22, wInc: 8, cap: 70, turrets: 5, sams: 3, harv: 6, barracks: 2, factories: 3, refs: 4, air: true,  siege: 3, raid: 35 },
