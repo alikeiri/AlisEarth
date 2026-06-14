@@ -496,8 +496,19 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
         const airSafe = enemyAA === 0 || airUnits.length >= enemyAA * 3;
         const tgt = (enemyAA > 0 && !airSafe ? airDefenseTarget(sim, p) : null) || bestStrikeTarget(sim, p);
         if (tgt) {
-          const strikers = airSafe ? army : ground; // hold air back until AA falls
-          if (strikers.length) cmds.push({ k: 'attack', p, ids: strikers.map(u => u.id), tgt: tgt.id, x: tgt.x, z: tgt.z });
+          // is the real target walled off from a ground march? if so the ground
+          // force actively smashes the nearest wall to punch a breach (rather than
+          // waiting for the player to leave a gap), while aircraft fly over it
+          const sealed = !findPath(sim.map, pl.spawn.x, pl.spawn.z, tgt.x, tgt.z, 16000, false);
+          const breach = sealed ? nearestEnemyWall(sim, p) : null;
+          if (airSafe && airUnits.length)
+            cmds.push({ k: 'attack', p, ids: airUnits.map(u => u.id), tgt: tgt.id, x: tgt.x, z: tgt.z });
+          // ground always commits: it hits the wall when sealed, the target otherwise.
+          // (when air is unsafe the whole army is ground — it leads the breach.)
+          if (ground.length) {
+            const gt = breach || tgt;
+            cmds.push({ k: 'attack', p, ids: ground.map(u => u.id), tgt: gt.id, x: gt.x, z: gt.z });
+          }
           mem.nextWave = sim.tickN + waveEvery * TICKS_PER_SEC;
           mem.waveSize = Math.min(cap - 6, mem.waveSize + L.wInc);
         } else mem.nextWave = sim.tickN + 8 * TICKS_PER_SEC;

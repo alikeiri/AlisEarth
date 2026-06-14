@@ -128,6 +128,10 @@
   .chatMsg .who { color: var(--accent); font-weight: 600; }
   .chatMsg .chan { color: #78909c; font-size: 10px; margin-right: 5px; }
   .chatMsg.dm { border-left-color: #b06fd4; }
+  /* while typing, the log expands to 10 lines and gets a faint backdrop so the
+     history stays readable over the battlefield */
+  #chatLog.typing { bottom: 92px; padding: 6px; border-radius: 6px;
+    background: rgba(6, 10, 14, 0.55); }
   #chatBar { position: absolute; left: 12px; bottom: 60px; width: 360px; z-index: 8;
     display: flex; gap: 6px; }
   #chatTo { background: #10171d; border: 1px solid #3a5260; color: #eceff1; border-radius: 4px;

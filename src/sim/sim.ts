@@ -1864,13 +1864,16 @@ export class Sim {
       u.x = Math.max(0.5, Math.min(W - 0.5, nx));
       u.z = Math.max(0.5, Math.min(H - 0.5, nz));
     } else {
-      const okCell = mode === 4
-        ? this.map.passableCrawler(Math.floor(nx), Math.floor(nz))
-        : mode === 3
-          ? this.map.passableAmphi(Math.floor(nx), Math.floor(nz))
-          : mode === 2
-            ? this.map.passableSea(Math.floor(nx), Math.floor(nz))
-            : this.map.passable(Math.floor(nx), Math.floor(nz));
+      const passAt = mode === 4 ? (cx: number, cz: number) => this.map.passableCrawler(cx, cz)
+        : mode === 3 ? (cx: number, cz: number) => this.map.passableAmphi(cx, cz)
+          : mode === 2 ? (cx: number, cz: number) => this.map.passableSea(cx, cz)
+            : (cx: number, cz: number) => this.map.passable(cx, cz);
+      const ncx = Math.floor(nx), ncz = Math.floor(nz);
+      let okCell = passAt(ncx, ncz);
+      // a diagonal cell change must not squeeze between two blocked cells — stops
+      // units slipping through wall corners/joins even when shoved off their path
+      const ocx = Math.floor(u.x), ocz = Math.floor(u.z);
+      if (okCell && ncx !== ocx && ncz !== ocz && !passAt(ncx, ocz) && !passAt(ocx, ncz)) okCell = false;
       if (okCell) { u.x = nx; u.z = nz; }
       else { u.path = null; } // blocked — replan next tick
     }

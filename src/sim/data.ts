@@ -56,7 +56,7 @@ export const UNITS: Record<string, UnitDef> = {
   recon:  { name: 'Recon Drone',  cost: 400,  hp: 70,  speed: 3.4, range: 4.0, dmg: 6,  rof: 0.6, builtAt: 'dronefac', buildTime: 7,  kind: 'air', fly: true },
   strike: { name: 'Strike Drone', cost: 1100, hp: 150, speed: 2.8, range: 5.0, dmg: 32, rof: 1.8, builtAt: 'dronefac', buildTime: 13, kind: 'air', fly: true },
   msldrone: { name: 'Missile Drone', cost: 1500, hp: 120, speed: 2.4, range: 7.0, dmg: 45, rof: 3.0, builtAt: 'dronefac', buildTime: 15, kind: 'air', fly: true },
-  mlrs:   { name: 'MLRS',         cost: 1600, hp: 170, speed: 1.6, range: 10.0, dmg: 66, rof: 3.6, builtAt: 'factory',  buildTime: 16, kind: 'veh' },
+  mlrs:   { name: 'MLRS',         cost: 1600, hp: 170, speed: 1.6, range: 13.0, dmg: 66, rof: 3.6, builtAt: 'factory',  buildTime: 16, kind: 'veh' },
   // the anti-infantry vehicle: autocannon IFV — shreds infantry, loses to tanks
   ifv:    { name: 'IFV',          cost: 700,  hp: 300, speed: 3.4, range: 5.0, dmg: 24, rof: 0.8, builtAt: 'factory',  buildTime: 9,  kind: 'veh' },
   // mobile anti-air pair: missile AA hunts airplanes, flak shreds drone swarms

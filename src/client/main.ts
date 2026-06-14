@@ -410,13 +410,13 @@ class GameClient {
   private tipSince = 0;
   private showRanges = true;
   private cmdFx: { fx: number; fz: number; tx: number; tz: number; t: number; atk: boolean }[] = [];
+  private wpTrail: { x: number; z: number; atk: boolean }[] = []; // shift-queued waypoint chain (visual)
   private lastClick = { t: 0, x: 0, y: 0 };
   private lastGhost: { cx: number; cz: number; ok: boolean } | null = null;
   private raf = 0;
   private lastT = 0;
   private frame = 0;
   private over = false;
-  private spectating = false; // surrendered but the match continues — watch on
   private overlayCtx: CanvasRenderingContext2D;
   private cleanups: (() => void)[] = [];
 
@@ -679,17 +679,37 @@ class GameClient {
       on(btn, 'touchstart', h, { passive: false });
       on(btn, 'click', h);
     });
-    // minimap: tap/drag to jump the camera (touch)
+    // minimap: tap/drag to jump the camera (touch); on desktop left-click/drag
+    // jumps the camera and right-click sends the selected units to that spot
     const mm = document.getElementById('minimap');
     if (mm) {
-      const jump = (cx: number, cy: number) => {
+      const toWorld = (cx: number, cy: number) => {
         const r = mm.getBoundingClientRect();
         // both axes flipped to match the camera's ground orientation
-        this.renderer.jumpCam((1 - (cx - r.left) / r.width) * W, (1 - (cy - r.top) / r.height) * H);
+        return { x: (1 - (cx - r.left) / r.width) * W, z: (1 - (cy - r.top) / r.height) * H };
       };
+      const jump = (cx: number, cy: number) => { const w = toWorld(cx, cy); this.renderer.jumpCam(w.x, w.z); };
       const mh = (e: TouchEvent) => { e.preventDefault(); const t = e.touches[0]; if (t) jump(t.clientX, t.clientY); };
       on(mm, 'touchstart', mh, { passive: false });
       on(mm, 'touchmove', mh, { passive: false });
+      let panning = false;
+      on(mm, 'mousedown', (e: MouseEvent) => {
+        e.preventDefault();
+        if (e.button === 2) {
+          // right-click on the minimap = move/harvest order for the selection
+          const ids = this.myUnitIds();
+          if (!ids.length) return;
+          const w = toWorld(e.clientX, e.clientY);
+          const cx = Math.floor(w.x), cz = Math.floor(w.z);
+          const onOre = this.game.map.inB(cx, cz) && this.game.map.ore[cz * W + cx] > 0;
+          this.game.issue({ k: onOre ? 'harvest' : 'move', p: this.game.me, ids, x: w.x, z: w.z, q: e.shiftKey });
+          this.recordWp(w.x, w.z, false, e.shiftKey);
+          this.markCmd(ids, w.x, w.z, false);
+          audio.ack(this.dominantType(ids), 'move');
+        } else if (e.button === 0) { panning = true; jump(e.clientX, e.clientY); }
+      });
+      on(mm, 'mousemove', (e: MouseEvent) => { if (panning) jump(e.clientX, e.clientY); });
+      on(window, 'mouseup', () => { panning = false; });
     }
   }
 
@@ -704,12 +724,14 @@ class GameClient {
     if ([...sel.options].some(o => o.value === prev)) sel.value = prev;
     bar.classList.remove('hidden');
     inp.value = '';
+    this.renderChat(); // expand to the last 10 lines as a typing aid
     setTimeout(() => inp.focus(), 0);
   }
 
   private closeChat() {
     document.getElementById('chatBar')!.classList.add('hidden');
     (document.getElementById('chatInput') as HTMLInputElement).blur();
+    this.renderChat(); // collapse back to the recent few
   }
 
   // radio line from the enemy AI commander (Claude strategist taunts)
@@ -719,17 +741,28 @@ class GameClient {
     audio.play('click');
   }
 
+  private chatHistory: { name: string; to: any; msg: string; t: number }[] = [];
+
   private appendChat(m: any) {
+    this.chatHistory.push({ name: String(m.name), to: m.to, msg: String(m.msg), t: performance.now() });
+    if (this.chatHistory.length > 40) this.chatHistory.shift();
+    this.renderChat();
+  }
+
+  // rebuild the chat log from history. While the input bar is open we show the
+  // last 10 lines as a typing aid; otherwise the most recent 8 (and the loop
+  // prunes those by age so they fade away when not chatting).
+  private renderChat() {
     const log = document.getElementById('chatLog')!;
-    const div = document.createElement('div');
-    const dm = typeof m.to === 'number';
-    div.className = 'chatMsg' + (dm ? ' dm' : '');
-    const chan = dm ? 'DM' : m.to === 'allies' ? 'ALLY' : 'ALL';
-    div.innerHTML = `<span class="chan">[${chan}]</span><span class="who">${m.name}:</span> ${String(m.msg)
-      .replace(/&/g, '&amp;').replace(/</g, '&lt;')}`;
-    (div as any).dataset.t = String(performance.now());
-    log.appendChild(div);
-    while (log.children.length > 8) log.removeChild(log.firstChild!);
+    const typing = !document.getElementById('chatBar')!.classList.contains('hidden');
+    log.classList.toggle('typing', typing);
+    const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;');
+    log.innerHTML = this.chatHistory.slice(typing ? -10 : -8).map(m => {
+      const dm = typeof m.to === 'number';
+      const chan = dm ? 'DM' : m.to === 'allies' ? 'ALLY' : 'ALL';
+      return `<div class="chatMsg${dm ? ' dm' : ''}" data-t="${m.t}"><span class="chan">[${chan}]</span>` +
+        `<span class="who">${esc(m.name)}:</span> ${esc(m.msg)}</div>`;
+    }).join('');
   }
 
   private sizeOverlay() {
@@ -743,6 +776,7 @@ class GameClient {
     this.ui.destroy();
     this.ui.setHudVisible(false);
     this.closeChat();
+    this.chatHistory = [];
     document.getElementById('chatLog')!.innerHTML = '';
     this.game.leave();
   }
@@ -1311,6 +1345,15 @@ class GameClient {
     }
   }
 
+  private wpT = 0; // last time the waypoint trail was touched (for auto-expiry)
+  // record a movement target for the on-screen waypoint trail: a shift-queued
+  // order extends the chain, a plain order starts it fresh (single moves clear it)
+  private recordWp(x: number, z: number, atk: boolean, queue: boolean) {
+    if (queue) this.wpTrail.push({ x, z, atk });
+    else this.wpTrail = [];
+    this.wpT = performance.now();
+  }
+
   private contextCommand(sx: number, sy: number, queue: boolean, force = false) {
     const me = this.game.me;
     const g = this.renderer.groundPoint(sx / window.innerWidth, sy / window.innerHeight);
@@ -1376,6 +1419,7 @@ class GameClient {
       this.game.issue({ k: 'attack', p: me, ids, tgt: enemy.i, x: enemy.x, z: enemy.z, q: queue });
       audio.ack(this.dominantType(ids), 'attack');
       this.markCmd(ids, enemy.x, enemy.z, true);
+      this.recordWp(enemy.x, enemy.z, true, queue);
       return;
     }
     audio.ack(this.dominantType(ids), 'move');
@@ -1383,9 +1427,11 @@ class GameClient {
     const cx = Math.floor(g.x), cz = Math.floor(g.z);
     if (this.game.map.inB(cx, cz) && this.game.map.ore[cz * W + cx] > 0) {
       this.game.issue({ k: 'harvest', p: me, ids, x: g.x, z: g.z, q: queue });
+      this.recordWp(g.x, g.z, false, queue);
       return;
     }
     this.game.issue({ k: 'move', p: me, ids, x: g.x, z: g.z, q: queue });
+    this.recordWp(g.x, g.z, false, queue);
   }
 
   // Distribute selected units evenly along the drawn path, assigning slots
@@ -1472,15 +1518,12 @@ class GameClient {
     this.tipEl.style.display = 'block';
   }
 
-  // surrender: scuttle our forces (a defeat). If other players are still
-  // fighting, keep watching as a spectator with the fog lifted; the end screen
-  // and stats only appear once the match actually finishes.
+  // surrender: scuttle our forces — a defeat. The end screen with stats appears
+  // right away (no spectating; matches can be rewatched from Replays instead).
   surrender() {
-    if (this.over || this.spectating) return;
+    if (this.over) return;
     this.game.issue({ k: 'surrender', p: this.game.me });
     audio.play('cancel');
-    this.spectating = true;
-    if (this.fog) { this.fog.fill(2); this.renderer.setFog(this.fog); this.renderer.setTreeFog(this.fog); }
   }
 
   // reflect each toggleable command's state on its quickbar button: lit when the
@@ -1602,7 +1645,7 @@ class GameClient {
     // fog of war for human players (spectator/replay modes see everything;
     // disabled when the player unchecked it on the start screen)
     let views = allViews;
-    if (!(this.game as any).isSim && fogEnabled && !this.over && !this.spectating) {
+    if (!(this.game as any).isSim && fogEnabled && !this.over) {
       if (!this.fog) this.fog = new Uint8Array(W * H);
       if (this.frame % 3 === 0) this.updateFog(allViews);
       const f = this.fog;
@@ -1639,10 +1682,15 @@ class GameClient {
     // chat messages + expiry
     for (const m of (this.game.drainChat?.() || [])) { this.appendChat(m); audio.play('click'); }
     if (this.frame % 30 === 0) {
-      const log = document.getElementById('chatLog')!;
-      const now = performance.now();
-      while (log.firstChild && now - Number((log.firstChild as any).dataset.t || 0) > 20000)
-        log.removeChild(log.firstChild);
+      // age out old lines so they fade away — but never while the player is
+      // typing, where the last 10 lines are kept on screen as a reference
+      const typing = !document.getElementById('chatBar')!.classList.contains('hidden');
+      if (!typing) {
+        const now = performance.now();
+        const before = this.chatHistory.length;
+        this.chatHistory = this.chatHistory.filter(m => now - m.t < 20000);
+        if (this.chatHistory.length !== before) this.renderChat();
+      }
     }
 
     // building ghost (single) or wall/barrier drag-line preview
@@ -1773,14 +1821,40 @@ class GameClient {
       }
     }
 
+    // shift-queued waypoint trail: a dotted chain through the queued points so
+    // the player can see the route their selection will follow, in click order
+    if (this.wpTrail.length) {
+      if (performance.now() - this.wpT > 12000 || !this.myUnitIds().length) this.wpTrail = [];
+      else {
+        const ctx = this.overlayCtx;
+        const pts = this.wpTrail.map(w => this.renderer.project(w.x, w.z, 0.3)).filter(p => p.ok);
+        // line from the selection's centre through each waypoint
+        let sx = 0, sz = 0, n = 0;
+        for (const id of this.myUnitIds()) { const v = this.byId.get(id); if (v) { sx += v.x; sz += v.z; n++; } }
+        const start = n ? this.renderer.project(sx / n, sz / n, 0.3) : null;
+        ctx.strokeStyle = 'rgba(120,210,255,0.55)'; ctx.lineWidth = 2; ctx.setLineDash([6, 5]);
+        ctx.beginPath();
+        if (start && start.ok) ctx.moveTo(start.x, start.y);
+        for (let i = 0; i < pts.length; i++) (i === 0 && !(start && start.ok)) ? ctx.moveTo(pts[i].x, pts[i].y) : ctx.lineTo(pts[i].x, pts[i].y);
+        ctx.stroke(); ctx.setLineDash([]);
+        // numbered waypoint pips
+        this.wpTrail.forEach((w, i) => {
+          const p = this.renderer.project(w.x, w.z, 0.3);
+          if (!p.ok) return;
+          ctx.fillStyle = w.atk ? 'rgba(255,90,70,0.92)' : 'rgba(120,210,255,0.92)';
+          ctx.beginPath(); ctx.arc(p.x, p.y, 7, 0, Math.PI * 2); ctx.fill();
+          ctx.fillStyle = '#06121a'; ctx.font = 'bold 10px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+          ctx.fillText(String(i + 1), p.x, p.y + 0.5);
+        });
+      }
+    }
+
     const st = this.game.status();
     // with multiple AIs the sim runs until ONE side remains; if the human is
     // wiped out first, call defeat immediately instead of forcing them to
     // spectate the survivors fight it out
     const meDead = !(this.game as any).isSim && players[this.game.me] && players[this.game.me].a === false;
-    // a surrendered spectator stays in until the match itself ends (st.over);
-    // only an unexpected wipe-out (meDead while NOT spectating) ends early
-    if ((st.over || (meDead && !this.spectating)) && !this.over) {
+    if ((st.over || meDead) && !this.over) {
       this.over = true;
       // the battle is decided — lift the fog so the whole map is revealed
       if (this.fog) { this.fog.fill(2); this.renderer.setFog(this.fog); this.renderer.setTreeFog(this.fog); }
