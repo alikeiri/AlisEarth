@@ -776,9 +776,10 @@ export class Sim {
       if (!e.b || e.hp <= 0 || (e.type !== 'wall' && e.type !== 'barrier')) continue;
       if (!this.foe(e.owner, u.owner) || !this.players[e.owner].alive) continue;
       const dx = e.x - u.x, dz = e.z - u.z, d2 = dx * dx + dz * dz;
-      // reach far enough that an army staged at base will still march to the
-      // wall line sealing off the objective (it paths to the wall's open edge)
-      if (d2 > 120 * 120) continue;
+      // reach far enough that an army staged near the wall line will march to it
+      // and breach (it paths to the wall's open edge); bounded so the O(n) scan
+      // and the cross-map treks stay cheap
+      if (d2 > 55 * 55) continue;
       if ((dx * dxT + dz * dzT) / dl < -1) continue;     // not the ones behind us
       if (d2 < bd) { bd = d2; best = e; }
     }
@@ -1358,12 +1359,12 @@ export class Sim {
       if (def.bombTruck) {
         if (d <= 1.4) { this.truckBoom(u); return; }
         u.repath -= 1;
-        if (!u.path || u.repath <= 0) {
-          u.path = findPath(this.map, u.x, u.z, tgt.x, tgt.z, 9000, false);
+        if (u.repath <= 0 || (!u.path && (u.pathFail || 0) === 0)) {
+          u.path = findPath(this.map, u.x, u.z, tgt.x, tgt.z, 4500, false);
           u.pi = 0; u.repath = 12;
           if (!u.path) {
-            if (++u.pathFail >= 3) { u.orders.shift(); u.path = null; u.pathFail = 0; return; }
-            u.repath = 40;
+            if (++u.pathFail >= 2) { u.orders.shift(); u.path = null; u.pathFail = 0; return; }
+            u.repath = 20;
           } else u.pathFail = 0;
         }
         this.stepPath(u, speed, 0);
@@ -1393,23 +1394,31 @@ export class Sim {
         }
       } else {
         u.repath -= 1;
-        if (!u.path || u.repath <= 0) {
+        // Recompute on the timer, OR immediately when we have a stale/empty path
+        // but ONLY if we aren't already backing off from a failed search. A unit
+        // whose target is walled off would otherwise run a full-cost A* EVERY
+        // tick (path stays null) — the single biggest sim hotspot. pathFail>0
+        // means "we just failed", so wait out the backoff instead of re-searching.
+        // recompute on the timer, or right away when our path is empty AND we
+        // aren't backing off from a failure (a fresh/just-finished path searches
+        // immediately so commands stay responsive)
+        if (u.repath <= 0 || (!u.path && (u.pathFail || 0) === 0)) {
           u.path = def.fly ? [{ x: tgt.x, z: tgt.z }]
-            : findPath(this.map, u.x, u.z, tgt.x, tgt.z, 9000, def.move === 'sea');
+            : findPath(this.map, u.x, u.z, tgt.x, tgt.z, 4500, def.move === 'sea');
           u.pi = 0; u.repath = 12;
           // can't reach the target. If a wall/barrier is blocking the way, BREACH
           // it (attack the nearest one toward the target) instead of giving up;
           // only abandon when the target is genuinely unreachable (e.g. across
           // water). Air just flies over, so this is ground-only.
           if (!u.path && !def.fly) {
-            if (++u.pathFail >= 3) {
+            if (++u.pathFail >= 2) {
               u.pathFail = 0; u.path = null;
               const tgtIsWall = tgt.b && (tgt.type === 'wall' || tgt.type === 'barrier');
               const wall = tgtIsWall ? null : this.nearestWallToward(u, tgt);
               if (wall) { u.orders.unshift({ k: 'attack', tgt: wall.id, keep: true }); return; }
               u.orders.shift(); return;
             }
-            u.repath = 40;
+            u.repath = 20 + (u.id % 13); // backoff + per-unit jitter (desync retries)
           } else u.pathFail = 0;
         }
         this.stepPath(u, speed, def.fly ? 1 : def.move === 'sea' ? 2 : 0);
