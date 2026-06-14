@@ -516,7 +516,8 @@ class GameClient {
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
       if (e.code === 'Enter' && this.game.isNet) { this.openChat(); e.preventDefault(); return; }
-      if (e.code === 'F3') { this.togglePerf(); e.preventDefault(); return; } // perf overlay
+      // perf overlay toggle — backquote/tilde (F-keys collide with browser shortcuts)
+      if (e.code === 'Backquote') { this.togglePerf(); e.preventDefault(); return; }
       this.keys.add(e.code);
       // cheat code buffer
       if (/^[a-zA-Z]$/.test(e.key)) {
@@ -1901,7 +1902,7 @@ class GameClient {
     if (!this.perfEl) {
       const el = document.createElement('div');
       el.id = 'perfHud';
-      el.style.cssText = 'position:fixed;top:60px;right:10px;z-index:30;background:rgba(6,10,14,0.82);'
+      el.style.cssText = 'position:fixed;top:60px;left:10px;z-index:30;background:rgba(6,10,14,0.82);'
         + 'border:1px solid #2c3e50;border-radius:6px;padding:7px 10px;font:11px/1.5 ui-monospace,monospace;'
         + 'color:#bfe3c8;white-space:pre;pointer-events:none;text-shadow:0 1px 2px #000';
       document.body.appendChild(el);
