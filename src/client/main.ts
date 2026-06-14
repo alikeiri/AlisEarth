@@ -2604,21 +2604,21 @@ function lobbyChatLine(m: any): string {
   if (m.sys) return `<div style="color:#ffc940">${escapeHtml(m.msg)}</div>`;
   return `<div><span style="color:var(--accent);font-weight:600">${escapeHtml(m.name)}:</span> ${escapeHtml(m.msg)}</div>`;
 }
+// the lobby chat appears on BOTH the global lobby and the room/waiting screen —
+// render to every .lobbyChatLog so players can chat while waiting to start too
 function renderLobbyChat(chat: any[]) {
-  const log = document.getElementById('lobbyChatLog');
-  if (!log) return;
-  log.innerHTML = (chat || []).length
+  const html = (chat || []).length
     ? (chat as any[]).slice(-30).map(lobbyChatLine).join('')
     : '<div style="color:#5f7384">No messages yet — say hello!</div>';
-  log.scrollTop = log.scrollHeight;
+  document.querySelectorAll('.lobbyChatLog').forEach(log => { log.innerHTML = html; log.scrollTop = log.scrollHeight; });
 }
 function appendLobbyChat(m: any) {
-  const log = document.getElementById('lobbyChatLog');
-  if (!log) return;
-  if (!log.querySelector('span,div[style*="ffc940"]')) log.innerHTML = ''; // clear the placeholder
-  log.insertAdjacentHTML('beforeend', lobbyChatLine(m));
-  while (log.children.length > 60) log.removeChild(log.firstChild!);
-  log.scrollTop = log.scrollHeight;
+  document.querySelectorAll('.lobbyChatLog').forEach(log => {
+    if (!log.querySelector('span,div[style*="ffc940"]')) log.innerHTML = ''; // clear the placeholder
+    log.insertAdjacentHTML('beforeend', lobbyChatLine(m));
+    while (log.children.length > 60) log.removeChild(log.firstChild!);
+    log.scrollTop = log.scrollHeight;
+  });
 }
 // small coloured ping pill (green/amber/red) — blank until a round-trip lands
 function pingBadge(ping: number | null | undefined): string {
@@ -2792,14 +2792,18 @@ function initMenus() {
   });
   // BACK leaves the lobby entirely (drops the connection)
   $('btnMpBack').addEventListener('click', () => { net?.close(); net = null; show('menu'); });
-  // lobby chat: send on click or Enter
-  const sendLobbyChat = () => {
-    const inp = $('lobbyChatInput') as HTMLInputElement;
+  // lobby chat: same chat shown on the global lobby AND the room waiting screen
+  const sendLobbyChat = (inputId: string) => {
+    const inp = $(inputId) as HTMLInputElement;
     const msg = inp.value.trim();
     if (msg && net) { net.send({ t: 'lobbychat', msg }); inp.value = ''; }
   };
-  $('lobbyChatSend').addEventListener('click', sendLobbyChat);
-  $('lobbyChatInput').addEventListener('keydown', e => { if ((e as KeyboardEvent).key === 'Enter') { e.preventDefault(); sendLobbyChat(); } });
+  const wireLobbyChat = (inputId: string, btnId: string) => {
+    $(btnId).addEventListener('click', () => sendLobbyChat(inputId));
+    $(inputId).addEventListener('keydown', e => { if ((e as KeyboardEvent).key === 'Enter') { e.preventDefault(); sendLobbyChat(inputId); } });
+  };
+  wireLobbyChat('lobbyChatInput', 'lobbyChatSend');
+  wireLobbyChat('roomChatInput', 'roomChatSend');
   $('btnStart').addEventListener('click', () => net?.send({ t: 'start' }));
   // LEAVE a room lobby returns to the global lobby (stay connected)
   $('btnLeave').addEventListener('click', () => {

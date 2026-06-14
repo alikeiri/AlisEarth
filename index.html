@@ -328,7 +328,7 @@
         <button class="mbtn" id="btnMpJoinCode">JOIN BY CODE</button>
       </div>
       <h3 style="margin:6px 0 4px;text-align:left">Lobby chat</h3>
-      <div id="lobbyChatLog" style="background:rgba(20,28,38,0.9);border:1px solid #2c3e50;border-radius:6px;padding:6px 8px;font-size:12px;line-height:1.6;color:#cfd8dc;height:120px;overflow-y:auto;text-align:left"></div>
+      <div id="lobbyChatLog" class="lobbyChatLog" style="background:rgba(20,28,38,0.9);border:1px solid #2c3e50;border-radius:6px;padding:6px 8px;font-size:12px;line-height:1.6;color:#cfd8dc;height:120px;overflow-y:auto;text-align:left"></div>
       <div class="mrow" style="margin-top:6px">
         <input class="minput" id="lobbyChatInput" maxlength="160" placeholder="Say something…" style="flex:1" />
         <button class="mbtn" id="lobbyChatSend" style="flex:0 0 90px">SEND</button>
@@ -348,6 +348,12 @@
         <button class="mbtn" id="btnLeave">LEAVE</button>
       </div>
       <div style="color:#78909c;font-size:13px;text-align:center">Share the code. Starting solo adds an AI opponent.</div>
+      <h3 style="margin:8px 0 4px;text-align:left">Lobby chat</h3>
+      <div class="lobbyChatLog" style="background:rgba(20,28,38,0.9);border:1px solid #2c3e50;border-radius:6px;padding:6px 8px;font-size:12px;line-height:1.6;color:#cfd8dc;height:110px;overflow-y:auto;text-align:left"></div>
+      <div class="mrow" style="margin-top:6px">
+        <input class="minput" id="roomChatInput" maxlength="160" placeholder="Say something…" style="flex:1" />
+        <button class="mbtn" id="roomChatSend" style="flex:0 0 90px">SEND</button>
+      </div>
     </div>
   </div>
 
