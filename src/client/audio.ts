@@ -12,6 +12,11 @@ class AudioMan {
   private musicTimer: ReturnType<typeof setInterval> | null = null;
   private eighth = 0;
   private nextT = 0;
+  // pre-recorded music tracks (mp3) that play instead of the synth, keyed by style
+  private trackSrc: Record<string, string> = { iron: './audio/iron_directive.mp3' };
+  private trackBuf: Record<string, AudioBuffer> = {};
+  private trackNode: AudioBufferSourceNode | null = null;
+  private trackLoading = '';
   muted = false;
   musicVol = 0.4;   // 0..1, music bus
   sfxVol = 1.0;     // 0..1, sound effects + unit voices
@@ -308,7 +313,10 @@ class AudioMan {
   private midi(n: number) { return 440 * Math.pow(2, (n - 69) / 12); }
 
   startMusic() {
-    if (!this.ctx || this.musicTimer || this.musicStyle === 'off') return;
+    if (!this.ctx || this.musicStyle === 'off') return;
+    // pre-recorded tracks (e.g. Iron Directive) play a looped mp3 instead of synth
+    if (this.trackSrc[this.musicStyle]) { this.startTrack(this.musicStyle); return; }
+    if (this.musicTimer) return;
     const bpm = this.musicStyle === 'ambient' ? 60 : this.musicStyle === 'march' ? 104
       : this.musicStyle === 'hellmarch' ? 142 : 124;
     const spe = 60 / bpm / 2; // seconds per eighth note
@@ -324,6 +332,41 @@ class AudioMan {
 
   stopMusic() {
     if (this.musicTimer) { clearInterval(this.musicTimer); this.musicTimer = null; }
+    this.stopTrack();
+  }
+
+  // looped playback of a pre-recorded track through the music bus (respects the
+  // music-volume slider and global mute). The decoded buffer is cached so
+  // switching back to it is instant.
+  private async startTrack(style: string) {
+    if (!this.ctx) return;
+    const url = this.trackSrc[style];
+    if (!url) return;
+    if (!this.trackBuf[style]) {
+      if (this.trackLoading === style) return; // already fetching
+      this.trackLoading = style;
+      try {
+        const res = await fetch(url);
+        const arr = await res.arrayBuffer();
+        this.trackBuf[style] = await this.ctx.decodeAudioData(arr);
+      } catch { this.trackLoading = ''; return; }
+      this.trackLoading = '';
+      if (this.musicStyle !== style) return; // user switched away while it loaded
+    }
+    this.playTrack(style);
+  }
+  private playTrack(style: string) {
+    if (!this.ctx || !this.trackBuf[style]) return;
+    this.stopTrack();
+    const src = this.ctx.createBufferSource();
+    src.buffer = this.trackBuf[style];
+    src.loop = true;
+    src.connect(this.musG);
+    src.start();
+    this.trackNode = src;
+  }
+  private stopTrack() {
+    if (this.trackNode) { try { this.trackNode.stop(); } catch { /* already stopped */ } this.trackNode.disconnect(); this.trackNode = null; }
   }
 
   private musTone(type: OscillatorType, freq: number, t: number, atk: number, dur: number, peak: number, lpf: number, echo = false) {
