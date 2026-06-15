@@ -431,6 +431,8 @@ export class UI {
         parts.push(kbd('P', 'patrol'));
         const holding = units.some(u => u.st);
         parts.push(kbd('G', holding ? 'hold: ON' : 'hold position'));
+        const looping = units.some(u => u.lp);
+        parts.push(kbd('Shift+RMB', 'queue waypoints') + ' · ' + kbd('R', looping ? 'repeat: ON' : 'repeat route') + ' · ' + kbd('Shift', 'show route'));
         if (units.length >= 2) parts.push(kbd('RMB-drag', 'formation'));
         parts.push(kbd('H', 'stop') + ' · ' + kbd('C', 'ranges'));
         parts.push(kbd('Ctrl+#', 'group'));
