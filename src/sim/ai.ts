@@ -24,6 +24,7 @@ interface AiMem {
   enemyBuildings?: number; // live count of enemy structures (walls excluded)
   lastHurtT?: number; // last tick a building of ours took damage (posture)
   defenders?: number[]; // infantry designated to the fortified defense line
+  harvDefCd?: number; // cooldown between harvester-rescue reactions
 }
 
 const LVL = [
@@ -83,29 +84,53 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
 
   // --- defense reaction + peace-breaking check (every tick, cheap) ---
   if (mem.defCd > 0) mem.defCd--;
+  if ((mem.harvDefCd ?? 0) > 0) mem.harvDefCd!--;
+  let threatSeen = false;
+  let harvHit: { v: Entity; attacker: Entity } | null = null;
+  let scanned = 0;
   for (const d of sim.dmgLog) {
     if (d.vOwner !== p) continue;
     const attacker = sim.ents.get(d.by);
     if (!attacker) continue;
-    // learn the enemy's attack corridor: a rolling average of where the
-    // attackers come from. After a few attacks this points down their route.
-    mem.threatX = (mem.threatX ?? attacker.x) * 0.9 + attacker.x * 0.1;
-    mem.threatZ = (mem.threatZ ?? attacker.z) * 0.9 + attacker.z * 0.1;
-    mem.threatN = (mem.threatN || 0) + 1;
-    if (d.b) mem.lastHurtT = sim.tickN; // base under fire → tighten the posture
-    if (!mem.peaceBroken && !sim.players[attacker.owner]?.isAI) {
-      mem.peaceBroken = true;
-      mem.nextWave = Math.min(mem.nextWave, sim.tickN + 12 * TICKS_PER_SEC);
-      mem.nextRaid = Math.min(mem.nextRaid, sim.tickN + 20 * TICKS_PER_SEC);
-    }
-    if (d.b && mem.defCd <= 0) {
-      const army = armyOf(sim, p, true);
-      if (army.length) {
-        cmds.push({ k: 'attack', p, ids: army.map(u => u.id), tgt: attacker.id, x: attacker.x, z: attacker.z });
-        mem.defCd = 8 * TICKS_PER_SEC;
+    if (!threatSeen) {
+      // learn the enemy's attack corridor: a rolling average of where the
+      // attackers come from. After a few attacks this points down their route.
+      mem.threatX = (mem.threatX ?? attacker.x) * 0.9 + attacker.x * 0.1;
+      mem.threatZ = (mem.threatZ ?? attacker.z) * 0.9 + attacker.z * 0.1;
+      mem.threatN = (mem.threatN || 0) + 1;
+      if (!mem.peaceBroken && !sim.players[attacker.owner]?.isAI) {
+        mem.peaceBroken = true;
+        mem.nextWave = Math.min(mem.nextWave, sim.tickN + 12 * TICKS_PER_SEC);
+        mem.nextRaid = Math.min(mem.nextRaid, sim.tickN + 20 * TICKS_PER_SEC);
       }
+      threatSeen = true;
     }
-    break;
+    if (d.b) {
+      mem.lastHurtT = sim.tickN; // base under fire → tighten the posture
+      if (mem.defCd <= 0) {
+        const army = armyOf(sim, p, true);
+        if (army.length) {
+          cmds.push({ k: 'attack', p, ids: army.map(u => u.id), tgt: attacker.id, x: attacker.x, z: attacker.z });
+          mem.defCd = 8 * TICKS_PER_SEC;
+        }
+      }
+    } else if (!harvHit) {
+      const v = sim.ents.get(d.victim);
+      if (v && UNITS[v.type]?.cargo) harvHit = { v, attacker }; // a harvester / oil miner under fire
+    }
+    if (++scanned >= 40 || (mem.defCd > 0 && harvHit)) break; // bounded scan
+  }
+  // harvesters under attack: rush the nearest spare combat units to defend them,
+  // and slip the miner to a safer field (away from the attacker, still nearby)
+  if (harvHit && (mem.harvDefCd ?? 0) <= 0) {
+    const { v, attacker } = harvHit;
+    const guards = armyOf(sim, p, true)
+      .sort((a, b) => ((a.x - v.x) ** 2 + (a.z - v.z) ** 2) - ((b.x - v.x) ** 2 + (b.z - v.z) ** 2))
+      .slice(0, 5);
+    if (guards.length) cmds.push({ k: 'attack', p, ids: guards.map(u => u.id), tgt: attacker.id, x: attacker.x, z: attacker.z });
+    const safe = saferOreField(sim, v, attacker.x, attacker.z);
+    if (safe) cmds.push({ k: 'harvest', p, ids: [v.id], x: safe.x + 0.5, z: safe.z + 0.5 });
+    mem.harvDefCd = 6 * TICKS_PER_SEC;
   }
 
   // --- macro cadence ---
@@ -676,6 +701,33 @@ function armyOf(sim: Sim, p: number, idleOnly: boolean): Entity[] {
     out.push(e);
   }
   return out;
+}
+
+// pick a safer resource field for a miner under fire: same resource type (ore vs
+// oil), reachable (same landmass for land miners / open water for sea ships),
+// well clear of the attacker but still reasonably close to the miner. null = none.
+function saferOreField(sim: Sim, harv: Entity, tx: number, tz: number): { x: number; z: number } | null {
+  const map: any = sim.map;
+  const oilMiner = !!UNITS[harv.type].oilMiner;
+  const sea = UNITS[harv.type].move === 'sea';
+  const reg = sea ? -1 : map.regionAt(Math.floor(harv.x), Math.floor(harv.z));
+  const hx = harv.x, hz = harv.z;
+  let best: { x: number; z: number } | null = null, bestScore = -1e9;
+  const R = 42;                                  // search a wide ring for a refuge field
+  const x0 = Math.max(0, Math.floor(hx) - R), x1 = Math.min(W, Math.floor(hx) + R);
+  const z0 = Math.max(0, Math.floor(hz) - R), z1 = Math.min(H, Math.floor(hz) + R);
+  for (let z = z0; z < z1; z++) for (let x = x0; x < x1; x++) {
+    const i = z * W + x;
+    if (map.ore[i] <= 0 || (map.oil[i] === 1) !== oilMiner) continue;
+    if (sea ? map.water[i] !== 1 : (reg >= 0 && map.regionAt(x, z) !== reg)) continue;
+    const dThreat = hyp(x - tx, z - tz);
+    if (dThreat < 12) continue;                 // must be clear of the attacker
+    const dHarv = hyp(x - hx, z - hz);
+    if (dHarv < 8) continue;                      // a genuinely different field, not the one under fire
+    const score = dThreat - dHarv * 0.6;         // far from the threat, but still near the miner
+    if (score > bestScore) { bestScore = score; best = { x, z }; }
+  }
+  return best;
 }
 
 // nearest ore cell not already served by one of our refineries

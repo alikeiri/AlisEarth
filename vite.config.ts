@@ -9,7 +9,9 @@ function git(cmd: string, fallback: string): string {
 }
 const APP_REV = git('rev-list --count HEAD', '0');
 const APP_HASH = git('rev-parse --short HEAD', 'dev');
-const BUILD_TIME = new Date().toISOString();
+// the footer shows the latest COMMIT's time (not the build time) so it always
+// reflects the source it was built from; falls back to build time off-git
+const BUILD_TIME = git('log -1 --format=%cI', new Date().toISOString());
 
 export default defineConfig({
   base: './',
