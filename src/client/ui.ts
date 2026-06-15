@@ -16,7 +16,7 @@ const U_ICONS: Record<string, string> = {
   chemtrooper: '\u{2623}️', chemtank: '\u{2623}️', chemdrone: '\u{2623}️',
   biotrooper: '\u{2622}️', biotank: '\u{2622}️', biodrone: '\u{2622}️', stealthtank: '\u{1F977}',
   gunboat: '\u{1F6A4}', destroyer: '\u{1F6F3}️', sub: '\u{1F93F}', navdrone: '\u{1F6F6}',
-  subhunter: '\u{1F42C}', mslcruiser: '\u{1F6A2}', flakship: '\u{1F387}',
+  subhunter: '\u{1F42C}', mslcruiser: '\u{1F6A2}', flakship: '\u{1F387}', transport: '\u{26F4}️',
   fighter: '\u{1F6E9}️', bomber: '\u{1F4A3}', dbomber: '\u{1F916}', heli: '\u{1F681}', helidrone: '\u{1FA81}',
   mcv: '\u{1F3D7}️', dozer: '\u{1F69C}', patriot: '\u{1F6F0}️',
 };
@@ -37,7 +37,7 @@ const UPG_INFO: Record<string, string> = {
 };
 export const U_LIST = ['rifle', 'rocket', 'melody', 'hive', 'tank', 'heavy', 'ifv', 'aatank', 'flak', 'patriot', 'fueltruck', 'harv', 'engineer', 'mcv', 'dozer', 'mlrs', 'recon', 'strike', 'msldrone',
   'chemtrooper', 'chemtank', 'chemdrone', 'biotrooper', 'biotank', 'biodrone', 'stealthtank',
-  'gunboat', 'destroyer', 'sub', 'subhunter', 'mslcruiser', 'flakship', 'navdrone', 'fighter', 'bomber', 'dbomber', 'heli', 'helidrone',
+  'gunboat', 'destroyer', 'sub', 'subhunter', 'mslcruiser', 'flakship', 'navdrone', 'transport', 'fighter', 'bomber', 'dbomber', 'heli', 'helidrone',
   'cmissile', 'bbmissile', 'chemissile'];
 
 // strengths/weaknesses tooltip, derived from the live damage matrix so it can
@@ -426,6 +426,8 @@ export class UI {
         if (units.some(u => u.t === 'hive')) parts.push(kbd('F', 'fortify / deploy'));
         if (units.some(u => u.t === 'mcv')) parts.push(kbd('F', 'deploy forward base'));
         if (units.some(u => u.t === 'dozer')) parts.push(kbd('T', 'terraform (drag an area, then mouse up/down sets height, click to build)'));
+        const carrier = units.find(u => UNITS[u.t]?.carrier);
+        if (carrier) parts.push(kbd('RMB', 'right-click units onto it to load') + ' · ' + kbd('U', `unload${carrier.cu ? ` (${carrier.cu} aboard)` : ''}`));
         parts.push(kbd('P', 'patrol'));
         const holding = units.some(u => u.st);
         parts.push(kbd('G', holding ? 'hold: ON' : 'hold position'));

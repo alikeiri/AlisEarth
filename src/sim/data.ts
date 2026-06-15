@@ -38,6 +38,7 @@ export interface UnitDef {
   deploys?: string;                              // MCV: F deploys it into this building (forward base)
   terra?: boolean;                               // bulldozer: can reshape terrain along a drawn path
   amphibious?: boolean;                          // can travel over BOTH land and water
+  carrier?: boolean;                             // transport ship: carries ground units across water (load/unload)
   altBuiltAt?: string;                           // a second building that can also produce this unit
   intercept?: { range: number; cd: number };     // shoots down silo missiles whose target is in range
   lays?: string;                                 // engineer: F lays this entity (a proximity mine)
@@ -102,6 +103,10 @@ export const UNITS: Record<string, UnitDef> = {
   // dedicated fleet air-defence: murders aircraft, useless against hulls
   flakship:  { name: 'Flak Cruiser', cost: 1200, hp: 360, speed: 2.6, range: 8.0, dmg: 30, rof: 0.7, builtAt: 'shipyard', buildTime: 13, kind: 'sea', move: 'sea' },
   navdrone:  { name: 'Naval Drone', cost: 500,  hp: 90,  speed: 3.6, range: 4.0, dmg: 18, rof: 1.0, builtAt: 'shipyard', buildTime: 7,  kind: 'sea', move: 'sea' },
+  // unarmed landing ship: ferries ground units across water. Capacity 10 vehicles
+  // + 30 infantry. Right-click it with units selected to load; press U to unload
+  // (onto shore if close, else it sails to the nearest coast and drops everyone).
+  transport: { name: 'Transport Ship', cost: 1100, hp: 800, speed: 3.2, range: 0, dmg: 0, rof: 1, builtAt: 'shipyard', buildTime: 12, kind: 'sea', move: 'sea', carrier: true },
   // aircraft (Aircraft Plant; require Airfield capacity)
   // ---- tech-gated units (require a Research Lab + the named research) ----
   chemtrooper: { name: 'Chem Trooper', cost: 500,  hp: 110, speed: 1.9, range: 4.2, dmg: 16, rof: 0.8, builtAt: 'barracks', buildTime: 7,  kind: 'inf', tech: 'chem', fortify: true },
