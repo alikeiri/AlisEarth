@@ -1916,9 +1916,11 @@ export class Sim {
   private tickHarvest(u: Entity, ord: Order, def: any) {
     const cap = def.cargo as number;
     const pl = this.players[u.owner];
+    const oilMiner = !!def.oilMiner, sea = def.move === 'sea';
+    const deliverR = sea ? 6 : 1.6; // sea oil ships pump ashore from just offshore
 
-    if (u.cargo >= cap || (u.cargo > 0 && this.map.ore[ord.oz! * W + ord.ox!] <= 0 && !this.findOreNear(ord))) {
-      // deliver
+    if (u.cargo >= cap || (u.cargo > 0 && this.map.ore[ord.oz! * W + ord.ox!] <= 0 && !this.findOreNear(ord, oilMiner, sea))) {
+      // deliver (oil refines at the Ore Refinery just like ore)
       let ref: Entity | null = null, bd = 1e9;
       for (const e of this.ents.values()) {
         if (e.b && e.owner === u.owner && e.type === 'refinery' && e.progress >= e.total) {
@@ -1927,7 +1929,7 @@ export class Sim {
         }
       }
       if (!ref) { u.path = null; return; } // wait for a refinery
-      if (bd <= 1.6) {
+      if (bd <= deliverR) {
         pl.credits += Math.round(u.cargoVal * pl.fac.incomeMul * pl.bonusIncome * (1 + 0.1 * (ref.lvl - 1)));
         u.cargo = 0; u.cargoVal = 0;
         this.events.push({ e: 'cash', x: ref.x, z: ref.z });
@@ -1979,15 +1981,14 @@ export class Sim {
     }
   }
 
-  private scanOre(ox: number, oz: number, R: number, ban?: Set<number>, reg?: number): { x: number; z: number } | null {
+  private scanOre(ox: number, oz: number, R: number, ban: Set<number> | undefined, oilMiner: boolean, sea: boolean, reg: number): { x: number; z: number } | null {
     let best: { x: number; z: number } | null = null, bd = 1e9;
     for (let z = Math.max(0, oz - R); z < Math.min(H, oz + R); z++) {
       for (let x = Math.max(0, ox - R); x < Math.min(W, ox + R); x++) {
-        if (this.map.ore[z * W + x] > 0 && !(ban && ban.has(z * W + x))) {
-          if (reg !== undefined && reg >= 0 && this.map.regionAt(x, z) !== reg) continue; // different landmass
-          const d = (x - ox) * (x - ox) + (z - oz) * (z - oz);
-          if (d < bd) { bd = d; best = { x, z }; }
-        }
+        const i = z * W + x;
+        if ((ban && ban.has(i)) || !this.mineCellOk(i, x, z, oilMiner, sea, reg)) continue;
+        const d = (x - ox) * (x - ox) + (z - oz) * (z - oz);
+        if (d < bd) { bd = d; best = { x, z }; }
       }
     }
     return best;
@@ -2006,13 +2007,13 @@ export class Sim {
     return best;
   }
 
-  private findOreNear(ord: Order): { x: number; z: number } | null {
-    // try locally first, then anywhere on the map — harvesters should never
-    // sit idle just because the nearest field is far away. Stay on the same
-    // landmass: ore across water is unreachable on foot.
+  private findOreNear(ord: Order, oilMiner = false, sea = false): { x: number; z: number } | null {
+    // try locally first, then anywhere on the map — miners should never sit idle
+    // just because the nearest field is far away. Stay on the same landmass (land)
+    // / on water (sea ships); oil miners seek oil, harvesters seek ore.
     const ban = ord.ban && ord.ban.length ? new Set(ord.ban) : undefined;
-    const reg = this.map.regionAt(ord.ox!, ord.oz!);
-    return this.scanOre(ord.ox!, ord.oz!, 22, ban, reg) || this.scanOre(ord.ox!, ord.oz!, Math.max(W, H), ban, reg);
+    const reg = sea ? -1 : this.map.regionAt(ord.ox!, ord.oz!);
+    return this.scanOre(ord.ox!, ord.oz!, 22, ban, oilMiner, sea, reg) || this.scanOre(ord.ox!, ord.oz!, Math.max(W, H), ban, oilMiner, sea, reg);
   }
 
   // Pick an ore cell for this harvester so the fleet SPREADS instead of blobbing
@@ -2029,7 +2030,8 @@ export class Sim {
       u.hzr = 0;
     }
     const ox = Math.floor(u.x), oz = Math.floor(u.z);
-    const reg = this.map.regionAt(ox, oz); // only consider ore on the same landmass
+    const oilMiner = !!UNITS[u.type].oilMiner, sea = UNITS[u.type].move === 'sea';
+    const reg = sea ? -1 : this.map.regionAt(ox, oz); // land: only ore on the same landmass
     // tally where friendly harvesters are already working / heading (crowding)
     const targets: { x: number; z: number }[] = [];
     for (const e of this.ents.values()) {
@@ -2044,10 +2046,8 @@ export class Sim {
     for (let z = Math.max(0, oz - R); z < Math.min(H, oz + R); z++) {
       for (let x = Math.max(0, ox - R); x < Math.min(W, ox + R); x++) {
         const i = z * W + x;
-        const ore = this.map.ore[i];
-        if (ore <= 0 || (ban && ban.has(i))) continue;
-        if (reg >= 0 && this.map.regionAt(x, z) !== reg) continue; // unreachable: different landmass
-        const value = ore * (this.map.gem[i] === 1 ? 3 : 1);
+        if ((ban && ban.has(i)) || !this.mineCellOk(i, x, z, oilMiner, sea, reg)) continue;
+        const value = this.map.ore[i] * (this.map.gem[i] === 1 ? 3 : 1);
         const dist = hyp(x - ox, z - oz);
         let crowd = 0;
         for (const t of targets) if ((t.x - x) * (t.x - x) + (t.z - z) * (t.z - z) < 49) crowd++; // within ~7 cells
@@ -2057,7 +2057,17 @@ export class Sim {
         if (score > bestScore) { bestScore = score; best = { x, z }; }
       }
     }
-    return best || this.findOreNear({ k: 'harvest', ox, oz, ban: ban ? [...ban] : undefined });
+    return best || this.findOreNear({ k: 'harvest', ox, oz, ban: ban ? [...ban] : undefined }, oilMiner, sea);
+  }
+
+  // can this cell be worked by the given miner? oil miners take only OIL wells
+  // (sea ships: water wells; land trucks: same-landmass land wells); ore
+  // harvesters take only non-oil ore on their own landmass.
+  private mineCellOk(i: number, x: number, z: number, oilMiner: boolean, sea: boolean, reg: number): boolean {
+    if (this.map.ore[i] <= 0) return false;
+    if ((this.map.oil[i] === 1) !== oilMiner) return false;
+    if (sea) return this.map.water[i] === 1;
+    return reg < 0 || this.map.regionAt(x, z) === reg;
   }
 
   autoHarvest(u: Entity) {

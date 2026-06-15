@@ -38,6 +38,7 @@ export class GameMap {
   forest = new Uint8Array(W * H);             // forest cells (blocked, rendered as trees)
   water = new Uint8Array(W * H);              // water cells (navigable by ships)
   gem = new Uint8Array(W * H);                // special ore: 3x credit value
+  oil = new Uint8Array(W * H);                // oil wells: mined by oil miners, refined for credits
   oreMax = new Float32Array(W * H);           // original ore amount (for regrowth)
   road = new Int8Array(W * H);                // 0 none, else owner+1 (extends build reach)
   roadDirty = true;
@@ -551,6 +552,43 @@ export function genMap(seed: number, nPlayers: number): GameMap {
       }
     gems++;
   }
+  // -- oil wells: a SECOND resource, worked by dedicated oil miners (land vehicle
+  // + sea ship) and refined at the Ore Refinery. Flagged in `oil` but stored in
+  // the same `ore` field so the whole harvest/regrow/delivery pipeline is reused.
+  const addOilWell = (cx: number, cz: number, sea: boolean) => {
+    for (let z = cz - 1; z <= cz + 1; z++)
+      for (let x = cx - 1; x <= cx + 1; x++) {
+        if (!m.inB(x, z)) continue;
+        const i = z * W + x;
+        const ok = sea ? m.water[i] === 1 : !m.blockedT(x, z);
+        if (!ok) continue;
+        m.ore[i] = 1000 * (0.8 + 0.4 * rng.next());
+        m.oil[i] = 1;
+      }
+    oreCenters.push({ x: cx, z: cz });
+  };
+  // land oil wells: contested, away from spawns
+  let oilL = 0, olt = 0;
+  const wantOilLand = Math.max(2, Math.round(W / 40));
+  while (oilL < wantOilLand && olt < 500) {
+    olt++;
+    const cx = centerBiased(W, 18, 0.3), cz = centerBiased(H, 18, 0.3);
+    if (m.blockedT(cx, cz) || !farFromOre(cx, cz, 11)) continue;
+    let okSpawn = true;
+    for (const s of starts) if ((cx - s.x) * (cx - s.x) + (cz - s.z) * (cz - s.z) < 18 * 18) { okSpawn = false; break; }
+    if (!okSpawn) continue;
+    addOilWell(cx, cz, false); oilL++;
+  }
+  // sea oil wells (open water) — guarantees an offshore economy on water/island maps
+  let oilS = 0, ost = 0;
+  const wantOilSea = Math.max(2, Math.round(W / 38));
+  while (oilS < wantOilSea && ost < 700) {
+    ost++;
+    const cx = 16 + rng.int(W - 32), cz = 16 + rng.int(H - 32);
+    if (m.water[cz * W + cx] !== 1 || !farFromOre(cx, cz, 9)) continue;
+    addOilWell(cx, cz, true); oilS++;
+  }
+
   // record original amounts so fields can slowly regrow (territory control)
   m.oreMax.set(m.ore);
   return m;

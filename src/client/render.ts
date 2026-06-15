@@ -790,6 +790,7 @@ export class Renderer {
   private selRing: THREE.InstancedMesh;
   private oreMesh: THREE.InstancedMesh;
   private gemMesh!: THREE.InstancedMesh;
+  private oilMesh!: THREE.InstancedMesh;
   private roadMesh!: THREE.InstancedMesh;
   private ghost: THREE.Mesh;
   private tracerGeo: THREE.BufferGeometry;
@@ -968,6 +969,17 @@ export class Renderer {
     this.gemMesh.frustumCulled = false;
     this.gemMesh.castShadow = true;
     this.scene.add(this.gemMesh);
+
+    // oil wells: a stubby dark derrick/pool marker (land + offshore)
+    const oilGeo = new THREE.CylinderGeometry(0.16, 0.34, 1.1, 6);
+    this.oilMesh = new THREE.InstancedMesh(
+      oilGeo,
+      new THREE.MeshStandardMaterial({ color: 0x1c1c22, roughness: 0.5, metalness: 0.4, emissive: 0x120a04, emissiveIntensity: 0.4 }),
+      1024
+    );
+    this.oilMesh.frustumCulled = false;
+    this.oilMesh.castShadow = true;
+    this.scene.add(this.oilMesh);
 
     // unit instancing: procedural models first, external GLBs swap in async
     for (const t of ['rifle', 'rocket', 'melody', 'tank', 'heavy', 'harv', 'engineer', 'recon', 'strike', 'msldrone', 'mlrs',
@@ -2083,17 +2095,21 @@ export class Renderer {
     // ore refresh
     if (this.map.oreDirty) {
       this.map.oreDirty = false;
-      let n = 0, gn = 0;
+      let n = 0, gn = 0, on = 0;
       for (let cz = 0; cz < H; cz++) {
         for (let cx = 0; cx < W; cx++) {
           const amt = this.map.ore[cz * W + cx];
           if (amt <= 0) continue;
           const x = cx + 0.5, z = cz + 0.5;
-          this.dummy.position.set(x, this.map.heightAt(x, z) + 0.15, z);
+          const oilCell = this.map.oil[cz * W + cx] === 1;
+          // oil wells (incl. offshore) sit on top of the ground/water surface
+          const baseY = oilCell ? Math.max(this.map.heightAt(x, z), SEA) : this.map.heightAt(x, z);
+          this.dummy.position.set(x, baseY + (oilCell ? 0.5 : 0.15), z);
           this.dummy.rotation.set(0, (cx * 7 + cz * 13) % 6, 0);
-          this.dummy.scale.setScalar(0.5 + Math.min(1, amt / 700) * 0.8);
+          this.dummy.scale.setScalar(oilCell ? 1 : 0.5 + Math.min(1, amt / 700) * 0.8);
           this.dummy.updateMatrix();
-          if (this.map.gem[cz * W + cx] === 1) { if (gn < 512) this.gemMesh.setMatrixAt(gn++, this.dummy.matrix); }
+          if (oilCell) { if (on < 1024) this.oilMesh.setMatrixAt(on++, this.dummy.matrix); }
+          else if (this.map.gem[cz * W + cx] === 1) { if (gn < 512) this.gemMesh.setMatrixAt(gn++, this.dummy.matrix); }
           else if (n < 2048) this.oreMesh.setMatrixAt(n++, this.dummy.matrix);
         }
       }
@@ -2101,6 +2117,8 @@ export class Renderer {
       this.oreMesh.instanceMatrix.needsUpdate = true;
       this.gemMesh.count = gn;
       this.gemMesh.instanceMatrix.needsUpdate = true;
+      this.oilMesh.count = on;
+      this.oilMesh.instanceMatrix.needsUpdate = true;
     }
 
     // road refresh

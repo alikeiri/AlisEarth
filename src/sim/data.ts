@@ -38,6 +38,7 @@ export interface UnitDef {
   deploys?: string;                              // MCV: F deploys it into this building (forward base)
   terra?: boolean;                               // bulldozer: can reshape terrain along a drawn path
   unique?: boolean;                              // at most one alive (or in production) per player
+  oilMiner?: boolean;                            // mines OIL wells (not ore) and refines them for credits
   amphibious?: boolean;                          // can travel over BOTH land and water
   carrier?: boolean;                             // transport ship: carries ground units across water (load/unload)
   altBuiltAt?: string;                           // a second building that can also produce this unit
@@ -64,6 +65,9 @@ export const UNITS: Record<string, UnitDef> = {
   tank:   { name: 'Battle Tank',  cost: 800,  hp: 340, speed: 2.6, range: 5.5, dmg: 34, rof: 1.6, builtAt: 'factory',  buildTime: 12, kind: 'veh' },
   heavy:  { name: 'Heavy Tank',   cost: 1250, hp: 640, speed: 2.0, range: 6.0, dmg: 58, rof: 2.2, builtAt: 'factory',  buildTime: 17, kind: 'veh' },
   harv:   { name: 'Harvester',    cost: 900,  hp: 450, speed: 1.6, range: 0,   dmg: 0,  rof: 1,   builtAt: 'factory',  buildTime: 14, kind: 'veh', cargo: 400 },
+  // oil economy: dedicated miners that work OIL wells and refine them at the Ore Refinery
+  oiltruck: { name: 'Oil Miner',  cost: 1000, hp: 480, speed: 1.7, range: 0,   dmg: 0,  rof: 1,   builtAt: 'factory',  buildTime: 13, kind: 'veh', cargo: 450, oilMiner: true },
+  oilship:  { name: 'Oil Rig Ship', cost: 1150, hp: 540, speed: 2.8, range: 0, dmg: 0,  rof: 1,   builtAt: 'shipyard', buildTime: 13, kind: 'sea', move: 'sea', cargo: 520, oilMiner: true },
   recon:  { name: 'Recon Drone',  cost: 400,  hp: 70,  speed: 3.4, range: 4.0, dmg: 6,  rof: 0.6, builtAt: 'dronefac', buildTime: 7,  kind: 'air', fly: true },
   strike: { name: 'Strike Drone', cost: 1100, hp: 150, speed: 2.8, range: 5.0, dmg: 32, rof: 1.8, builtAt: 'dronefac', buildTime: 13, kind: 'air', fly: true },
   msldrone: { name: 'Missile Drone', cost: 1500, hp: 120, speed: 2.4, range: 7.0, dmg: 45, rof: 3.0, builtAt: 'dronefac', buildTime: 15, kind: 'air', fly: true },

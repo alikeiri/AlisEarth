@@ -19,6 +19,7 @@ const U_ICONS: Record<string, string> = {
   subhunter: '\u{1F42C}', mslcruiser: '\u{1F6A2}', flakship: '\u{1F387}', transport: '\u{26F4}️',
   fighter: '\u{1F6E9}️', bomber: '\u{1F4A3}', dbomber: '\u{1F916}', heli: '\u{1F681}', helidrone: '\u{1FA81}',
   mcv: '\u{1F3D7}️', dozer: '\u{1F69C}', patriot: '\u{1F6F0}️',
+  oiltruck: '\u{1F6E2}️', oilship: '\u{1F6E2}️',
 };
 export const B_LIST = ['power', 'refinery', 'radar', 'barracks', 'factory', 'turret', 'sam', 'cannon', 'tesla', 'irondome', 'wall', 'barrier', 'dronefac', 'shipyard', 'airforce', 'airfield', 'lab', 'silo'];
 
@@ -35,9 +36,9 @@ const UPG_INFO: Record<string, string> = {
   airforce: '+25% production speed',
   shipyard: '+25% production speed',
 };
-export const U_LIST = ['rifle', 'rocket', 'melody', 'hive', 'tank', 'heavy', 'ifv', 'aatank', 'flak', 'patriot', 'fueltruck', 'harv', 'engineer', 'mcv', 'dozer', 'mlrs', 'recon', 'strike', 'msldrone',
+export const U_LIST = ['rifle', 'rocket', 'melody', 'hive', 'tank', 'heavy', 'ifv', 'aatank', 'flak', 'patriot', 'fueltruck', 'harv', 'oiltruck', 'engineer', 'mcv', 'dozer', 'mlrs', 'recon', 'strike', 'msldrone',
   'chemtrooper', 'chemtank', 'chemdrone', 'biotrooper', 'biotank', 'biodrone', 'stealthtank',
-  'gunboat', 'destroyer', 'sub', 'subhunter', 'mslcruiser', 'flakship', 'navdrone', 'transport', 'fighter', 'bomber', 'dbomber', 'heli', 'helidrone',
+  'gunboat', 'destroyer', 'sub', 'subhunter', 'mslcruiser', 'flakship', 'navdrone', 'oilship', 'transport', 'fighter', 'bomber', 'dbomber', 'heli', 'helidrone',
   'cmissile', 'bbmissile', 'chemissile'];
 
 // strengths/weaknesses tooltip, derived from the live damage matrix so it can
@@ -91,6 +92,8 @@ const DESCRIPTIONS: Record<string, string> = {
   heavy: 'Heavy Tank: slow, heavily armored bruiser with big guns.',
   ifv: 'IFV: fast autocannon carrier — shreds infantry, can pepper aircraft.',
   harv: 'Harvester: gathers ore and returns it to a refinery. Unarmed.',
+  oiltruck: 'Oil Miner: works land OIL wells and refines them at the Ore Refinery for credits. Unarmed.',
+  oilship: 'Oil Rig Ship: works offshore OIL wells and pumps the oil to a coastal Ore Refinery. Unarmed.',
   mcv: 'Construction Vehicle: deploys (F) into a new Construction Yard for a forward base.',
   dozer: 'Bulldozer: reshapes terrain (T) — raise/lower ground, build land bridges.',
   recon: 'Recon Drone: cheap, fast scout with a light weapon and good vision.',
@@ -633,7 +636,7 @@ export class UI {
     for (let cz = 0; cz < H; cz++)
       for (let cx = 0; cx < W; cx++)
         if (map.ore[cz * W + cx] > 0) {
-          ctx.fillStyle = map.gem[cz * W + cx] === 1 ? '#3ee8e0' : '#d9a520';
+          ctx.fillStyle = map.oil[cz * W + cx] === 1 ? '#2a2a33' : map.gem[cz * W + cx] === 1 ? '#3ee8e0' : '#d9a520';
           ctx.fillRect(mx(cx + 1), my(cz + 1), 1.6, 1.6);
         }
     // fog overlay (drawn over terrain+ore, under entities the player can see)
