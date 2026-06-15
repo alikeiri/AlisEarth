@@ -53,6 +53,7 @@ export interface Entity {
   mineStock?: number; // engineer: proximity mines left to lay
   rzx?: number; rzz?: number; rzr?: number; // engineer: assigned auto-repair zone (centre + radius)
   hzx?: number; hzz?: number; hzr?: number; // harvester: assigned ore-gathering work area (centre + radius)
+  cargoUnits?: Entity[]; // transport ship: ground units stowed aboard (removed from the map while carried)
   holdFire?: boolean; // weapons-hold: never fires, even when attacked, until toggled off
   forceTgt?: number; forceT?: number; // defensive building: force-fire target id + ticks left
 }
@@ -77,6 +78,21 @@ const FORT_ATK_MUL = 1.5;   // fortified infantry hit harder
 const FORT_DEF_MUL = 0.5;   // ...and take half damage (settled)
 const FORT_DEPLOY_VULN = 1.5; // ...but take extra while deploying / packing
 const MISSILE_CAP = 25;     // max armed missiles a single silo can stockpile
+const CARRY_VEH = 10;       // transport ship capacity: vehicles
+const CARRY_INF = 30;       // transport ship capacity: infantry
+// how many of each kind a transport already holds
+function carriedCounts(ship: Entity): { veh: number; inf: number } {
+  let veh = 0, inf = 0;
+  for (const e of ship.cargoUnits || []) { const k = UNITS[e.type]?.kind; if (k === 'veh') veh++; else if (k === 'inf') inf++; }
+  return { veh, inf };
+}
+// can this ship take one more unit of the given type?
+function canBoard(ship: Entity, type: string): boolean {
+  const k = UNITS[type]?.kind;
+  if (k !== 'veh' && k !== 'inf') return false;   // only ground units
+  const c = carriedCounts(ship);
+  return k === 'veh' ? c.veh < CARRY_VEH : c.inf < CARRY_INF;
+}
 
 const FORM: { x: number; z: number }[] = [{ x: 0, z: 0 }];
 for (let r = 1; r <= 3; r++) {
@@ -596,6 +612,24 @@ export class Sim {
         u.hzx = c.cx; u.hzz = c.cz; u.hzr = c.r;
         const n = this.scanOreZone(c.cx, c.cz, c.r) || { x: Math.floor(c.cx), z: Math.floor(c.cz) };
         u.orders = [{ k: 'harvest', ox: n.x, oz: n.z }]; u.path = null; u.cmdT = this.tickN;
+      }
+      return;
+    }
+    if (c.k === 'load') {
+      // ground units board a transport ship (c.tgt). They walk to it and embark
+      // when adjacent; only infantry/vehicles can board, up to the ship's capacity.
+      const ship = this.ents.get(c.tgt);
+      if (!ship || !UNITS[ship.type]?.carrier || ship.owner !== c.p) return;
+      for (const u of units) {
+        const k = UNITS[u.type]?.kind;
+        if ((k === 'inf' || k === 'veh') && u.id !== ship.id) { u.orders = [{ k: 'board', tgt: c.tgt }]; u.path = null; u.cmdT = this.tickN; }
+      }
+      return;
+    }
+    if (c.k === 'unload') {
+      // transports drop their cargo: onto shore if close, else sail to the nearest coast first
+      for (const u of units) if (UNITS[u.type]?.carrier && (u.cargoUnits?.length || 0) > 0) {
+        u.orders = [{ k: 'unload' }]; u.path = null; u.cmdT = this.tickN;
       }
       return;
     }
@@ -1471,6 +1505,32 @@ export class Sim {
       }
       const d = hyp(t.x - u.x, t.z - u.z);
       if (d > 3.2) this.moveToward(u, t.x, t.z, def); else u.path = null; // hold near it when close
+    } else if (ord.k === 'board') {
+      // walk to a transport ship and embark when adjacent (it sits just offshore)
+      const ship = this.ents.get(ord.tgt!);
+      if (!ship || ship.hp <= 0 || !UNITS[ship.type]?.carrier || ship.owner !== u.owner) { u.orders.shift(); u.path = null; return; }
+      if (!canBoard(ship, u.type)) { u.orders.shift(); u.path = null; return; } // full or not loadable
+      if (Math.hypot(ship.x - u.x, ship.z - u.z) <= 2.6) {
+        (ship.cargoUnits ??= []).push(u);   // stow aboard
+        this.ents.delete(u.id);             // leave the map while carried (safe: tick iterates a copy)
+        u.orders = []; u.path = null;
+        this.events.push({ e: 'board', x: u.x, z: u.z });
+        return;
+      }
+      this.moveToward(u, ship.x, ship.z, def); // pathing lands a land unit on the shore beside the ship
+    } else if (ord.k === 'unload') {
+      // drop all cargo: onto shore if we're close, otherwise sail to the nearest coast
+      if (!(u.cargoUnits?.length)) { u.orders.shift(); u.path = null; return; }
+      const shore = nearestPassable(this.map, Math.floor(u.x), Math.floor(u.z), 5);
+      if (shore && Math.hypot(shore.x + 0.5 - u.x, shore.z + 0.5 - u.z) <= 4.5) {
+        this.unloadAll(u);
+        u.orders.shift(); u.path = null;
+      } else {
+        const coast = nearestPassable(this.map, Math.floor(u.x), Math.floor(u.z), 80);
+        if (!coast) { u.orders.shift(); u.path = null; return; } // no land anywhere — give up
+        const seaAdj = nearestSea(this.map, coast.x, coast.z, 8) || { x: Math.floor(u.x), z: Math.floor(u.z) };
+        this.moveToward(u, seaAdj.x + 0.5, seaAdj.z + 0.5, def);
+      }
     } else if (ord.k === 'force') {
       // force-fire at a fixed point (or a tracked entity), hitting friend OR foe
       let px = ord.x!, pz = ord.z!;
@@ -1957,6 +2017,24 @@ export class Sim {
   }
 
   // returns true when arrived
+  // disgorge a transport's whole cargo onto nearby shore cells, spread out so
+  // they don't all stack on one tile (separation tidies the rest)
+  private unloadAll(ship: Entity) {
+    const cu = ship.cargoUnits || [];
+    const ring = [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, 1], [1, -1], [-1, -1], [2, 0], [0, 2], [-2, 0], [0, -2]];
+    cu.forEach((u, i) => {
+      const o = ring[i % ring.length];
+      const c = nearestPassable(this.map, Math.floor(ship.x) + o[0] * 2, Math.floor(ship.z) + o[1] * 2, 14)
+        || nearestPassable(this.map, Math.floor(ship.x), Math.floor(ship.z), 16)
+        || { x: Math.floor(ship.x), z: Math.floor(ship.z) };
+      u.x = c.x + 0.5; u.z = c.z + 0.5; u.px = u.x; u.pz = u.z;
+      u.orders = []; u.path = null; u.cmdT = this.tickN;
+      this.ents.set(u.id, u);                 // back onto the map
+      this.events.push({ e: 'unload', x: u.x, z: u.z });
+    });
+    ship.cargoUnits = [];
+  }
+
   private moveToward(u: Entity, x: number, z: number, def: any): boolean {
     const d = Math.sqrt((u.x - x) * (u.x - x) + (u.z - z) * (u.z - z));
     if (d < 0.25) return true;
@@ -2051,6 +2129,8 @@ export class Sim {
       } else {
         this.events.push({ e: 'boom', x: e.x, z: e.z, big: false });
         if (!UNITS[e.type]?.internal) this.stats.lostU[e.owner]++;
+        // a transport sunk with troops aboard: they go down with the ship
+        if (e.cargoUnits?.length) { for (const c of e.cargoUnits) if (!UNITS[c.type]?.internal) this.stats.lostU[c.owner]++; e.cargoUnits = []; }
         // AI casualty ledger (drives the next game's unit-mix preferences)
         if (this.players[e.owner]?.isAI) {
           const k = UNITS[e.type]?.kind as keyof typeof this.aiLost;
@@ -2206,6 +2286,7 @@ export class Sim {
         if (UNITS[e.type]?.cloak) v.ck = 1;
         if (e.holdFire) v.hf = 1;
         if (e.orders[0]?.k === 'patrol') v.pa = 1;
+        if (e.cargoUnits && e.cargoUnits.length) v.cu = e.cargoUnits.length;
         if (e.rzr && e.rzr > 0) { v.rzx = e.rzx; v.rzz = e.rzz; v.rzr = e.rzr; }
         if (e.hzr && e.hzr > 0) { v.hzx = e.hzx; v.hzz = e.hzz; v.hzr = e.hzr; }
         if (e.cd > 0 && UNITS[e.type]?.dmg > 0) {

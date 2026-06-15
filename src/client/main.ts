@@ -81,6 +81,7 @@ function simViews(sim: Sim, a: number): any[] {
       if (e.hzr && e.hzr > 0) { v.hzx = e.hzx; v.hzz = e.hzz; v.hzr = e.hzr; }
       if (e.holdFire) v.hf = 1;
       if (e.orders[0]?.k === 'patrol') v.pa = 1;
+      if (e.cargoUnits && e.cargoUnits.length) v.cu = e.cargoUnits.length; // transport: units aboard
     }
     out.push(v);
   }
@@ -490,6 +491,7 @@ class GameClient {
   private groups: Record<number, number[]> = {};
   private lastGroupTap = { n: 0, t: 0 };
   private lastHover: { x: number; y: number } | null = null;
+  private loadHover = false; // hovering my transport with loadable units selected
   private tipEl: HTMLDivElement | null = null;  // delayed name+HP hover tooltip
   private tipEntId = -1;
   private tipSince = 0;
@@ -610,6 +612,11 @@ class GameClient {
         this.renderer.setFormationPath(null);
       }
       if (e.code === 'KeyS') this.issueToUnits({ k: 'stop' });
+      // U: transport ships unload their cargo (onto shore, or sail to the nearest coast)
+      if (e.code === 'KeyU') {
+        const ships = this.myUnitIds().filter(id => { const v = this.byId.get(id); return v && UNITS[v.t]?.carrier && (v.cu || 0) > 0; });
+        if (ships.length) { this.game.issue({ k: 'unload', p: this.game.me, ids: ships }); audio.play('confirm'); }
+      }
       // H: weapons-hold toggle (don't fire even when attacked)
       if (e.code === 'KeyH') {
         const ids = this.myUnitIds();
@@ -1575,6 +1582,17 @@ class GameClient {
         return;
       }
     }
+    // right-click MY transport ship with ground units selected → load them aboard
+    const carrier = this.pickView(sx, sy, v => v.o === me && v.b !== 1 && UNITS[v.t]?.carrier);
+    if (carrier) {
+      const ground = ids.filter(id => { const k = UNITS[this.byId.get(id)?.t]?.kind; return k === 'inf' || k === 'veh'; });
+      if (ground.length) {
+        this.game.issue({ k: 'load', p: me, ids: ground, tgt: carrier.i });
+        audio.play('confirm'); audio.ack(this.dominantType(ground), 'move');
+        this.markCmd(ground, carrier.x, carrier.z, false);
+        return;
+      }
+    }
     // right-click a friendly unit (not one of the selected ones) with combat
     // units selected → escort it: follow it and engage anything that threatens it
     if (ids.some(id => UNITS[this.byId.get(id)?.t]?.dmg > 0)) {
@@ -1921,7 +1939,7 @@ class GameClient {
     const canHover = !this.ui.placing && !this.patrolMode && !this.mouse.dragging
       && !this.mouse.rDragging && this.myUnitIds().length > 0;
     let hover = this.lastHover;
-    if (!canHover) { hover = null; this.lastHover = null; }
+    if (!canHover) { hover = null; this.lastHover = null; this.loadHover = false; }
     else if (this.frame % 2 === 0) {
       hover = null;
       const enemy = this.pickView(this.mouse.x, this.mouse.y, v => !this.allies.has(v.o));
@@ -1930,6 +1948,11 @@ class GameClient {
         if (p.ok) hover = { x: p.x, y: p.y };
       }
       this.lastHover = hover;
+      // hovering MY transport with ground units selected → show the loading cursor
+      const me = this.game.me;
+      const hasGround = this.myUnitIds().some(id => { const k = UNITS[this.byId.get(id)?.t]?.kind; return k === 'inf' || k === 'veh'; });
+      const carrier = hasGround ? this.pickView(this.mouse.x, this.mouse.y, v => v.o === me && v.b !== 1 && UNITS[v.t]?.carrier) : null;
+      this.loadHover = !!carrier;
     }
     // delayed name + HP tooltip for whatever entity sits under the cursor
     this.updateEntTip(t);
@@ -1940,7 +1963,7 @@ class GameClient {
       && this.byId.get([...this.selection][0])?.o === this.game.me;
     // only assign when it changes — re-setting a data-URI cursor every frame
     // makes Chrome re-decode the image and flicker
-    const wantCursor = this.terraMode ? TERRA_CURSOR : siloAiming ? SILO_CURSOR : hover ? 'crosshair' : '';
+    const wantCursor = this.terraMode ? TERRA_CURSOR : siloAiming ? SILO_CURSOR : this.loadHover ? LOAD_CURSOR : hover ? 'crosshair' : '';
     if (wantCursor !== this.lastCursor) { canvas3.style.cursor = wantCursor; this.lastCursor = wantCursor; }
 
     // range/detection circles for the current selection
@@ -2120,6 +2143,8 @@ const $ = (id: string) => document.getElementById(id)!;
 const SILO_CURSOR = "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='34' height='34'%3E%3Cg fill='none' stroke='%23ff4030' stroke-width='2'%3E%3Ccircle cx='17' cy='17' r='10'/%3E%3Cpath d='M17 1v9M17 24v9M1 17h9M24 17h9'/%3E%3C/g%3E%3Ccircle cx='17' cy='17' r='1.6' fill='%23ff4030'/%3E%3C/svg%3E\") 17 17, crosshair";
 // green leveling icon shown while a bulldozer is terraforming (area + up/down arrows)
 const TERRA_CURSOR = "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='32' height='32'%3E%3Cg fill='none' stroke='%234ade6a' stroke-width='2'%3E%3Crect x='5' y='13' width='22' height='14' rx='1'/%3E%3Cpath d='M16 2v8M12 6l4-4 4 4'/%3E%3C/g%3E%3C/svg%3E\") 16 20, crosshair";
+// loading cursor: a crate descending into an open box (shown over your transport)
+const LOAD_CURSOR = "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='34' height='34'%3E%3Cg fill='none' stroke='%2340c4ff' stroke-width='2'%3E%3Cpath d='M6 20v8h22v-8'/%3E%3Crect x='12' y='10' width='10' height='10' rx='1'/%3E%3Cpath d='M17 1v6M14 4l3-3 3 3'/%3E%3C/g%3E%3C/svg%3E\") 17 17, crosshair";
 let selFaction = 'usa';
 let selDiff = 1;
 let selDiff2 = 2;
