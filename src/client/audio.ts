@@ -191,6 +191,10 @@ class AudioMan {
       case 'click':
         this.tone('square', 850, 850, 0.025, 0.07 * v);
         break;
+      case 'notify': // new lobby message while the tab is backgrounded: gentle rising chime
+        this.tone('triangle', 880, 880, 0.12, 0.18 * v);
+        this.tone('triangle', 1175, 1175, 0.17, 0.16 * v, 0.10);
+        break;
       case 'confirm':
         this.tone('sine', 440, 540, 0.07, 0.12 * v);
         break;

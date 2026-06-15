@@ -1016,6 +1016,19 @@ export class Sim {
     }
   }
 
+  // Mass-production bonus: if another finished building of the same type and owner
+  // is currently producing the same unit, both build 25% faster. Encourages
+  // splitting one unit across twin factories instead of stacking a single queue.
+  private coProdBonus(b: Entity, type: string): number {
+    for (const bb of this.ents.values()) {
+      if (bb === b || !bb.b || bb.owner !== b.owner || bb.type !== b.type) continue;
+      if (bb.progress < bb.total) continue;          // still under construction
+      const h = bb.queue[0];
+      if (h && h.type === type && h.paid !== false) return 1.25; // actively building same unit
+    }
+    return 1;
+  }
+
   // ---------- buildings ----------
   private tickBuilding(b: Entity) {
     const pl = this.players[b.owner];
@@ -1076,7 +1089,8 @@ export class Sim {
         else return;
       }
       if (pl.godmode) it.t = 0;                       // cheat: instant production
-      else it.t -= TICK * rate * (1 + 0.25 * (b.lvl - 1)); // upgrades speed up production
+      // upgrades speed up production; a twin factory building the same unit adds +25%
+      else it.t -= TICK * rate * (1 + 0.25 * (b.lvl - 1)) * this.coProdBonus(b, it.type);
       if (it.t <= 0 && UNITS[it.type].missile) {
         // missiles don't spawn — they arm the silo, stacking up to MISSILE_CAP
         (b.missileStock ??= []).push(it.type);

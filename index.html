@@ -234,9 +234,9 @@
     </div>
     <button id="sidebarToggle" title="Show/hide build menu">⮜</button>
     <div id="sidebar">
-      <h3>Structures</h3>
+      <h3 id="hdrB">Structures</h3>
       <div class="bgrid" id="gridB"></div>
-      <h3>Units</h3>
+      <h3 id="hdrU">Units</h3>
       <div class="bgrid" id="gridU"></div>
     </div>
     <div id="minimapWrap"><canvas id="minimap" width="200" height="200"></canvas></div>
@@ -327,7 +327,10 @@
         <input class="minput" id="mpJoinCode" maxlength="4" placeholder="CODE" style="flex:0 0 96px" />
         <button class="mbtn" id="btnMpJoinCode">JOIN BY CODE</button>
       </div>
-      <h3 style="margin:6px 0 4px;text-align:left">Lobby chat</h3>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin:6px 0 4px">
+        <h3 style="margin:0;text-align:left">Lobby chat</h3>
+        <button type="button" class="lobbyNotifyToggle" title="Play a sound when a new message arrives while this tab is in the background" style="background:none;border:0;color:#78909c;font-size:12px;cursor:pointer;padding:2px 4px">🔔 Alert: on</button>
+      </div>
       <div id="lobbyChatLog" class="lobbyChatLog" style="background:rgba(20,28,38,0.9);border:1px solid #2c3e50;border-radius:6px;padding:6px 8px;font-size:12px;line-height:1.6;color:#cfd8dc;height:120px;overflow-y:auto;text-align:left"></div>
       <div class="mrow" style="margin-top:6px">
         <input class="minput" id="lobbyChatInput" maxlength="160" placeholder="Say something…" style="flex:1" />
@@ -348,7 +351,10 @@
         <button class="mbtn" id="btnLeave">LEAVE</button>
       </div>
       <div style="color:#78909c;font-size:13px;text-align:center">Share the code. Starting solo adds an AI opponent.</div>
-      <h3 style="margin:8px 0 4px;text-align:left">Lobby chat</h3>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin:8px 0 4px">
+        <h3 style="margin:0;text-align:left">Lobby chat</h3>
+        <button type="button" class="lobbyNotifyToggle" title="Play a sound when a new message arrives while this tab is in the background" style="background:none;border:0;color:#78909c;font-size:12px;cursor:pointer;padding:2px 4px">🔔 Alert: on</button>
+      </div>
       <div class="lobbyChatLog" style="background:rgba(20,28,38,0.9);border:1px solid #2c3e50;border-radius:6px;padding:6px 8px;font-size:12px;line-height:1.6;color:#cfd8dc;height:110px;overflow-y:auto;text-align:left"></div>
       <div class="mrow" style="margin-top:6px">
         <input class="minput" id="roomChatInput" maxlength="160" placeholder="Say something…" style="flex:1" />

@@ -836,11 +836,19 @@ class GameClient {
   private train(type: string) {
     const def = UNITS[type];
     if (!def) return;
-    // a primary building (set via double-click) always wins; else shortest queue.
+    const canMake = (v: any) => v && v.b && v.o === this.game.me && v.pr >= 1 &&
+      (v.t === def.builtAt || v.t === def.altBuiltAt);
+    // if a single matching production building is selected, queue on THAT one so
+    // twin factories can each build something different. Otherwise: a primary
+    // building (set via double-click) always wins; else the shortest queue.
+    if (this.selection.size === 1) {
+      const sel = this.byId.get([...this.selection][0]);
+      if (canMake(sel)) { this.game.issue({ k: 'train', p: this.game.me, bid: sel.i, type }); audio.play('click'); return; }
+    }
     // some units (MCV) can come from a second building type too (altBuiltAt)
     let primary: any = null, best: any = null;
     for (const v of this.lastViews) {
-      if (!v.b || v.o !== this.game.me || (v.t !== def.builtAt && v.t !== def.altBuiltAt) || v.pr < 1) continue;
+      if (!canMake(v)) continue;
       if (v.pm) primary = v;
       if (!best || (v.qn || 0) < (best.qn || 0)) best = v;
     }
@@ -2619,6 +2627,26 @@ function appendLobbyChat(m: any) {
     while (log.children.length > 60) log.removeChild(log.firstChild!);
     log.scrollTop = log.scrollHeight;
   });
+  // alert the player to a new lobby message they'd otherwise miss: only when the
+  // tab is backgrounded or unfocused, and only if they haven't muted the alert
+  if (!notifyMuted() && (document.hidden || !document.hasFocus())) audio.play('notify');
+}
+// per-browser preference: sound alert for new lobby messages while the tab is in
+// the background. Persisted so it sticks across sessions; toggled from the lobby.
+function notifyMuted(): boolean { return localStorage.getItem('feNotifyMuted') === '1'; }
+function syncNotifyToggles() {
+  const muted = notifyMuted();
+  document.querySelectorAll('.lobbyNotifyToggle').forEach(b => {
+    (b as HTMLElement).textContent = muted ? '🔕 Alert: off' : '🔔 Alert: on';
+  });
+}
+function wireNotifyToggles() {
+  document.querySelectorAll('.lobbyNotifyToggle').forEach(b => b.addEventListener('click', () => {
+    localStorage.setItem('feNotifyMuted', notifyMuted() ? '0' : '1');
+    syncNotifyToggles();
+    if (!notifyMuted()) audio.play('notify'); // preview the sound when turning it back on
+  }));
+  syncNotifyToggles();
 }
 // small coloured ping pill (green/amber/red) — blank until a round-trip lands
 function pingBadge(ping: number | null | undefined): string {
@@ -2804,6 +2832,7 @@ function initMenus() {
   };
   wireLobbyChat('lobbyChatInput', 'lobbyChatSend');
   wireLobbyChat('roomChatInput', 'roomChatSend');
+  wireNotifyToggles();
   $('btnStart').addEventListener('click', () => net?.send({ t: 'start' }));
   // LEAVE a room lobby returns to the global lobby (stay connected)
   $('btnLeave').addEventListener('click', () => {

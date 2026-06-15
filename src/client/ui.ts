@@ -487,6 +487,24 @@ export class UI {
       }
     }
     const credits = pl.c;
+
+    // When a single finished production building of mine is selected, focus the
+    // sidebar on just that building's units: hide the Structures section and show
+    // only units it can make. Picking a unit then queues it on THAT building, so
+    // twin factories can each build something different. No selection → full menu.
+    let prodFilter: string | null = null;
+    if (selection && selection.size === 1) {
+      const v = views.find(x => x.i === [...selection][0]);
+      if (v && v.b && v.o === me && v.pr >= 1 &&
+        ['barracks', 'factory', 'dronefac', 'airforce', 'shipyard', 'silo'].includes(v.t))
+        prodFilter = v.t;
+    }
+    const hdrB = document.getElementById('hdrB'), gridB = document.getElementById('gridB');
+    const hdrU = document.getElementById('hdrU');
+    hdrB?.classList.toggle('hidden', !!prodFilter);
+    gridB?.classList.toggle('hidden', !!prodFilter);
+    if (hdrU) hdrU.textContent = prodFilter ? BUILDINGS[prodFilter].name : 'Units';
+
     for (const t of B_LIST) {
       const def = BUILDINGS[t];
       const cost = Math.round(def.cost * fac.costMul);
@@ -501,8 +519,11 @@ export class UI {
       let ok = (myDone[def.builtAt] || 0) > 0 || (def.altBuiltAt ? (myDone[def.altBuiltAt] || 0) > 0 : false);
       if (ok && def.pad && padHave >= padCap) ok = false; // airfields full
       if (def.tech && !myTech[def.tech]) ok = false;      // not yet researched
-      // hide tech-gated buttons entirely until the tech exists
-      this.btns[t].classList.toggle('hidden', !!def.tech && !myTech[def.tech]);
+      // hide tech-gated buttons until the tech exists, and (when a production
+      // building is selected) any unit that building can't make
+      const techHidden = !!def.tech && !myTech[def.tech];
+      const filtHidden = !!prodFilter && def.builtAt !== prodFilter && def.altBuiltAt !== prodFilter;
+      this.btns[t].classList.toggle('hidden', techHidden || filtHidden);
       const q = queueByUnit[t];
       this.styleBtn(t, ok, credits >= cost, cost, q?.n || 0, q?.prog || 0);
       if (def.pad) {
