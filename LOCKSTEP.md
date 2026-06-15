@@ -64,14 +64,40 @@ Verification (`node det-harness.mjs`, and `__detmath()` / `__detmathDet()` /
 Verdict: the sim is bit-identical across V8 (Chrome/Node) and SpiderMonkey
 (Firefox). **The determinism gate is PASSED — deterministic lockstep is viable.**
 
-## Step 3 — the lockstep loop (after the cross-engine gate passes)
+## Step 3 — the lockstep loop
 
-- Input-delay buffer: ~300 ms+ at 500 ms ping (classic RTS, acceptable).
-- Stalled-client policy: buffer + AI-substitute a lagging player, never freeze-all.
-- Transport: WebTransport (HTTP/3 datagrams) or WebRTC DataChannel (unreliable),
-  sending a **redundant rolling window** of recent inputs per packet so packet
-  loss never stalls (per gafferongames "Deterministic Lockstep"). TCP/WebSocket
-  head-of-line blocking is the current stall cause at high ping.
+`src/sim/lockstep.ts` — `LockstepEngine` (transport-agnostic): input-delay
+scheduling, redundant-window loss recovery, ready-gating + stall/catch-up, and
+deterministic drop-to-AI.
+
+**3a — netless model validation ✅** (`node lockstep-harness.mjs`, `__lockstep()`):
+two in-process sims through a FakeLink stay bit-identical under ideal / latency<delay
+/ latency>delay (stall+catchup) / 10% loss / 30% loss + jitter.
+
+**3b — real WebSocket transport ✅** (`node lockstep-net-harness.mjs [url] [n] [ticks]`):
+server is a dumb input relay (no server sim) for lockstep rooms; clients run their
+own sim. Verified 2/3/4 real WS clients stay bit-identical end-to-end.
+
+**3c — stalled-client policy ✅**: a missing input stalls (never desyncs). On a
+clean disconnect the server runs a drop-tick consensus (survivors report their last
+held input tick; the server broadcasts the min), and every survivor switches the
+leaver to AI at that exact tick. Verified: 3- and 4-client games with a mid-game
+drop stay bit-identical (`--drop`).
+
+**Key fix found by the networked harness:** `aiTick` drew from the shared gameplay
+`rng`, so clients computing different players' AI consumed it asymmetrically and
+desynced. Fixed with a **per-player AI RNG** (`sim.aiRngP[p]`) separate from the
+gameplay `rng` — this also lets a dropped player's AI be recomputed identically by
+every survivor.
+
+### Remaining (Step 4 — playable integration)
+- Wire `LockstepEngine` into a `NetLockstepGame` (GameLike) + a lobby "Lockstep"
+  toggle, so it's playable in the UI (not just harnesses).
+- Tune input delay for 400–500 ms ping; add a netgraph/stall indicator.
+- Transport upgrade (optional): WebTransport (HTTP/3 datagrams) or WebRTC
+  DataChannel for true unreliable delivery — the redundant rolling window already
+  exploits it. TCP/WebSocket head-of-line blocking is the current stall cause at
+  high ping/loss; it works today but UDP would smooth it.
 
 The live 5-server fleet keeps running the snapshot build (`main`) while this fork
 (`lockstep` branch) is developed and gated.

@@ -326,13 +326,13 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
     // reactive AA is a NEED, not surplus: build to the target even at army cap
     // so an air assault always gets answered (user: "if air seen, build AA/flak")
     else if (airSeen >= 1 && nU('aatank') + nU('flak') < aaTarget && pl.credits > 700) {
-      cmds.push({ k: 'train', p, bid: fac.id, type: sim.rng.next() < 0.5 ? 'aatank' : 'flak' });
+      cmds.push({ k: 'train', p, bid: fac.id, type: sim.aiRngP[p].next() < 0.5 ? 'aatank' : 'flak' });
     }
     else if (armyCount < cap && pl.credits > (ecoShort ? 2200 : 1000)) {
       // islanders keep only a small home guard of vehicles
       const groundArmy = nU('tank') + nU('heavy') + nU('ifv') + nU('mlrs') + nU('aatank') + nU('flak');
       if (island && groundArmy >= 8) continue;
-      const r = sim.rng.next();
+      const r = sim.aiRngP[p].next();
       const t = nU('mlrs') < L.siege ? 'mlrs'
         : (nU('aatank') + nU('flak') < aaTarget && r < aaPrio) ? (r < aaPrio * 0.5 ? 'aatank' : 'flak')
         : r < (antiInf ? 0.4 : 0.25) ? 'mlrs' // artillery shreds infantry masses
@@ -345,13 +345,13 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
   }
   const dro = (myB['dronefac'] || []).find(b => b.progress >= b.total && b.queue.length < 2);
   if (dro && armyCount < cap && pl.credits > (ecoShort ? 2400 : 1100)) {
-    const r = sim.rng.next();
+    const r = sim.aiRngP[p].next();
     const t = pl.credits > 3000 && r < 0.35 ? 'msldrone' : pl.credits > 2600 && r < 0.65 ? 'strike' : 'recon';
     cmds.push({ k: 'train', p, bid: dro.id, type: t });
   }
   const af = (myB['airforce'] || []).find(b => b.progress >= b.total && b.queue.length < 2);
   if (af && armyCount < cap && pl.credits > (island || dirAir || prefAir ? 1800 : 2000)) {
-    const r = sim.rng.next();
+    const r = sim.aiRngP[p].next();
     // once the enemy army is broken (but buildings remain), switch to bombers to
     // level the base; vs an air-heavy enemy build interceptors; else a mix
     const enemyCrippled = (mem.enemyCombat ?? 99) <= 3 && (mem.enemyBuildings ?? 0) > 0;
@@ -371,10 +371,10 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
     if (seaN < fleetCap && pl.credits > (ecoShort ? 2600 : 1500)) {
       const enemySubs = countEnemyType(sim, p, 'sub');
       let t: string;
-      if (enemySubs > 0 && nU('subhunter') < 2 && sim.rng.next() < 0.5) t = 'subhunter';
-      else if (antiAir && nU('flakship') < 2 && sim.rng.next() < 0.4) t = 'flakship'; // screen the fleet from air
+      if (enemySubs > 0 && nU('subhunter') < 2 && sim.aiRngP[p].next() < 0.5) t = 'subhunter';
+      else if (antiAir && nU('flakship') < 2 && sim.aiRngP[p].next() < 0.4) t = 'flakship'; // screen the fleet from air
       else {
-        const r = sim.rng.next();
+        const r = sim.aiRngP[p].next();
         t = r < 0.4 ? 'destroyer' : r < 0.6 ? 'mslcruiser' : r < 0.78 ? 'gunboat' : r < 0.92 ? 'sub' : 'flakship';
       }
       cmds.push({ k: 'train', p, bid: sy.id, type: t });
@@ -401,7 +401,7 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
   // missile silo: keep one warhead cooking, launch at the best target when armed
   const silo = (myB['silo'] || []).find(b => b.progress >= b.total);
   if (silo && !silo.storedMissile && !silo.queue.length && pl.credits > 2400) {
-    const t = pl.tech['chem'] && sim.rng.next() < 0.4 ? 'chemissile' : 'cmissile';
+    const t = pl.tech['chem'] && sim.aiRngP[p].next() < 0.4 ? 'chemissile' : 'cmissile';
     cmds.push({ k: 'train', p, bid: silo.id, type: t });
   }
   if (silo && silo.storedMissile && (sim.tickN >= mem.peaceUntil || mem.peaceBroken)) {
@@ -586,7 +586,7 @@ function defenseSpot(sim: Sim, p: number, type: string, base: { x: number; z: nu
       if (!mine.length) score -= Math.abs(lat) * 0.15;             // first one: centre the front
       else if (near < range * 0.6) score -= (range * 0.6 - near) * 1.5; // too clumped
       else score += Math.min(near, range * 1.3) * 0.4;             // spread ~range apart, tiled coverage
-      score += sim.rng.next() * 0.2;
+      score += sim.aiRngP[p].next() * 0.2;
       if (score > bestScore) { bestScore = score; best = { x: cx, z: cz }; }
     }
   }
@@ -741,10 +741,10 @@ function findSpot(sim: Sim, p: number, type: string, toward?: { x: number; z: nu
   for (const base of bases.slice(0, 4)) {
     for (let r = 3; r <= 12; r++) {
       for (let k = 0; k < 8; k++) {
-        const cx = Math.round(base.x + sim.rng.range(-r, r));
-        const cz = Math.round(base.z + sim.rng.range(-r, r));
+        const cx = Math.round(base.x + sim.aiRngP[p].range(-r, r));
+        const cz = Math.round(base.z + sim.aiRngP[p].range(-r, r));
         if (!sim.canPlace(p, type, cx, cz)) continue;
-        let score = sim.rng.next();
+        let score = sim.aiRngP[p].next();
         if (toward) score -= Math.sqrt((cx - toward.x) * (cx - toward.x) + (cz - toward.z) * (cz - toward.z)) * 0.08;
         // breathing room: wall-to-wall placement traps harvesters and units —
         // penalize spots that touch an existing building

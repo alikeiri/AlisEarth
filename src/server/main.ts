@@ -166,7 +166,8 @@ interface Client { ws: WebSocket; name: string; faction: string; slot: number; l
 interface Room {
   code: string; clients: Client[]; started: boolean;
   sim: Sim | null; timer: ReturnType<typeof setInterval> | null; cmdQ: any[];
-  aiSlots: number[]; size: number; diff: number; islands?: boolean;
+  aiSlots: number[]; size: number; diff: number; islands?: boolean; lockstep?: boolean;
+  dropVote?: { player: number; votes: Map<number, number> }; // lockstep: drop-tick consensus
   rec?: { seed: number; size: number; players: any[]; cmds: { k: number; c: any[] }[] };
   lastReport?: any; replaySaved?: boolean;
 }
@@ -371,6 +372,18 @@ function startRoom(room: Room) {
   // islands mode rides in seed bit 0x40000000 (cleared from the random bits first)
   let seed = ((Math.random() * 0x7fffffff) | 0) & ~0x40000000;
   if (room.islands) seed |= 0x40000000;
+
+  // LOCKSTEP mode: the server runs NO sim and sends NO snapshots — each client
+  // runs its own deterministic sim and the server only relays input messages.
+  // The host (slot 0) drives any AI slots. Bandwidth = O(inputs), not O(units).
+  if (room.lockstep) {
+    room.clients.forEach((c, i) => send(c.ws, {
+      t: 'start', lockstep: true, seed, size: room.size, you: i, aiSlots: room.aiSlots,
+      players: specs.map(s => ({ name: s.name, faction: s.faction, isAI: !!s.isAI })),
+    }));
+    return;
+  }
+
   setMapSize(room.size);
   room.sim = new Sim(seed, specs);
   room.rec = { seed, size: room.size, players: specs.map(s => ({ ...s })), cmds: [] };
@@ -489,6 +502,7 @@ wss.on('connection', ws => {
         size: [72, 96, 128].includes(m.size) ? m.size : 96,
         diff: Number.isInteger(m.diff) && m.diff >= 0 && m.diff <= 3 ? m.diff : 1,
         islands: !!m.islands,
+        lockstep: !!m.lockstep,
       };
       me.room = room;
       rooms.set(code, room);
@@ -540,6 +554,26 @@ wss.on('connection', ws => {
       if (room && room.started && room.sim && me && m.cmd && m.cmd.p === me.slot) {
         if (room.cmdQ.length < 400) room.cmdQ.push(m.cmd);
       }
+    } else if (m.t === 'lsin') {
+      // LOCKSTEP: relay this client's input frames to the room's other clients.
+      // The server is a dumb relay — it never inspects or runs the sim.
+      if (room && room.started && room.lockstep && me && Array.isArray(m.frames)) {
+        const payload = JSON.stringify({ t: 'lsin', player: me.slot, frames: m.frames });
+        for (const c of room.clients) if (c !== me && c.ws.readyState === WebSocket.OPEN) c.ws.send(payload);
+      }
+    } else if (m.t === 'lslast') {
+      // LOCKSTEP drop consensus: a client reports the last tick it holds input for
+      // the dropped player; once all survivors report, the server broadcasts the
+      // agreed drop tick (the min) so everyone switches that player to AI together.
+      if (room && room.lockstep && me && room.dropVote && typeof m.tick === 'number' && m.player === room.dropVote.player) {
+        room.dropVote.votes.set(me.slot, m.tick);
+        if (room.dropVote.votes.size >= room.clients.length) {
+          const at = Math.min(...room.dropVote.votes.values());
+          const pl = room.dropVote.player;
+          for (const c of room.clients) if (c.ws.readyState === WebSocket.OPEN) c.ws.send(JSON.stringify({ t: 'lsdrop', player: pl, tick: at }));
+          room.dropVote = undefined;
+        }
+      }
     }
   });
 
@@ -560,6 +594,13 @@ wss.on('connection', ws => {
       // still in the lobby: compact the slots so the remaining players reindex
       room.clients.forEach((c, i) => { c.slot = i; });
       sendRoom(room);
+    } else if (room.lockstep) {
+      // lockstep: no server sim to reassign. Start drop consensus — survivors
+      // report the last tick they hold the leaver's input for, and the server
+      // broadcasts the agreed (min) drop tick so everyone switches that player
+      // to local AI at the SAME tick, preserving determinism.
+      room.dropVote = { player: leaverSlot, votes: new Map() };
+      for (const c of room.clients) if (c.ws.readyState === WebSocket.OPEN) c.ws.send(JSON.stringify({ t: 'lsdropvote', player: leaverSlot }));
     } else {
       // a human left an in-progress match: transfer their army to an allied
       // human if one is still here, otherwise disband it — never a team defeat

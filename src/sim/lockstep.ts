@@ -36,10 +36,13 @@ export class LockstepEngine {
   readonly redundancy: number;
   send: (msg: InputMsg) => void = () => {};        // wired to the transport
   localInput: (sim: Sim) => Cmd[] = () => [];      // produces this client's commands for the current tick
+  aiFor: (sim: Sim, player: number) => Cmd[] = () => []; // input for a dropped (now AI-run) player
   // inputs[tick] = per-player command lists (undefined = not yet known)
   private inputs = new Map<number, (Cmd[] | undefined)[]>();
   private localHistory: Frame[] = [];
   private produced = new Set<number>();            // ticks we've already generated local input for
+  private lastInput: number[];                      // highest tick we hold input for, per player
+  private droppedFrom = new Map<number, number>();  // player -> first tick they're AI-controlled
   stalls = 0;                                       // diagnostics: how often we waited on a peer
   hashes = new Map<number, string>();              // executed-tick -> state digest (for verification)
 
@@ -49,10 +52,18 @@ export class LockstepEngine {
     this.nPlayers = nPlayers;
     this.delay = opts.delay ?? 4;
     this.redundancy = opts.redundancy ?? 12;
+    this.lastInput = new Array(nPlayers).fill(this.delay - 1);
     // the first `delay` ticks have no real input — everyone agrees they're empty,
     // which lets the sims start while the first real inputs propagate
     for (let t = 0; t < this.delay; t++) this.inputs.set(t, new Array(nPlayers).fill([]));
   }
+
+  // a peer disconnected: from `fromTick` on, this client computes that player's
+  // input locally via the (deterministic) AI. Every surviving client does the
+  // same from the SAME server-agreed tick, so the sims stay identical.
+  dropToAI(player: number, fromTick: number) { this.droppedFrom.set(player, fromTick); }
+  // the last tick we hold this player's input for (for the server's drop vote)
+  lastInputTickFor(player: number): number { return this.lastInput[player]; }
 
   private slot(tick: number): (Cmd[] | undefined)[] {
     let s = this.inputs.get(tick);
@@ -66,13 +77,20 @@ export class LockstepEngine {
     for (const f of msg.frames) {
       const s = this.slot(f.tick);
       if (s[msg.player] === undefined) s[msg.player] = f.cmds;
+      if (f.tick > this.lastInput[msg.player]) this.lastInput[msg.player] = f.tick;
     }
   }
 
+  // is player p's input for tick T available (or supplied by AI because p was dropped)?
+  private have(p: number, s: (Cmd[] | undefined)[], tick: number): boolean {
+    if (s[p] !== undefined) return true;
+    const from = this.droppedFrom.get(p);
+    return from !== undefined && tick >= from;
+  }
   private ready(): boolean {
     const s = this.inputs.get(this.sim.tickN);
     if (!s) return false;
-    for (let p = 0; p < this.nPlayers; p++) if (s[p] === undefined) return false;
+    for (let p = 0; p < this.nPlayers; p++) if (!this.have(p, s, this.sim.tickN)) return false;
     return true;
   }
 
@@ -87,6 +105,7 @@ export class LockstepEngine {
         const cmds = this.localInput(this.sim) || [];
         const tick = this.sim.tickN + this.delay;
         this.slot(tick)[this.localPlayer] = cmds;
+        if (tick > this.lastInput[this.localPlayer]) this.lastInput[this.localPlayer] = tick;
         this.localHistory.push({ tick, cmds });
         while (this.localHistory.length > this.redundancy) this.localHistory.shift();
         this.send({ player: this.localPlayer, frames: this.localHistory.slice() });
@@ -95,7 +114,12 @@ export class LockstepEngine {
       if (!this.ready()) { this.stalls++; return; }    // waiting on a peer's input
       const s = this.inputs.get(this.sim.tickN)!;
       const merged: Cmd[] = [];
-      for (let p = 0; p < this.nPlayers; p++) merged.push(...(s[p] || []));
+      for (let p = 0; p < this.nPlayers; p++) {
+        // a dropped player's missing input is regenerated locally by the AI —
+        // deterministic, so every surviving client produces the identical command
+        const cmds = s[p] !== undefined ? s[p]! : this.aiFor(this.sim, p) || [];
+        merged.push(...cmds);
+      }
       const executed = this.sim.tickN;
       this.sim.tick(merged);
       this.inputs.delete(executed);                    // gc consumed inputs

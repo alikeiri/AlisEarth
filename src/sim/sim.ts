@@ -94,6 +94,11 @@ export class Sim {
   nextId = 1;
   tickN = 0;
   rng: RNG;
+  // per-player AI RNG, SEPARATE from the gameplay rng. AI decisions must not draw
+  // from `rng` or lockstep desyncs: each client computes only some players' AI, so
+  // sharing `rng` would consume it asymmetrically. Per-player streams also let a
+  // dropped player's AI be recomputed identically by every surviving client.
+  aiRngP: RNG[] = [];
   events: any[] = [];
   dmgLog: any[] = [];
   aiMem: any[] = [];
@@ -139,6 +144,7 @@ export class Sim {
         spawn: this.map.spawns[i],
       });
       this.aiMem.push(null);
+      this.aiRngP.push(new RNG((seed ^ 0xa1c0ffe ^ Math.imul(i + 1, 0x9e3779b1)) >>> 0));
       this.placeStart(i);
     });
     const n = this.players.length;
