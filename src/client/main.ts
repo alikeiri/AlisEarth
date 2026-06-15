@@ -386,8 +386,8 @@ class NetLockstepGame implements GameLike {
   isNet = true;
   private engine: LockstepEngine;
   private pending: any[] = [];      // user commands queued since the last tick
-  private acc = 0;
-  private targetTick = 0;           // real-time gate: +1 every 100 ms
+  private acc = 0;                  // wall-time accumulator (ms) toward the next tick
+  private frac = 0;                 // interpolation 0..1 toward the latest executed tick
   private evQ: any[] = [];
   private chatQ: any[] = [];
   private roster: { name: string; isAI: boolean }[] = [];
@@ -415,13 +415,24 @@ class NetLockstepGame implements GameLike {
   get tickN() { return this.sim.tickN; }
   issue(cmd: any) { this.pending.push(cmd); }
   update(dtMs: number) {
-    // advance at a steady 10 Hz of wall time; the engine executes up to targetTick
-    // as inputs allow (stalling when a peer is late, catching up afterwards)
+    // Step the sim at ~10 Hz of wall time, but ONLY consume a tick's worth of
+    // accumulated time when a tick actually executes. If the peer's input is late
+    // the sim stalls — we then leave `acc` un-consumed and clamp the render frac
+    // to 1 so units HOLD at their last position instead of oscillating (the old
+    // code advanced a wall clock regardless, which made units twitch every 100ms
+    // while stalled). When the backlog clears it catches up in one burst.
     this.acc += dtMs;
-    while (this.acc >= 100) { this.acc -= 100; this.targetTick++; }
-    this.engine.pump(this.targetTick); // executes ticks up to targetTick; onTick drains events per tick
+    let guard = 0;
+    while (this.acc >= 100 && guard++ < 8) {
+      const before = this.sim.tickN;
+      this.engine.pump(before + 1);          // try to advance exactly one tick
+      if (this.sim.tickN === before) break;  // stalled (waiting on a peer) — stop consuming time
+      this.acc -= 100;
+    }
+    if (this.acc > 1000) this.acc = 1000;    // bound a pathological backlog (peer can only lead by ~delay)
+    this.frac = Math.min(1, this.acc / 100); // clamp: a stall sits at the target, never past it
   }
-  views(): any[] { return simViews(this.sim, Math.max(0, Math.min(1, this.acc / 100))); }
+  views(): any[] { return simViews(this.sim, this.frac); }
   players(): any[] { return simPlayers(this.sim); }
   drainEvents() { const e = this.evQ; this.evQ = []; return e; }
   status() { return this.sim.done ? { over: true, winner: this.sim.winner } : { over: false, winner: -2 }; }
