@@ -4,7 +4,7 @@ export const TICK = 0.1;            // seconds per sim tick (10 Hz)
 export const TICKS_PER_SEC = 10;
 // bump whenever map generation or sim logic changes in a way that breaks
 // replay reproduction (same seed must produce the same game to replay it)
-export const SIM_VERSION = 3;
+export const SIM_VERSION = 4;
 export const ORE_VALUE = 0.8;      // credits per ore unit (economy pacing)
 export const START_CREDITS = 3000;
 export const ORE_REGEN = 0.9;     // ore regrown per field cell per second...
@@ -28,6 +28,7 @@ export interface UnitDef {
   emits?: string;                                // fortified emitter: unit type it spawns
   ephemeral?: number;                            // self-destructs after N seconds (mini drones)
   tech?: string;                                 // requires this researched technology
+  sight?: number;                                // explicit fog-of-war reveal radius (else derived from range)
   cloak?: boolean;                               // stealth: low detection range to the enemy
   internal?: boolean;                            // not buildable from a sidebar
   kamikaze?: boolean;                            // one-way: explodes on contact (dmg = blast)
@@ -71,7 +72,7 @@ export const UNITS: Record<string, UnitDef> = {
   aatank: { name: 'AA Vehicle',   cost: 950,  hp: 280, speed: 3.0, range: 8.0, dmg: 42, rof: 1.6, builtAt: 'factory',  buildTime: 11, kind: 'veh' },
   flak:   { name: 'Flak Gun',     cost: 650,  hp: 240, speed: 2.6, range: 6.5, dmg: 16, rof: 0.45, builtAt: 'factory', buildTime: 9,  kind: 'veh' },
   engineer: { name: 'Engineer',   cost: 600,  hp: 200, speed: 2.2, range: 0,   dmg: 0,  rof: 1,   builtAt: 'factory',  buildTime: 10, kind: 'veh', repair: true, road: true, lays: 'mine', mines: 4 },
-  patriot:  { name: 'Patriot SAM', cost: 1100, hp: 200, speed: 2.4, range: 0,  dmg: 0,  rof: 1,   builtAt: 'factory',  buildTime: 12, kind: 'veh', intercept: { range: 11, cd: 4 }, fortify: true },
+  patriot:  { name: 'Patriot SAM', cost: 1100, hp: 200, speed: 2.4, range: 0,  dmg: 0,  rof: 1,   builtAt: 'factory',  buildTime: 12, kind: 'veh', intercept: { range: 11, cd: 4 }, fortify: true, sight: 14 }, // mobile radar picket: reveals fog
   mine:     { name: 'Land Mine',  cost: 0,    hp: 1,   speed: 0,   range: 0,   dmg: 150, rof: 1,  builtAt: '',         buildTime: 0,  kind: 'veh', internal: true, mine: true, trigger: 1.5, blastR: 2.4 },
   // Construction Vehicle: slow, defenceless; press F to deploy it into a forward
   // construction yard (enables building structures around the new spot)
@@ -136,6 +137,7 @@ export interface BuildingDef {
   intercept?: { range: number; cd: number };     // anti-missile shield: shoots down incoming silo missiles
   emp?: number;                                   // tesla: stuns the struck unit for this many seconds
   noAir?: boolean;                                // defensive gun that cannot elevate to hit aircraft
+  sight?: number;                                 // explicit fog-of-war reveal radius (radar dome sees far)
 }
 
 export const BUILDINGS: Record<string, BuildingDef> = {
@@ -160,7 +162,7 @@ export const BUILDINGS: Record<string, BuildingDef> = {
   airfield: { name: 'Airfield',          cost: 800,  hp: 600,  power: -15,  buildTime: 8,  size: 2, prereq: 'airforce' },
   lab:      { name: 'Research Lab',       cost: 2000, hp: 850,  power: -50,  buildTime: 14, size: 2, prereq: 'factory' },
   silo:     { name: 'Missile Silo',       cost: 2500, hp: 900,  power: -60,  buildTime: 16, size: 2, prereq: 'lab' },
-  radar:    { name: 'Radar Dome',         cost: 900,  hp: 600,  power: -40,  buildTime: 9,  size: 2, prereq: 'refinery' },
+  radar:    { name: 'Radar Dome',         cost: 900,  hp: 600,  power: -40,  buildTime: 9,  size: 2, prereq: 'refinery', sight: 26 }, // wide sweep pierces the fog of war
   wall:     { name: 'Wall',               cost: 100,  hp: 900,  power: 0,    buildTime: 8,  size: 1, prereq: 'barracks' },
   barrier:  { name: 'Tank Barrier',       cost: 50,   hp: 450,  power: 0,    buildTime: 6,  size: 1, prereq: 'barracks' },
 };
@@ -171,6 +173,7 @@ export const TECHS: Record<string, TechDef> = {
   chem:    { id: 'chem',    name: 'Chemical Weapons',  cost: 1500, time: 30, desc: 'Unlocks Chem Trooper, Chem Tank, Chem Drone' },
   bio:     { id: 'bio',     name: 'Biological Weapons', cost: 1800, time: 35, desc: 'Unlocks Bio Trooper, Bio Tank, Bio Drone' },
   stealth: { id: 'stealth', name: 'Stealth Systems',   cost: 2000, time: 38, desc: 'Unlocks the cloaked Stealth Tank' },
+  satellite: { id: 'satellite', name: 'Spy Satellite', cost: 3000, time: 50, desc: 'Launches a satellite — permanently reveals the entire map (removes fog of war)' },
 };
 
 // Faction balance philosophy: nobody is strictly strongest. Superpowers get

@@ -59,7 +59,9 @@ class LocalGame implements GameLike {
     const minForPlayers = nPlayers >= 4 ? 160 : nPlayers === 3 ? 136 : 112;
     const effSize = Math.min(MAXD, Math.max(size, minForPlayers));
     setMapSize(effSize);
-    const seed = (Date.now() ^ (Math.random() * 0x7fffffff)) >>> 0;
+    // islands mode rides in seed bit 0x40000000 (clear it from the random bits first)
+    let seed = ((Date.now() ^ (Math.random() * 0x7fffffff)) >>> 0) & ~0x40000000;
+    if (islandsEnabled) seed |= 0x40000000;
     const LVL_NAMES = ['Easy', 'Normal', 'Hard', 'Brutal'];
     const pickFacs = (avoid: string[], n: number) => {
       const pool = Object.keys(FACTIONS).filter(f => !avoid.includes(f));
@@ -163,6 +165,7 @@ class LocalGame implements GameLike {
         if (e.missileStock && e.missileStock.length) v.msn = e.missileStock.length;
         if (e.strikeR && e.strikeR > 0) { v.kx = e.strikeX; v.kz = e.strikeZ; v.kr = e.strikeR; }
         if (e.burnT && e.burnT > 0) v.bn = 1;
+        if (e.holdFire) v.hf = 1;                       // defensive building on weapons-hold
       } else {
         if (e.stance) v.st = e.stance;
         if (e.fortified) v.fo = 1;
@@ -174,6 +177,7 @@ class LocalGame implements GameLike {
         }
         if (e.sd > 0) v.sd = Math.ceil(e.sd); // self-destruct countdown
         if (e.rzr && e.rzr > 0) { v.rzx = e.rzx; v.rzz = e.rzz; v.rzr = e.rzr; } // engineer repair zone
+        if (e.hzr && e.hzr > 0) { v.hzx = e.hzx; v.hzz = e.hzz; v.hzr = e.hzr; } // harvester work area
         if (e.holdFire) v.hf = 1;                       // weapons-hold
         if (e.orders[0]?.k === 'patrol') v.pa = 1;      // currently patrolling
       }
@@ -246,6 +250,7 @@ class ReplayGame implements GameLike {
         v.cx = e.cx; v.cz = e.cz; v.sz = e.size; v.lv = e.lvl; v.qn = e.queue.length;
         if (e.storedMissile) v.ms = e.storedMissile;
         if (e.burnT && e.burnT > 0) v.bn = 1;
+        if (e.holdFire) v.hf = 1;                       // defensive building on weapons-hold
       } else {
         if (e.fortified) v.fo = 1;
         if (e.cd > 0 && UNITS[e.type]?.dmg > 0) {
@@ -394,7 +399,7 @@ class GameClient {
     mode: '' as '' | 'pan' | 'box' | 'pinch', sx: 0, sy: 0, downT: 0, moved: false,
     pinchD: 0, pinchA: 0, boxToggle: false, longTimer: 0 as any,
   };
-  private rMode: 'pan' | 'form' | 'aatk' | 'silo' | 'reparea' = 'pan';
+  private rMode: 'pan' | 'form' | 'aatk' | 'silo' | 'reparea' | 'harvarea' = 'pan';
   private formPath: { x: number; z: number }[] | null = null;
   private areaDrag: { cx: number; cz: number; r: number } | null = null;
   private patrolMode = false;
@@ -539,6 +544,7 @@ class GameClient {
       if (e.code === 'KeyH') {
         const ids = this.myUnitIds();
         if (ids.length) { const anyFiring = ids.some(id => !this.byId.get(id)?.hf); this.game.issue({ k: 'holdfire', p: this.game.me, ids, on: anyFiring }); audio.play('confirm'); }
+        else { const bids = this.selectedDefBuildings(); if (bids.length) { const anyFiring = bids.some(id => !this.byId.get(id)?.hf); this.game.issue({ k: 'bholdfire', p: this.game.me, ids: bids, on: anyFiring }); audio.play('confirm'); } }
       }
       // +/- game speed (skirmish only — multiplayer is server-paced)
       if (e.code === 'Equal' || e.code === 'NumpadAdd') this.changeSpeed(1);
@@ -685,7 +691,10 @@ class GameClient {
       const ids = this.myUnitIds();
       if (act === 'stop') this.issueToUnits({ k: 'stop' });
       else if (act === 'hold') { if (ids.length) { const anyAgg = ids.some(id => !this.byId.get(id)?.st); this.game.issue({ k: 'stance', p: this.game.me, ids, stance: anyAgg ? 1 : 0 }); } }
-      else if (act === 'holdfire') { if (ids.length) { const anyFiring = ids.some(id => !this.byId.get(id)?.hf); this.game.issue({ k: 'holdfire', p: this.game.me, ids, on: anyFiring }); } }
+      else if (act === 'holdfire') {
+        if (ids.length) { const anyFiring = ids.some(id => !this.byId.get(id)?.hf); this.game.issue({ k: 'holdfire', p: this.game.me, ids, on: anyFiring }); }
+        else { const bids = this.selectedDefBuildings(); if (bids.length) { const anyFiring = bids.some(id => !this.byId.get(id)?.hf); this.game.issue({ k: 'bholdfire', p: this.game.me, ids: bids, on: anyFiring }); } }
+      }
       else if (act === 'patrol') { if (ids.length || this.selectedProdBuilding()) { this.patrolMode = !this.patrolMode; this.patrolDraw = null; } }
       else if (act === 'fortify') { const f = ids.filter(id => UNITS[this.byId.get(id)?.t]?.fortify); if (f.length) this.game.issue({ k: 'fortify', p: this.game.me, ids: f }); }
       else if (act === 'ranges') { this.showRanges = !this.showRanges; btn.classList.toggle('on', this.showRanges); }
@@ -819,6 +828,12 @@ class GameClient {
     const v = this.byId.get([...this.selection][0]);
     if (!v || !v.b || v.o !== this.game.me) return null;
     return ['barracks', 'factory', 'dronefac', 'airforce', 'shipyard'].includes(v.t) ? v : null;
+  }
+
+  // my selected defensive buildings (turret/cannon/tesla/sam) — for Hold/Force Fire
+  private selectedDefBuildings(): number[] {
+    return [...this.selection].map(id => this.byId.get(id))
+      .filter(b => b && b.b && b.o === this.game.me && BUILDINGS[b.t]?.attack).map(b => b.i);
   }
 
   // most common unit type in the current selection (for voice acknowledgments)
@@ -1020,10 +1035,14 @@ class GameClient {
     let best: any = null, bd = 1e9;
     for (const v of this.lastViews) {
       if (!filter(v)) continue;
-      const p = this.renderer.project(v.x, v.z, v.b ? 1 : 0.5);
+      // aircraft render at altitude — project at the unit's flight height so the
+      // click lands on the model itself, not the empty ground beneath it
+      const ud = UNITS[v.t];
+      const h = v.b ? 1 : (ud?.fly ? (ud.alt || 2.3) : 0.5);
+      const p = this.renderer.project(v.x, v.z, h);
       if (!p.ok) continue;
       const d = Math.hypot(p.x - sx, p.y - sy);
-      const r = v.b ? 14 + (v.sz || 1) * 7 : 16;
+      const r = v.b ? 14 + (v.sz || 1) * 7 : (ud?.fly ? 20 : 16); // a touch more slack for fast movers
       if (d < r && d < bd) { bd = d; best = v; }
     }
     return best;
@@ -1170,10 +1189,16 @@ class GameClient {
       } else {
         const ids = this.myUnitIds();
         const engs = ids.filter(id => UNITS[this.byId.get(id)?.t]?.repair);
+        const harvs = ids.filter(id => UNITS[this.byId.get(id)?.t]?.cargo);
         if (ids.length && engs.length === ids.length) {
           // engineers only: right-drag marks out an auto-repair patrol zone
           const g = this.renderer.groundPoint(e.clientX / window.innerWidth, e.clientY / window.innerHeight);
           this.rMode = 'reparea';
+          this.areaDrag = g ? { cx: g.x, cz: g.z, r: 0 } : null;
+        } else if (ids.length && harvs.length === ids.length) {
+          // harvesters only: right-drag marks out an ore-gathering work area
+          const g = this.renderer.groundPoint(e.clientX / window.innerWidth, e.clientY / window.innerHeight);
+          this.rMode = 'harvarea';
           this.areaDrag = g ? { cx: g.x, cz: g.z, r: 0 } : null;
         } else {
           // 2+ units selected: right-drag draws a formation line; otherwise it pans
@@ -1226,6 +1251,15 @@ class GameClient {
           this.game.issue({ k: 'repairzone', p: this.game.me, ids: engs, cx: Math.round(area.cx * 10) / 10, cz: Math.round(area.cz * 10) / 10, r: Math.round(area.r * 10) / 10 });
           audio.play('confirm');
           this.markCmd(engs, area.cx, area.cz, false);
+        }
+      }
+      else if (this.rMode === 'harvarea' && area && area.r >= 1) {
+        // assign the selected harvesters an ore-gathering work area
+        const harvs = this.myUnitIds().filter(id => UNITS[this.byId.get(id)?.t]?.cargo);
+        if (harvs.length) {
+          this.game.issue({ k: 'harvestzone', p: this.game.me, ids: harvs, cx: Math.round(area.cx * 10) / 10, cz: Math.round(area.cz * 10) / 10, r: Math.round(area.r * 10) / 10 });
+          audio.play('confirm');
+          this.markCmd(harvs, area.cx, area.cz, false);
         }
       }
       else if (this.rMode === 'form' && path && path.length >= 2) this.issueFormation(path, e.shiftKey);
@@ -1288,11 +1322,16 @@ class GameClient {
   private updateFog(allViews: any[]) {
     const f = this.fog!;
     for (let i = 0; i < f.length; i++) if (f[i] === 2) f[i] = 1;
+    const players = this.game.players?.() || [];
+    const powered = (owner: number) => { const p = players[owner]; return !p || (p.pm ?? 1) >= (p.pu ?? 0); };
     for (const v of allViews) {
       if (!this.allies.has(v.o)) continue; // my team (incl. allies) grants vision
       const def = (UNITS as any)[v.t] || (BUILDINGS as any)[v.t];
       let sight = v.b ? 7 : Math.max(5, (def?.range || 4) + 3);
-      if (!v.b && v.t === 'patriot' && v.fo) sight = 16; // fortified Patriot deploys a radar — wide eyes
+      // explicit sight reveals far (Radar Dome, Patriot). The Radar Dome's wide
+      // sweep needs power and a finished build; otherwise it sees like any building.
+      if (def?.sight && !(v.b && (powered(v.o) === false || (v.pr ?? 1) < 1))) sight = def.sight;
+      if (!v.b && v.t === 'patriot' && v.fo) sight = 20; // fortified Patriot: bigger deployed radar
       const cx = Math.floor(v.x), cz = Math.floor(v.z), r = Math.ceil(sight);
       for (let dz = -r; dz <= r; dz++) for (let dx = -r; dx <= r; dx++) {
         if (dx * dx + dz * dz > sight * sight) continue;
@@ -1300,6 +1339,26 @@ class GameClient {
         if (x >= 0 && z >= 0 && x < W && z < H) f[z * W + x] = 2;
       }
     }
+  }
+
+  // brief centered announcement banner (satellite online, etc.)
+  private satBanner: HTMLElement | null = null;
+  private satBannerSeq = 0;
+  flashBanner(text: string) {
+    if (!this.satBanner) {
+      const el = document.createElement('div');
+      el.style.cssText = 'position:fixed;top:84px;left:50%;transform:translateX(-50%);z-index:40;' +
+        'padding:10px 22px;border-radius:8px;background:rgba(10,16,24,0.92);border:1px solid #4aa3ff;' +
+        'color:#cfe6ff;font:600 15px/1.3 system-ui,sans-serif;letter-spacing:0.5px;' +
+        'box-shadow:0 4px 18px rgba(0,0,0,0.5);pointer-events:none;text-align:center;transition:opacity .4s';
+      document.body.appendChild(el);
+      this.satBanner = el;
+    }
+    this.satBanner.textContent = text;
+    this.satBanner.style.opacity = '1';
+    this.satBanner.style.display = 'block';
+    const seq = ++this.satBannerSeq;
+    window.setTimeout(() => { if (this.satBanner && seq === this.satBannerSeq) this.satBanner.style.opacity = '0'; }, 5000);
   }
 
   // radar threat detection: with a powered Radar Dome, scan for enemy combat
@@ -1401,6 +1460,15 @@ class GameClient {
         this.markCmd(ids0, tgt ? tgt.x : g.x, tgt ? tgt.z : g.z, true);
         return;
       }
+      // no units selected: force-fire from selected defensive buildings (turret etc.)
+      const bids = [...this.selection].map(id => this.byId.get(id)).filter(b => b && b.b && b.o === me && BUILDINGS[b.t]?.attack).map(b => b.i);
+      if (bids.length) {
+        const tgt = this.pickView(sx, sy, () => true);
+        this.game.issue({ k: 'bforcefire', p: me, ids: bids, tgt: tgt ? tgt.i : undefined, x: g.x, z: g.z });
+        audio.play('confirm');
+        this.markCmd(bids, tgt ? tgt.x : g.x, tgt ? tgt.z : g.z, true);
+        return;
+      }
     }
 
     // single selected production building → rally point (armed silo → LAUNCH)
@@ -1417,7 +1485,10 @@ class GameClient {
         if (r) this.markCmd([sel[0].i], g.x, g.z, true);
         return;
       }
-      this.game.issue({ k: 'rally', p: me, bid: sel[0].i, x: g.x, z: g.z });
+      // rally points only make sense for unit-producing buildings — a right-click
+      // on a defensive/utility building (turret, radar, conyard…) does nothing
+      if (['barracks', 'factory', 'dronefac', 'airforce', 'shipyard'].includes(sel[0].t))
+        this.game.issue({ k: 'rally', p: me, bid: sel[0].i, x: g.x, z: g.z });
       return;
     }
     const ids = this.myUnitIds();
@@ -1665,10 +1736,10 @@ class GameClient {
           }
         }
         this.renderer.setFormationPath(this.formPath);
-      } else if ((this.rMode === 'aatk' || this.rMode === 'silo' || this.rMode === 'reparea') && this.areaDrag) {
-        // attack / strike / repair-zone circle grows with the drag
+      } else if ((this.rMode === 'aatk' || this.rMode === 'silo' || this.rMode === 'reparea' || this.rMode === 'harvarea') && this.areaDrag) {
+        // attack / strike / repair-zone / harvest-zone circle grows with the drag
         const g = this.renderer.groundPoint(this.mouse.x / window.innerWidth, this.mouse.y / window.innerHeight);
-        if (g) this.areaDrag.r = Math.min(this.rMode === 'silo' ? 20 : this.rMode === 'reparea' ? 24 : 14, Math.hypot(g.x - this.areaDrag.cx, g.z - this.areaDrag.cz));
+        if (g) this.areaDrag.r = Math.min(this.rMode === 'silo' ? 20 : (this.rMode === 'reparea' || this.rMode === 'harvarea') ? 24 : 14, Math.hypot(g.x - this.areaDrag.cx, g.z - this.areaDrag.cz));
       }
     }
 
@@ -1685,6 +1756,8 @@ class GameClient {
     if (!(this.game as any).isSim && fogEnabled && !this.over) {
       if (!this.fog) this.fog = new Uint8Array(W * H);
       if (this.frame % 3 === 0) this.updateFog(allViews);
+      // Spy Satellite tech: permanent full-map visibility — keep the whole mask lit
+      if (plList[this.game.me]?.tech?.includes('satellite')) this.fog.fill(2);
       const f = this.fog;
       views = allViews.filter(v => {
         if (this.allies.has(v.o)) return true;
@@ -1700,7 +1773,7 @@ class GameClient {
     for (const id of this.selection) if (!this.byId.has(id)) this.selection.delete(id);
 
     // terraforming edited the heightfield → rebuild the terrain mesh (throttled)
-    if (this.game.map.heightDirty && this.frame % 4 === 0) {
+    if (this.game.map.heightDirty && this.frame % 6 === 0) {
       this.renderer.refreshTerrain();
       this.game.map.heightDirty = false;
     }
@@ -1714,6 +1787,11 @@ class GameClient {
         this.appendChat({ name: who, to: 'all', msg: 'We surrender! The region is yours.' });
       }
       if (ev.e === 'sdtick' && ev.owner === this.game.me) audio.play('sdbeep');
+      if (ev.e === 'tech' && ev.tech === 'satellite' && this.allies.has(ev.p)) {
+        // a satellite goes up: dramatic rocket launch + permanent map reveal
+        this.renderer.launchSatellite(ev.x ?? W / 2, ev.z ?? H / 2);
+        if (ev.p === this.game.me) { audio.play('win'); this.flashBanner('🛰  SATELLITE ONLINE — full map visibility'); }
+      }
       audio.event(ev, this.renderer.camX, this.renderer.camZ, this.game.me);
     }
     // chat messages + expiry
@@ -1826,12 +1904,15 @@ class GameClient {
     // live attack/strike-circle while dragging
     if (this.mouse.rDragging && (this.rMode === 'aatk' || this.rMode === 'silo') && this.areaDrag && this.areaDrag.r > 0.5)
       circles.push({ x: this.areaDrag.cx, z: this.areaDrag.cz, r: this.areaDrag.r, atk: true, fill: true } as any);
-    // live engineer repair-zone circle while dragging (green)
-    if (this.mouse.rDragging && this.rMode === 'reparea' && this.areaDrag && this.areaDrag.r > 0.5)
+    // live engineer repair-zone / harvester work-area circle while dragging (green)
+    if (this.mouse.rDragging && (this.rMode === 'reparea' || this.rMode === 'harvarea') && this.areaDrag && this.areaDrag.r > 0.5)
       circles.push({ x: this.areaDrag.cx, z: this.areaDrag.cz, r: this.areaDrag.r, atk: false, kind: 'place' } as any);
     // standing repair zones on my selected engineers (green)
     for (const v of views) if (v.rzr && v.o === this.game.me && this.selection.has(v.i))
       circles.push({ x: v.rzx, z: v.rzz, r: v.rzr, atk: false, kind: 'place' } as any);
+    // standing harvester work areas on my selected harvesters (green)
+    for (const v of views) if (v.hzr && v.o === this.game.me && this.selection.has(v.i))
+      circles.push({ x: v.hzx, z: v.hzz, r: v.hzr, atk: false, kind: 'place' } as any);
     // standing missile-strike zones on my silos (red)
     for (const v of views) if (v.kr && v.o === this.game.me)
       circles.push({ x: v.kx, z: v.kz, r: v.kr, atk: true, fill: true } as any);
@@ -1974,6 +2055,7 @@ let selDiff = 1;
 let selDiff2 = 2;
 let selSize = 112;
 let fogEnabled = true; // start-screen checkbox; spectator/replay always show all
+let islandsEnabled = false; // start-screen checkbox: generate a 2-4 island map split by water
 let selEnemies = 1; // 1-3 AI opponents in skirmish
 let selDiff3 = 2;   // third enemy's difficulty
 let selTeams = [1, 2, 3, 4]; // team per player slot (You, AI1, AI2, AI3); FFA by default
@@ -2748,6 +2830,7 @@ function initMenus() {
     const key = (($('claudeKey') as HTMLInputElement).value || '').trim();
     try { localStorage.setItem('ae_claude_key', key); } catch { /* no storage */ }
     fogEnabled = ($('fogChk') as HTMLInputElement)?.checked ?? true;
+    islandsEnabled = ($('islandChk') as HTMLInputElement)?.checked ?? false;
     const levels = [selDiff, selDiff2, selDiff3].slice(0, selEnemies);
     const teams = selTeams.slice(0, 1 + selEnemies);
     startGame(new LocalGame(playerName(), selFaction, selDiff, selSize, null, levels, teams));
@@ -2810,7 +2893,7 @@ function initMenus() {
   // create a game others can see and join from the lobby
   $('btnMpCreate').addEventListener('click', () => {
     $('mpErr').textContent = '';
-    net?.send({ t: 'create', name: playerName(), faction: selFaction, size: selSize, diff: selDiff });
+    net?.send({ t: 'create', name: playerName(), faction: selFaction, size: selSize, diff: selDiff, islands: ($('islandChk') as HTMLInputElement)?.checked ?? false });
   });
   $('btnMpJoinCode').addEventListener('click', () => {
     $('mpErr').textContent = '';

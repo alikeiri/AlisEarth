@@ -51,7 +51,9 @@ export interface Entity {
   stunT?: number; // EMP stun: seconds the unit is frozen (can't move or fire)
   mineStock?: number; // engineer: proximity mines left to lay
   rzx?: number; rzz?: number; rzr?: number; // engineer: assigned auto-repair zone (centre + radius)
+  hzx?: number; hzz?: number; hzr?: number; // harvester: assigned ore-gathering work area (centre + radius)
   holdFire?: boolean; // weapons-hold: never fires, even when attacked, until toggled off
+  forceTgt?: number; forceT?: number; // defensive building: force-fire target id + ticks left
 }
 
 export interface PlayerState {
@@ -438,6 +440,24 @@ export class Sim {
         if (e.b && e.owner === c.p && e.type === b.type) e.primary = (e.id === b.id);
       return;
     }
+    if (c.k === 'bholdfire') {
+      // weapons-hold toggle for selected defensive buildings (turret/cannon/tesla/sam)
+      const blds = (c.ids || []).map((i: number) => this.ents.get(i))
+        .filter((b: Entity | undefined): b is Entity => !!b && b.b && b.owner === c.p && !!BUILDINGS[b.type]?.attack);
+      if (!blds.length) return;
+      const on = c.on !== undefined ? !!c.on : !blds.every(b => b.holdFire);
+      for (const b of blds) b.holdFire = on;
+      return;
+    }
+    if (c.k === 'bforcefire') {
+      // force a defensive building to fire on a specific target for a short window,
+      // overriding its hold-fire toggle
+      for (const i of (c.ids || [])) {
+        const b = this.ents.get(i);
+        if (b && b.b && b.owner === c.p && BUILDINGS[b.type]?.attack && c.tgt != null) { b.forceTgt = c.tgt; b.forceT = 30; }
+      }
+      return;
+    }
     if (c.k === 'stance') {
       for (const id of (c.ids || [])) {
         const u = this.ents.get(id);
@@ -561,6 +581,15 @@ export class Sim {
     if (c.k === 'repairzone') {
       // engineers: stand watch over an area, auto-repairing friendlies inside it
       for (const u of units) if (UNITS[u.type]?.repair) { u.rzx = c.cx; u.rzz = c.cz; u.rzr = c.r; }
+      return;
+    }
+    if (c.k === 'harvestzone') {
+      // harvesters: confine ore gathering to a drawn work area and head there now
+      for (const u of units) if (UNITS[u.type]?.cargo) {
+        u.hzx = c.cx; u.hzz = c.cz; u.hzr = c.r;
+        const n = this.scanOreZone(c.cx, c.cz, c.r) || { x: Math.floor(c.cx), z: Math.floor(c.cz) };
+        u.orders = [{ k: 'harvest', ox: n.x, oz: n.z }]; u.path = null; u.cmdT = this.tickN;
+      }
       return;
     }
     if (c.k === 'holdfire') {
@@ -989,6 +1018,8 @@ export class Sim {
       : att.type === 'mlrs' || att.type === 'msldrone' ? 4
       : att.type === 'heli' || att.type === 'helidrone' ? (tgtInf ? 0 : 1)   // guns vs inf, rockets vs veh/bld
       : att.type === 'heavy' || att.type === 'destroyer' ? 6                 // heavy/naval gun
+      : att.type === 'cannon' ? 9                                            // Heavy Cannon emplacement: visible shell
+      : att.type === 'tesla' ? 10                                            // Tesla Coil: lightning bolt
       : ud?.kind === 'air' ? 3 : 2;
     const ev: any = { e: 'shot', x: att.x, z: att.z, tx: tgt.x, tz: tgt.z, w };
     if (ud?.fly) ev.f = 1;
@@ -1075,7 +1106,7 @@ export class Sim {
       if (b.research.t <= 0) {
         pl.tech[b.research.tech] = true;
         this.events.push({ e: 'done', x: b.x, z: b.z });
-        this.events.push({ e: 'tech', p: b.owner, tech: b.research.tech });
+        this.events.push({ e: 'tech', p: b.owner, tech: b.research.tech, x: b.x, z: b.z });
         b.research = null;
       }
     }
@@ -1146,9 +1177,18 @@ export class Sim {
     if (def.attack) {
       const ready = b.cd <= 0;                              // will this shot actually fire?
       b.cd -= TICK;
-      const tgt = this.findEnemy(b, def.attack.range + 0.8 * (b.lvl - 1), !!def.noAir);
+      const rng = def.attack.range + 0.8 * (b.lvl - 1);
+      let tgt = this.findEnemy(b, rng, !!def.noAir);
+      // force-fire: lock onto the commanded target for a short window, overriding
+      // the hold-fire toggle, as long as it stays in range
+      let forced = false;
+      if (b.forceT && b.forceT > 0) {
+        b.forceT -= 1;
+        const ft = b.forceTgt != null ? this.ents.get(b.forceTgt) : undefined;
+        if (ft && ft.hp > 0 && (b.x - ft.x) ** 2 + (b.z - ft.z) ** 2 <= rng * rng) { tgt = ft; forced = true; }
+      }
       if (tgt) {
-        this.fire(b, tgt, def.attack.dmg * (1 + 0.25 * (b.lvl - 1)), def.attack.rof / pl.pf);
+        this.fire(b, tgt, def.attack.dmg * (1 + 0.25 * (b.lvl - 1)), def.attack.rof / pl.pf, forced);
         // tesla coil: the bolt briefly EMP-freezes the struck unit
         if (ready && def.emp && !tgt.b && tgt.hp > 0) {
           tgt.stunT = Math.max(tgt.stunT || 0, def.emp);
@@ -1354,12 +1394,24 @@ export class Sim {
         }
       }
     } else if (recentlyHit && u.reactCd <= 0 && this.ents.has(u.lastHitBy)) {
-      // defenceless (harvester/engineer): flee away from the attacker
+      // defenceless (harvester/engineer): run for cover — head to the nearest
+      // friendly defensive structure (or the base) so they regroup under guns
+      // instead of bolting into the open; fall back to fleeing away if we have none
       const att = this.ents.get(u.lastHitBy)!;
-      const dx = u.x - att.x, dz = u.z - att.z;
-      const d = Math.hypot(dx, dz) || 1;
-      const fx = Math.max(1, Math.min(W - 1, u.x + (dx / d) * 9));
-      const fz = Math.max(1, Math.min(H - 1, u.z + (dz / d) * 9));
+      let safe: Entity | null = null, bd = 1e9;
+      for (const e of this.ents.values()) {
+        if (!e.b || e.owner !== u.owner || e.hp <= 0 || e.progress < e.total) continue;
+        if (!BUILDINGS[e.type]?.attack && e.type !== 'conyard') continue;
+        const dd = (e.x - u.x) ** 2 + (e.z - u.z) ** 2;
+        if (dd < bd) { bd = dd; safe = e; }
+      }
+      let fx: number, fz: number;
+      if (safe) { fx = safe.x; fz = safe.z; }
+      else {
+        const dx = u.x - att.x, dz = u.z - att.z, d = Math.hypot(dx, dz) || 1;
+        fx = Math.max(1, Math.min(W - 1, u.x + (dx / d) * 9));
+        fz = Math.max(1, Math.min(H - 1, u.z + (dz / d) * 9));
+      }
       u.orders = [{ k: 'move', x: fx, z: fz }];
       if (def.cargo) u.orders.push({ k: 'harvest', ox: Math.floor(u.x), oz: Math.floor(u.z) }); // resume after
       u.path = null;
@@ -1419,6 +1471,12 @@ export class Sim {
       if (ord.tgt != null) {
         if (!te || te.hp <= 0) { u.orders.shift(); u.path = null; return; } // target destroyed → done
         px = te.x; pz = te.z;
+      }
+      // suicide truck: a force-fire order means "drive there and detonate", not shoot
+      if (def.bombTruck) {
+        if (Math.hypot(px - u.x, pz - u.z) <= 1.4) { this.truckBoom(u); return; }
+        this.moveToward(u, px, pz, def);
+        return;
       }
       const range = (te?.b && def.siegeRange) ? def.siegeRange : def.range;
       const d = Math.hypot(px - u.x, pz - u.z);
@@ -1822,6 +1880,19 @@ export class Sim {
     return best;
   }
 
+  // nearest ore cell within a harvester's assigned circular work area
+  private scanOreZone(cx: number, cz: number, r: number): { x: number; z: number } | null {
+    let best: { x: number; z: number } | null = null, bd = 1e9;
+    const R = Math.ceil(r), ox = Math.floor(cx), oz = Math.floor(cz), r2 = r * r;
+    for (let z = Math.max(0, oz - R); z < Math.min(H, oz + R + 1); z++)
+      for (let x = Math.max(0, ox - R); x < Math.min(W, ox + R + 1); x++) {
+        if (this.map.ore[z * W + x] <= 0) continue;
+        const d = (x - cx) ** 2 + (z - cz) ** 2;
+        if (d <= r2 && d < bd) { bd = d; best = { x, z }; }
+      }
+    return best;
+  }
+
   private findOreNear(ord: Order): { x: number; z: number } | null {
     // try locally first, then anywhere on the map — harvesters should never
     // sit idle just because the nearest field is far away
@@ -1835,6 +1906,13 @@ export class Sim {
   // dedicated fraction of the AI's harvesters "prospect" the high-value gem
   // fields even when they sit in farther, riskier ground.
   private chooseOre(u: Entity, ban?: Set<number>): { x: number; z: number } | null {
+    // a harvester with an assigned work area mines ONLY inside it; once the area
+    // is exhausted the zone is released so the unit forages normally again
+    if (u.hzr && u.hzr > 0) {
+      const zb = this.scanOreZone(u.hzx!, u.hzz!, u.hzr);
+      if (zb) return zb;
+      u.hzr = 0;
+    }
     const ox = Math.floor(u.x), oz = Math.floor(u.z);
     // tally where friendly harvesters are already working / heading (crowding)
     const targets: { x: number; z: number }[] = [];
@@ -2113,6 +2191,7 @@ export class Sim {
         if (e.missileStock && e.missileStock.length) v.msn = e.missileStock.length;
         if (e.strikeR && e.strikeR > 0) { v.kx = e.strikeX; v.kz = e.strikeZ; v.kr = e.strikeR; }
         if (e.burnT && e.burnT > 0) v.bn = 1;
+        if (e.holdFire) v.hf = 1;                       // defensive building on weapons-hold
       } else {
         if (e.stance) v.st = e.stance;
         if (e.fortified) v.fo = 1;
@@ -2121,6 +2200,7 @@ export class Sim {
         if (e.holdFire) v.hf = 1;
         if (e.orders[0]?.k === 'patrol') v.pa = 1;
         if (e.rzr && e.rzr > 0) { v.rzx = e.rzx; v.rzz = e.rzz; v.rzr = e.rzr; }
+        if (e.hzr && e.hzr > 0) { v.hzx = e.hzx; v.hzz = e.hzz; v.hzr = e.hzr; }
         if (e.cd > 0 && UNITS[e.type]?.dmg > 0) {
           v.fr = 1; // mid-reload = in a firefight (drives aim pose)
           if (e.aimX !== undefined) { v.ax = Math.round(e.aimX * 10) / 10; v.az = Math.round(e.aimZ! * 10) / 10; }

@@ -41,6 +41,9 @@ export class GameMap {
   road = new Int8Array(W * H);                // 0 none, else owner+1 (extends build reach)
   roadDirty = true;
   heightDirty = false;                        // terraforming edited the heightfield → rebuild mesh
+  // dirty bounding box of terraformed cells since the last mesh refresh, so the
+  // renderer only rebuilds the touched region instead of the whole terrain
+  hdMinX = 1e9; hdMinZ = 1e9; hdMaxX = -1e9; hdMaxZ = -1e9;
   terraMask = new Uint8Array(W * H);          // 1 = cell was terraformed to land (render as concrete)
   spawns: { x: number; z: number }[] = [];
   oreDirty = true;
@@ -110,6 +113,10 @@ export class GameMap {
     // water are cleared so a flooded channel doesn't show concrete
     this.terraMask[cz * W + cx] = target > SEA ? 1 : 0;
     this.heightDirty = true;
+    if (cx < this.hdMinX) this.hdMinX = cx;
+    if (cx > this.hdMaxX) this.hdMaxX = cx;
+    if (cz < this.hdMinZ) this.hdMinZ = cz;
+    if (cz > this.hdMaxZ) this.hdMaxZ = cz;
     return done;
   }
 }
@@ -234,28 +241,56 @@ export function genMap(seed: number, nPlayers: number): GameMap {
   const m = new GameMap();
   const rng = new RNG(seed ^ 0x5eed);
 
-  // -- heights: an Earth continent silhouette + warped coasts + ridges
+  // -- heights: either ONE Earth-continent silhouette, or 2-4 separate islands
+  //    divided by water. Islands mode rides in seed bit 0x40000000 so it flows
+  //    through skirmish / multiplayer / replays without any extra plumbing.
+  const islands = (seed & 0x40000000) !== 0;
   const cont = CONTINENTS[(seed >>> 3) % CONTINENTS.length];
+  const nIslands = Math.min(4, Math.max(2, nPlayers));
+  const isleC: { x: number; z: number }[] = [];
+  if (islands) {
+    const quad = [[0.27, 0.27], [0.73, 0.73], [0.73, 0.27], [0.27, 0.73]];
+    const jx = (((seed >>> 5) % 100) / 100 - 0.5) * 0.08;
+    const jz = (((seed >>> 13) % 100) / 100 - 0.5) * 0.08;
+    for (let k = 0; k < nIslands; k++) isleC.push({ x: (quad[k][0] + jx) * W, z: (quad[k][1] + jz) * H });
+  }
+  const isleR = Math.min(W, H) * (nIslands <= 2 ? 0.30 : 0.23);
   for (let z = 0; z <= H; z++) {
     for (let x = 0; x <= W; x++) {
       const dEdge = Math.min(x, W - x, z, H - z) / (W * 0.5);
       const e = Math.min(1, dEdge / 0.14); // thin sea border at map edges
-      // domain-warped mask sample = detailed coastline from a coarse shape;
-      // seed bits mirror the continent for extra per-game variety. 1.06 fills
-      // more of the map with land (bigger playable area; tester: felt small).
-      let wu = (x / W - 0.5) * 1.06 + 0.5 + (fbm(seed + 91, x * 0.045, z * 0.045) - 0.5) * 0.14;
-      let wv = (z / H - 0.5) * 1.06 + 0.5 + (fbm(seed + 92, x * 0.045, z * 0.045) - 0.5) * 0.14;
-      if (seed & 32) wu = 1 - wu;
-      if (seed & 64) wv = 1 - wv;
-      const mask = maskAt(cont.rows, wu, wv);
-      // lower, flatter landmass: the plateau rises only gently from the shore so
-      // coasts aren't towering cliffs and naval guns can reach shore targets
-      // (tester: landmass too high — destroyers couldn't hit land)
-      let h = (smoothstep(0.28, 0.62, mask) * 3.2 - 0.55) * 2.7 * e;
-      h += (fbm(seed, x * 0.05, z * 0.05) - 0.5) * 1.6 * mask; // interior variation
-      const ridge = fbm(seed + 777, x * 0.06, z * 0.06);
-      h += Math.max(0, ridge - 0.7) * 8 * mask; // mountains only well inland
-      h += fbm(seed + 313, x * 0.18, z * 0.18) * 0.45; // small texture
+      let h: number;
+      if (islands) {
+        // each node takes the height of its nearest island: a warped radial blob
+        // that rises from the sea, leaving open water between the landmasses
+        let nd = 1e9;
+        for (const c of isleC) { const d = Math.hypot(x - c.x, z - c.z); if (d < nd) nd = d; }
+        const warp = (fbm(seed + 555, x * 0.05, z * 0.05) - 0.5) * isleR * 0.55; // organic coast
+        const r = (nd + warp) / isleR;                 // 0 at island core .. 1 at coast
+        const land = 1 - smoothstep(0.6, 1.0, r);
+        h = land * 3.0 - 0.9;
+        h += (fbm(seed, x * 0.05, z * 0.05) - 0.5) * 1.4 * land;
+        const ridge = fbm(seed + 777, x * 0.06, z * 0.06);
+        h += Math.max(0, ridge - 0.72) * 7 * land;     // inland peaks
+        h += fbm(seed + 313, x * 0.18, z * 0.18) * 0.42;
+        h *= (0.35 + 0.65 * e);                         // taper to sea at the very edges
+      } else {
+        // domain-warped mask sample = detailed coastline from a coarse shape;
+        // seed bits mirror the continent for extra per-game variety. 1.06 fills
+        // more of the map with land (bigger playable area; tester: felt small).
+        let wu = (x / W - 0.5) * 1.06 + 0.5 + (fbm(seed + 91, x * 0.045, z * 0.045) - 0.5) * 0.14;
+        let wv = (z / H - 0.5) * 1.06 + 0.5 + (fbm(seed + 92, x * 0.045, z * 0.045) - 0.5) * 0.14;
+        if (seed & 32) wu = 1 - wu;
+        if (seed & 64) wv = 1 - wv;
+        const mask = maskAt(cont.rows, wu, wv);
+        // lower, flatter landmass: the plateau rises only gently from the shore so
+        // coasts aren't towering cliffs and naval guns can reach shore targets
+        h = (smoothstep(0.28, 0.62, mask) * 3.2 - 0.55) * 2.7 * e;
+        h += (fbm(seed, x * 0.05, z * 0.05) - 0.5) * 1.6 * mask; // interior variation
+        const ridge = fbm(seed + 777, x * 0.06, z * 0.06);
+        h += Math.max(0, ridge - 0.7) * 8 * mask; // mountains only well inland
+        h += fbm(seed + 313, x * 0.18, z * 0.18) * 0.45; // small texture
+      }
       m.hN[z * (W + 1) + x] = Math.max(-1.2, h);
     }
   }

@@ -803,6 +803,7 @@ export class Renderer {
   private rockets: FxRocket[] = [];
   private smokeMesh!: THREE.InstancedMesh;
   private smokeParts: FxPart[] = [];
+  private satLaunches: { g: THREE.Group; t: number; x: number; z: number; y0: number }[] = [];
   private terrain: THREE.Mesh;
   private terraPrev!: THREE.Mesh;
   private waterMat: THREE.MeshPhongMaterial;
@@ -1218,8 +1219,16 @@ export class Renderer {
     const pos = geo.getAttribute('position') as THREE.BufferAttribute;
     const splat = geo.getAttribute('splat') as THREE.BufferAttribute;
     const terra = geo.getAttribute('terra') as THREE.BufferAttribute;
+    // only recompute the terraformed region (with a margin for slope/normals) —
+    // rebuilding every vertex each frame is what made bulldozing lag
+    const m = this.map as any;
+    const partial = m.hdMaxX >= m.hdMinX;
+    const minX = partial ? m.hdMinX - 2 : -1e9, maxX = partial ? m.hdMaxX + 2 : 1e9;
+    const minZ = partial ? m.hdMinZ - 2 : -1e9, maxZ = partial ? m.hdMaxZ + 2 : 1e9;
+    m.hdMinX = 1e9; m.hdMinZ = 1e9; m.hdMaxX = -1e9; m.hdMaxZ = -1e9; // consume the box
     for (let i = 0; i < pos.count; i++) {
       const x = pos.getX(i), z = pos.getZ(i);
+      if (x < minX || x > maxX || z < minZ || z > maxZ) continue;
       const h = this.map.heightAt(x, z);
       pos.setY(i, h);
       terra.setX(i, this.terraAt(x, z));
@@ -1720,6 +1729,27 @@ export class Renderer {
           });
           this.spawnParts(ev.x, wy, ev.z, 3, false);   // launch bubbles
           this.spawnParts(ev.tx, wy, ev.tz, 4, false); // impact splash
+        } else if (ev.w === 9) {
+          // Heavy Cannon emplacement: muzzle flash + a fast shell that arcs to the
+          // target and auto-detonates (the rockets updater spawns the impact burst)
+          this.spawnParts(ev.x, y1 + 0.8, ev.z, 4, false);
+          const dist = Math.hypot(ev.tx - ev.x, ev.tz - ev.z);
+          if (this.rockets.length < 64) this.rockets.push({
+            x0: ev.x, y0: y1 + 0.8, z0: ev.z, x1: ev.tx, y1: y2, z1: ev.tz,
+            t: 0, delay: 0, dur: Math.max(0.16, dist * 0.022), arc: 0.5 + dist * 0.1,
+          });
+        } else if (ev.w === 10) {
+          // Tesla Coil: a jagged bright lightning bolt arcing off the coil + sparks
+          const yt = y1 + 2.0, seg = 5, jit = () => (Math.random() - 0.5) * 1.3;
+          for (let i = 0; i < seg && this.tracers.length < MAX_TRACER; i++) {
+            const a = i / seg, b = (i + 1) / seg;
+            this.tracers.push({
+              x1: ev.x + (ev.tx - ev.x) * a + (i ? jit() : 0), y1: yt + (y2 - yt) * a + jit() * 0.6, z1: ev.z + (ev.tz - ev.z) * a + (i ? jit() : 0),
+              x2: ev.x + (ev.tx - ev.x) * b + (i < seg - 1 ? jit() : 0), y2: yt + (y2 - yt) * b + jit() * 0.6, z2: ev.z + (ev.tz - ev.z) * b + (i < seg - 1 ? jit() : 0),
+              t: 0.16,
+            });
+          }
+          this.spawnParts(ev.tx, y2, ev.tz, 5, false);
         } else {
           if (this.tracers.length < MAX_TRACER) this.tracers.push({ x1: ev.x, y1, z1: ev.z, x2: ev.tx, y2, z2: ev.tz, t: 0.1 });
           this.spawnParts(ev.tx, y2, ev.tz, 2, false);
@@ -1770,6 +1800,30 @@ export class Renderer {
         this.spawnParts(ev.x, y, ev.z, 2, false);
       }
     }
+  }
+
+  // Spy-satellite launch: a large rocket lifts off from (x,z) and accelerates
+  // skyward, leaving a fire-and-smoke trail, then disappears "into space".
+  launchSatellite(x: number, z: number) {
+    const y0 = Math.max(this.map.heightAt(x, z), SEA);
+    const g = new THREE.Group();
+    const white = new THREE.MeshStandardMaterial({ color: 0xeef2f6, roughness: 0.5, metalness: 0.3 });
+    const dark = new THREE.MeshStandardMaterial({ color: 0x2a2f36, roughness: 0.7, metalness: 0.2 });
+    const red = new THREE.MeshStandardMaterial({ color: 0xd23b3b, roughness: 0.6, metalness: 0.2 });
+    const body = new THREE.Mesh(new THREE.CylinderGeometry(0.7, 0.7, 6, 16), white); body.position.y = 3; g.add(body);
+    const band = new THREE.Mesh(new THREE.CylinderGeometry(0.72, 0.72, 0.6, 16), red); band.position.y = 4.6; g.add(band);
+    const nose = new THREE.Mesh(new THREE.ConeGeometry(0.7, 1.8, 16), white); nose.position.y = 6.9; g.add(nose);
+    const bell = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.82, 0.8, 12), dark); bell.position.y = -0.2; g.add(bell);
+    for (let i = 0; i < 4; i++) {
+      const fin = new THREE.Mesh(new THREE.BoxGeometry(0.12, 1.4, 1.0), dark);
+      const a = i * Math.PI / 2;
+      fin.position.set(Math.cos(a) * 0.7, 0.6, Math.sin(a) * 0.7); fin.rotation.y = -a;
+      g.add(fin);
+    }
+    g.position.set(x, y0, z); g.castShadow = true;
+    this.scene.add(g);
+    this.satLaunches.push({ g, t: 0, x, z, y0 });
+    this.spawnParts(x, y0 + 0.4, z, 16, true); // ignition blast
   }
 
   private spawnParts(x: number, y: number, z: number, n: number, big: boolean) {
@@ -2131,6 +2185,24 @@ export class Renderer {
     });
     this.rocketMesh.count = rn;
     this.rocketMesh.instanceMatrix.needsUpdate = true;
+
+    // satellite launches: a big rocket accelerates skyward, trailing fire + smoke
+    this.satLaunches = this.satLaunches.filter(s => {
+      s.t += dt;
+      const dur = 7;
+      if (s.t >= dur) { this.scene.remove(s.g); return false; }
+      const p = s.t / dur;
+      s.g.position.set(s.x + p * p * 18, s.y0 + p * p * 150, s.z); // accelerating ascent + gravity-turn drift
+      s.g.rotation.z = -Math.min(0.6, p * 0.8);                    // lean downrange as it climbs
+      const ex = s.g.position;
+      this.spawnParts(ex.x, ex.y - 0.2, ex.z, 3, true);            // engine flame
+      if (this.smokeParts.length < 400) this.smokeParts.push({
+        x: ex.x + (Math.random() - 0.5) * 0.6, y: ex.y - 0.5, z: ex.z + (Math.random() - 0.5) * 0.6,
+        vx: (Math.random() - 0.5) * 0.6, vy: -0.3, vz: (Math.random() - 0.5) * 0.6,
+        life: 0, max: 1.3 + Math.random() * 0.8, s: 2.4,
+      });
+      return true;
+    });
 
     // smoke puffs: drift and grow
     let sn = 0;

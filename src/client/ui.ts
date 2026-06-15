@@ -439,11 +439,15 @@ export class UI {
           parts.push(kbd('RMB', 'launch / bombard area'));
           parts.push(kbd('R', sel[0].rp ? 'auto-build: ON' : 'auto-build missiles'));
         } else {
-          parts.push(kbd('RMB', 'set rally point'));
           if (['barracks', 'factory', 'dronefac', 'airforce', 'shipyard'].includes(sel[0].t)) {
+            parts.push(kbd('RMB', 'set rally point'));
             parts.push(kbd('2×LMB', sel[0].pm ? 'primary ✓' : 'set primary'));
             parts.push(kbd('P', 'patrol route for produced units'));
             parts.push(kbd('R', 'repeat production'));
+          }
+          if (BUILDINGS[sel[0].t]?.attack) {
+            parts.push(kbd('H', sel[0].hf ? 'hold fire: ON' : 'hold fire'));
+            parts.push(kbd('Ctrl+RMB', 'force fire'));
           }
         }
         if (this.upgTarget >= 0) parts.push(kbd('⬆', 'upgrade (sidebar button)'));

@@ -166,7 +166,7 @@ interface Client { ws: WebSocket; name: string; faction: string; slot: number; l
 interface Room {
   code: string; clients: Client[]; started: boolean;
   sim: Sim | null; timer: ReturnType<typeof setInterval> | null; cmdQ: any[];
-  aiSlots: number[]; size: number; diff: number;
+  aiSlots: number[]; size: number; diff: number; islands?: boolean;
   rec?: { seed: number; size: number; players: any[]; cmds: { k: number; c: any[] }[] };
   lastReport?: any; replaySaved?: boolean;
 }
@@ -368,7 +368,9 @@ function startRoom(room: Room) {
     room.aiSlots.push(specs.length);
     specs.push({ name: `AI ${FACTIONS[f].name} (${lvlName})`, faction: f, isAI: true, aiLvl: room.diff });
   }
-  const seed = (Math.random() * 0x7fffffff) | 0;
+  // islands mode rides in seed bit 0x40000000 (cleared from the random bits first)
+  let seed = ((Math.random() * 0x7fffffff) | 0) & ~0x40000000;
+  if (room.islands) seed |= 0x40000000;
   setMapSize(room.size);
   room.sim = new Sim(seed, specs);
   room.rec = { seed, size: room.size, players: specs.map(s => ({ ...s })), cmds: [] };
@@ -486,6 +488,7 @@ wss.on('connection', ws => {
         code, clients: [me], started: false, sim: null, timer: null, cmdQ: [], aiSlots: [],
         size: [72, 96, 128].includes(m.size) ? m.size : 96,
         diff: Number.isInteger(m.diff) && m.diff >= 0 && m.diff <= 3 ? m.diff : 1,
+        islands: !!m.islands,
       };
       me.room = room;
       rooms.set(code, room);
