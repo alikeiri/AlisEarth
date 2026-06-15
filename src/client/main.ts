@@ -71,6 +71,10 @@ function simViews(sim: Sim, a: number): any[] {
       if (e.burnT && e.burnT > 0) v.bn = 1;
       if (e.holdFire) v.hf = 1;
     } else {
+      // per-TICK travel (framerate-independent): real path movement is ~0.2+/tick,
+      // a collision shove/micro-nudge is far smaller — only the former animates legs
+      const ddx = e.x - e.px, ddz = e.z - e.pz;
+      if (ddx * ddx + ddz * ddz > 0.0036) v.mv = 1;
       if (e.stance) v.st = e.stance;
       if (e.fortified) v.fo = 1;
       if (e.fortT > 0) v.ft = e.fortGoal ? 1 : 2;
@@ -101,7 +105,7 @@ function simViews(sim: Sim, a: number): any[] {
 function simPlayers(sim: Sim): any[] {
   return sim.players.map(pl => ({
     c: Math.floor(pl.credits), a: pl.alive, pm: Math.round(pl.powerMade), pu: Math.round(pl.powerUsed),
-    n: pl.name, f: pl.faction, tm: pl.team, ai: pl.isAI, tech: Object.keys(pl.tech).filter(k => pl.tech[k]),
+    n: pl.name, f: pl.faction, tm: pl.team, ai: pl.isAI, tech: Object.keys(pl.tech).filter(k => pl.tech[k]), satOk: !!pl.satOk,
   }));
 }
 
@@ -287,7 +291,7 @@ class ReplayGame implements GameLike {
   players(): any[] {
     return this.sim.players.map(pl => ({
       c: Math.floor(pl.credits), a: pl.alive, pm: Math.round(pl.powerMade), pu: Math.round(pl.powerUsed),
-      n: pl.name, f: pl.faction, tm: pl.team, ai: pl.isAI, tech: Object.keys(pl.tech).filter(k => pl.tech[k]),
+      n: pl.name, f: pl.faction, tm: pl.team, ai: pl.isAI, tech: Object.keys(pl.tech).filter(k => pl.tech[k]), satOk: !!pl.satOk,
     }));
   }
   drainEvents() { const e = this.evQ; this.evQ = []; return e; }
@@ -435,6 +439,8 @@ class NetLockstepGame implements GameLike {
   views(): any[] { return simViews(this.sim, this.frac); }
   players(): any[] { return simPlayers(this.sim); }
   drainEvents() { const e = this.evQ; this.evQ = []; return e; }
+  // debug overlay telemetry: socket counters + ping + lockstep-specific health
+  netStats() { return { ...this.net.stats, stalls: this.engine.stalls, tick: this.sim.tickN, delay: this.engine.delay }; }
   status() { return this.sim.done ? { over: true, winner: this.sim.winner } : { over: false, winner: -2 }; }
   sendChat(to: any, msg: string) { this.net.send({ t: 'chat', to, msg }); }
   drainChat() { const q = this.chatQ; this.chatQ = []; return q; }
@@ -531,8 +537,18 @@ class GameClient {
   private lastT = 0;
   private frame = 0;
   private over = false;
+  private hb: Worker | null = null;     // heartbeat worker: keeps the sim/net advancing when the tab is hidden
+  private hbUrl = '';
+  private lastRaf = 0;                  // wall clock of the last rAF frame (watchdog)
+  private lastHidden = 0;               // wall clock at the last background step
   private overlayCtx: CanvasRenderingContext2D;
   private cleanups: (() => void)[] = [];
+  // throttled audio-cue state
+  private cueT: Record<string, number> = {}; // last-played wall clock per cue
+  private pwrState = 0;                  // 0 ok, 1 low, 2 insufficient (for crossing detection)
+  private siloCued = false;             // missile-silo cue: once per session
+  private satCued = new Set<number>();  // satellite cue: once per player
+  private hpPrev = new Map<number, number>(); // my entities' hp last frame (under-attack detection)
 
   // fog of war: 0 never seen, 1 explored, 2 currently visible — client-side
   // per-player view masking (spectator modes see everything)
@@ -769,7 +785,31 @@ class GameClient {
     this.sizeOverlay();
     this.lastT = performance.now();
     (window as any).__fe = this; // debug/testing handle
+    this.startHeartbeat(on);
     this.loop(this.lastT);
+  }
+
+  // requestAnimationFrame is paused/throttled whenever the tab is hidden OR the
+  // window loses focus — fatal for lockstep, where a backgrounded client stops
+  // pumping inputs and every peer stalls waiting on it. A dedicated Web Worker
+  // timer is NOT throttled by visibility/focus, so it acts as a watchdog: if the
+  // rAF loop hasn't run recently (i.e. it's been throttled away), the worker
+  // drives the sim + network pump itself. When rAF is healthy the worker stays
+  // out of the way entirely, so foreground play is byte-for-byte unchanged.
+  private startHeartbeat(_on: any) {
+    try {
+      const src = 'var t=setInterval(function(){postMessage(0)},16);onmessage=function(e){if(e.data==="x"){clearInterval(t)}}';
+      this.hbUrl = URL.createObjectURL(new Blob([src], { type: 'text/javascript' }));
+      this.hb = new Worker(this.hbUrl);
+      this.hb.onmessage = () => {
+        if (this.over) return;
+        const now = performance.now();
+        if (now - this.lastRaf < 120) { this.lastHidden = 0; return; } // rAF is healthy — it owns the sim
+        let dt = this.lastHidden ? (now - this.lastHidden) / 1000 : 0.05;
+        this.lastHidden = now;
+        this.game.update(Math.min(0.25, dt) * 1000);   // advance sim + lockstep pump; no render while hidden
+      };
+    } catch { /* no Worker support: background play just won't advance */ }
   }
 
   // on-screen action buttons for touch devices (keyboard-free controls)
@@ -876,6 +916,7 @@ class GameClient {
   }
 
   private chatHistory: { name: string; to: any; msg: string; t: number }[] = [];
+  private chatT0 = performance.now();   // game-start reference for chat timestamps
 
   private appendChat(m: any) {
     this.chatHistory.push({ name: String(m.name), to: m.to, msg: String(m.msg), t: performance.now() });
@@ -891,10 +932,17 @@ class GameClient {
     const typing = !document.getElementById('chatBar')!.classList.contains('hidden');
     log.classList.toggle('typing', typing);
     const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;');
-    log.innerHTML = this.chatHistory.slice(typing ? -10 : -8).map(m => {
+    // elapsed-since-game-start stamp, HH:MM
+    const stamp = (t: number) => {
+      const min = Math.max(0, Math.floor((t - this.chatT0) / 60000));
+      return `${String(Math.floor(min / 60)).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`;
+    };
+    // always keep the last 10 lines on screen (they persist after the chat closes)
+    log.innerHTML = this.chatHistory.slice(-10).map(m => {
       const dm = typeof m.to === 'number';
       const chan = dm ? 'DM' : m.to === 'allies' ? 'ALLY' : 'ALL';
-      return `<div class="chatMsg${dm ? ' dm' : ''}" data-t="${m.t}"><span class="chan">[${chan}]</span>` +
+      return `<div class="chatMsg${dm ? ' dm' : ''}" data-t="${m.t}">` +
+        `<span class="chan">${stamp(m.t)} [${chan}]</span>` +
         `<span class="who">${esc(m.name)}:</span> ${esc(m.msg)}</div>`;
     }).join('');
   }
@@ -906,6 +954,8 @@ class GameClient {
 
   destroy() {
     cancelAnimationFrame(this.raf);
+    if (this.hb) { try { this.hb.postMessage('x'); this.hb.terminate(); } catch { /* already gone */ } this.hb = null; }
+    if (this.hbUrl) { try { URL.revokeObjectURL(this.hbUrl); } catch { /* ignore */ } this.hbUrl = ''; }
     for (const c of this.cleanups) c();
     this.ui.destroy();
     this.ui.setHudVisible(false);
@@ -1563,8 +1613,9 @@ class GameClient {
         this.markCmd(ids0, tgt ? tgt.x : g.x, tgt ? tgt.z : g.z, true);
         return;
       }
-      // no units selected: force-fire from selected defensive buildings (turret etc.)
-      const bids = [...this.selection].map(id => this.byId.get(id)).filter(b => b && b.b && b.o === me && BUILDINGS[b.t]?.attack).map(b => b.i);
+      // no units selected: force-fire from selected force-fire-capable buildings
+      // (Defense Turret, Heavy Cannon — not Tesla Coil / Missile Battery)
+      const bids = [...this.selection].map(id => this.byId.get(id)).filter(b => b && b.b && b.o === me && BUILDINGS[b.t]?.forceFire).map(b => b.i);
       if (bids.length) {
         const tgt = this.pickView(sx, sy, () => true);
         this.game.issue({ k: 'bforcefire', p: me, ids: bids, tgt: tgt ? tgt.i : undefined, x: g.x, z: g.z });
@@ -1761,6 +1812,7 @@ class GameClient {
 
   private loop = (t: number) => {
     this.raf = requestAnimationFrame(this.loop);
+    this.lastRaf = performance.now();   // heartbeat watchdog: rAF is alive
     const dt = Math.min(0.1, (t - this.lastT) / 1000 || 0.016);
     this.lastT = t;
     const _w0 = this.perfOn ? performance.now() : 0;
@@ -1870,8 +1922,9 @@ class GameClient {
     if (!(this.game as any).isSim && fogEnabled && !this.over) {
       if (!this.fog) this.fog = new Uint8Array(W * H);
       if (this.frame % 3 === 0) this.updateFog(allViews);
-      // Spy Satellite tech: permanent full-map visibility — keep the whole mask lit
-      if (plList[this.game.me]?.tech?.includes('satellite')) this.fog.fill(2);
+      // Spy Satellite: full-map visibility — but only while it's online (powered
+      // and a Research Lab still stands); if it goes dark, fog returns
+      if (plList[this.game.me]?.satOk) this.fog.fill(2);
       const f = this.fog;
       views = allViews.filter(v => {
         if (this.allies.has(v.o)) return true;
@@ -1901,23 +1954,29 @@ class GameClient {
         this.appendChat({ name: who, to: 'all', msg: 'We surrender! The region is yours.' });
       }
       if (ev.e === 'sdtick' && ev.owner === this.game.me) audio.play('sdbeep');
-      if (ev.e === 'tech' && ev.tech === 'satellite' && this.allies.has(ev.p)) {
-        // a satellite goes up: dramatic rocket launch + permanent map reveal
-        this.renderer.launchSatellite(ev.x ?? W / 2, ev.z ?? H / 2);
-        if (ev.p === this.game.me) { audio.play('win'); this.flashBanner('🛰  SATELLITE ONLINE — full map visibility'); }
+      if (ev.e === 'tech' && ev.tech === 'satellite') {
+        // ANY player's satellite launch gets a one-time cue (per player)
+        if (!this.satCued.has(ev.p)) { this.satCued.add(ev.p); audio.play('satup'); }
+        if (this.allies.has(ev.p)) {
+          // an allied satellite goes up: dramatic rocket launch + permanent map reveal
+          this.renderer.launchSatellite(ev.x ?? W / 2, ev.z ?? H / 2);
+          if (ev.p === this.game.me) { this.flashBanner('🛰  SATELLITE ONLINE — full map visibility'); }
+        }
       }
       audio.event(ev, this.renderer.camX, this.renderer.camZ, this.game.me);
     }
+    this.updateAudioCues(views);
     // chat messages + expiry
     for (const m of (this.game.drainChat?.() || [])) { this.appendChat(m); audio.play('click'); }
     if (this.frame % 30 === 0) {
-      // age out old lines so they fade away — but never while the player is
-      // typing, where the last 10 lines are kept on screen as a reference
+      // age out old lines so they fade away — but always KEEP the last 10
+      // (they stay on screen after the chat closes), and never prune while typing
       const typing = !document.getElementById('chatBar')!.classList.contains('hidden');
-      if (!typing) {
+      if (!typing && this.chatHistory.length > 10) {
         const now = performance.now();
         const before = this.chatHistory.length;
-        this.chatHistory = this.chatHistory.filter(m => now - m.t < 20000);
+        const cutoff = this.chatHistory.length - 10; // indices below this may age out
+        this.chatHistory = this.chatHistory.filter((m, i) => i >= cutoff || now - m.t < 20000);
         if (this.chatHistory.length !== before) this.renderChat();
       }
     }
@@ -2121,6 +2180,32 @@ class GameClient {
 
   // F3 perf overlay: frame rate + where each frame's time goes, plus (for a
   // multiplayer match) the snapshot stream — rate, size and arrival latency.
+  // rate-limited audio feedback cues (power state, under-attack, silo, satellite).
+  // Each cue fires at most once per 30s, and the power cues only on a threshold
+  // CROSSING into a worse state so a steady brownout doesn't nag repeatedly.
+  private updateAudioCues(views: any[]) {
+    const now = performance.now();
+    const cue = (k: string, snd: string, gap = 30000) => {
+      if (now - (this.cueT[k] || 0) >= gap) { this.cueT[k] = now; audio.play(snd); }
+    };
+    const me = this.game.players?.()[this.game.me];
+    if (me && me.a !== false) {
+      const st = me.pu > me.pm ? 2 : (me.pu > me.pm * 0.85 ? 1 : 0);
+      if (st > this.pwrState) { if (st === 2) cue('pwrout', 'pwrout'); else cue('pwrlow', 'pwrlow'); }
+      this.pwrState = st;
+    }
+    // a missile silo finished anywhere on the map — announce once per session
+    if (!this.siloCued && views.some(v => v.b && v.t === 'silo' && (v.pr ?? 1) >= 1)) { this.siloCued = true; audio.play('siloup'); }
+    // my units / buildings taking fire — separate cues, 30s apart each
+    for (const v of views) {
+      if (v.o !== this.game.me) continue;
+      const prev = this.hpPrev.get(v.i);
+      if (prev !== undefined && v.h < prev - 0.5) cue(v.b ? 'bldgattack' : 'unitattack', v.b ? 'bldgattack' : 'underattack');
+    }
+    this.hpPrev.clear();
+    for (const v of views) if (v.o === this.game.me) this.hpPrev.set(v.i, v.h);
+  }
+
   // This is what diagnoses "performance got bad": a low FPS with high render
   // time is the client GPU/CPU; healthy FPS but stale snapshots is the network
   // or a server tick falling behind.
@@ -2147,11 +2232,20 @@ class GameClient {
       const win = (now - this.perfRx.t) / 1000;
       const kbps = win > 0.5 ? ((ns.bytes - this.perfRx.bytes) / 1024 / win) : 0;
       if (win > 1) this.perfRx = { bytes: ns.bytes, t: now };
-      const snapRate = ns.interpSpan > 0 ? (1000 / ns.interpSpan) : 0;
-      const stale = ns.sinceSnap;
-      const staleCol = stale > 400 ? '#ff6b5e' : stale > 200 ? '#ffc940' : '#7bdcff';
-      s += `\n<span style="color:#7bdcff">net</span>  ${snapRate.toFixed(1)} snap/s  ${(ns.lastSize / 1024).toFixed(1)}KB`
-        + `\n<span style="color:${staleCol}">last snap ${stale.toFixed(0)}ms ago</span>  ${kbps.toFixed(0)}KB/s`;
+      const ping = Math.round(ns.ping || 0);
+      const pCol = ping > 200 ? '#ff6b5e' : ping > 120 ? '#ffc940' : '#7bdcff';
+      s += `\n<span style="color:${pCol}">ping ${ping}ms</span>  ${kbps.toFixed(0)}KB/s  ${ns.msgs || 0} msgs`;
+      if (ns.interpSpan !== undefined) {            // snapshot game
+        const snapRate = ns.interpSpan > 0 ? (1000 / ns.interpSpan) : 0;
+        const stale = ns.sinceSnap;
+        const staleCol = stale > 400 ? '#ff6b5e' : stale > 200 ? '#ffc940' : '#7bdcff';
+        s += `\n<span style="color:#7bdcff">net</span>  ${snapRate.toFixed(1)} snap/s  ${(ns.lastSize / 1024).toFixed(1)}KB`
+          + `\n<span style="color:${staleCol}">last snap ${stale.toFixed(0)}ms ago</span>`;
+      } else if (ns.stalls !== undefined) {          // lockstep game
+        const stCol = ns.stalls > 50 ? '#ffc940' : '#7be08a';
+        s += `\n<span style="color:#7bdcff">lockstep</span>  tick ${ns.tick}  delay ${ns.delay}`
+          + `\n<span style="color:${stCol}">stalls ${ns.stalls}</span>`;
+      }
     }
     this.perfEl.innerHTML = s;
   }

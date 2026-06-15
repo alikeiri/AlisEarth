@@ -46,6 +46,7 @@ export class GameMap {
   // renderer only rebuilds the touched region instead of the whole terrain
   hdMinX = 1e9; hdMinZ = 1e9; hdMaxX = -1e9; hdMaxZ = -1e9;
   terraMask = new Uint8Array(W * H);          // 1 = cell was terraformed to land (render as concrete)
+  terraVersion = 0;                           // bumped on every terraform edit (minimap cache invalidation)
   spawns: { x: number; z: number }[] = [];
   oreDirty = true;
 
@@ -73,6 +74,41 @@ export class GameMap {
   passableCrawler(cx: number, cz: number): boolean {
     return this.inB(cx, cz) && this.occ[cz * W + cx] === 0;
   }
+  // land-connectivity components: which cells a GROUND unit can walk between over
+  // terrain alone (water/cliffs split the map into islands). Lets harvesters skip
+  // ore they could never reach. Recomputed lazily after terraforming changes land.
+  landRegion: Int32Array | null = null;
+  regionDirty = true;
+  private computeLandRegions() {
+    const reg = this.landRegion && this.landRegion.length === W * H ? this.landRegion : new Int32Array(W * H);
+    reg.fill(-1);
+    const stack: number[] = [];
+    let next = 0;
+    for (let s = 0; s < W * H; s++) {
+      if (this.tBlocked[s] !== 0 || reg[s] !== -1) continue;
+      const id = next++;
+      reg[s] = id; stack.push(s);
+      while (stack.length) {
+        const i = stack.pop()!;
+        const x = i % W, z = (i / W) | 0;
+        for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
+          if (!dx && !dz) continue;
+          const nx = x + dx, nz = z + dz;
+          if (nx < 0 || nz < 0 || nx >= W || nz >= H) continue;
+          const ni = nz * W + nx;
+          if (this.tBlocked[ni] === 0 && reg[ni] === -1) { reg[ni] = id; stack.push(ni); }
+        }
+      }
+    }
+    this.landRegion = reg;
+    this.regionDirty = false;
+  }
+  // region id of a cell's land component (-1 = water/cliff/out of bounds)
+  regionAt(cx: number, cz: number): number {
+    if (this.regionDirty || !this.landRegion) this.computeLandRegions();
+    if (!this.inB(cx, cz)) return -1;
+    return this.landRegion![cz * W + cx];
+  }
   heightAt(x: number, z: number): number {
     const cx = Math.min(W - 0.001, Math.max(0, x)), cz = Math.min(H - 0.001, Math.max(0, z));
     const xi = Math.floor(cx), zi = Math.floor(cz);
@@ -96,6 +132,7 @@ export class GameMap {
         if (avg < SEA + 0.05) { this.tBlocked[ci] = 1; this.water[ci] = 1; }
         else if (slope > 2.0) this.tBlocked[ci] = 1;
       }
+    this.regionDirty = true; // land connectivity may have changed
   }
 
   // nudge one cell's four corner nodes toward a target height by `step`, then
@@ -114,6 +151,7 @@ export class GameMap {
     // water are cleared so a flooded channel doesn't show concrete
     this.terraMask[cz * W + cx] = target > SEA ? 1 : 0;
     this.heightDirty = true;
+    this.terraVersion++;
     if (cx < this.hdMinX) this.hdMinX = cx;
     if (cx > this.hdMaxX) this.hdMaxX = cx;
     if (cz < this.hdMinZ) this.hdMinZ = cz;
@@ -468,24 +506,35 @@ export function genMap(seed: number, nPlayers: number): GameMap {
     addOre(Math.round(s.x + dx * 10), Math.round(s.z + dz * 3 + rng.range(-3, 3)), 2, 700);
     addOre(Math.round(s.x + dx * 3 + rng.range(-3, 3)), Math.round(s.z + dz * 10), 2, 700);
   }
-  // central contested fields — spaced out from every existing patch
+  // central contested fields — spaced out from every existing patch, and pulled
+  // toward the middle of the map (a triangular distribution peaks at center) so
+  // the contested economy doesn't randomly favour one side / one continent.
+  // `tightness` 0..1: higher = more clustered around center.
+  const centerBiased = (size: number, margin: number, tightness: number) => {
+    let t = 0; const n = tightness >= 0.6 ? 3 : 2;
+    for (let k = 0; k < n; k++) t += rng.next();
+    t /= n;                                   // mean 0.5, more peaked with more samples
+    return Math.round(margin + t * (size - 2 * margin));
+  };
   const MIN_GAP = 13;
   let placed = 0, tries = 0;
   const wantOre = Math.max(3, Math.round(W / 19));
-  while (placed < wantOre && tries < 400) {
+  while (placed < wantOre && tries < 600) {
     tries++;
-    const cx = 24 + rng.int(W - 48), cz = 24 + rng.int(H - 48);
+    const cx = centerBiased(W, 24, 0.4), cz = centerBiased(H, 24, 0.4);
     if (m.blockedT(cx, cz) || !farFromOre(cx, cz, MIN_GAP)) continue;
     addOre(cx, cz, 3, 900);
     placed++;
   }
 
-  // -- special crystal fields: rare, contested, 3x value
+  // -- special crystal fields: rare, contested, 3x value — concentrated near the
+  // map center (tight bias) so the high-value blue ore is genuinely a contested,
+  // central prize rather than a lucky edge spawn.
   let gems = 0, gtries = 0;
   const wantGems = Math.max(2, Math.round(W / 44));
-  while (gems < wantGems && gtries < 400) {
+  while (gems < wantGems && gtries < 600) {
     gtries++;
-    const cx = 20 + rng.int(W - 40), cz = 20 + rng.int(H - 40);
+    const cx = centerBiased(W, Math.round(W * 0.28), 0.8), cz = centerBiased(H, Math.round(H * 0.28), 0.8);
     if (m.blockedT(cx, cz) || !farFromOre(cx, cz, MIN_GAP)) continue;
     let farFromSpawns = true;
     for (const s of starts)

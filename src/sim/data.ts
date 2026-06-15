@@ -37,6 +37,7 @@ export interface UnitDef {
   blastR?: number;                               // missile blast radius
   deploys?: string;                              // MCV: F deploys it into this building (forward base)
   terra?: boolean;                               // bulldozer: can reshape terrain along a drawn path
+  unique?: boolean;                              // at most one alive (or in production) per player
   amphibious?: boolean;                          // can travel over BOTH land and water
   carrier?: boolean;                             // transport ship: carries ground units across water (load/unload)
   altBuiltAt?: string;                           // a second building that can also produce this unit
@@ -79,7 +80,7 @@ export const UNITS: Record<string, UnitDef> = {
   // construction yard (enables building structures around the new spot)
   mcv:    { name: 'Construction Vehicle', cost: 2500, hp: 500, speed: 1.1, range: 0, dmg: 0, rof: 1, builtAt: 'factory', altBuiltAt: 'shipyard', buildTime: 20, kind: 'veh', deploys: 'conyard', amphibious: true },
   // Bulldozer: slow, defenceless terraformer — reshapes the ground along a drawn path
-  dozer:  { name: 'Bulldozer',    cost: 1400, hp: 420, speed: 1.3, range: 0,   dmg: 0,  rof: 1,   builtAt: 'factory',  buildTime: 12, kind: 'veh', terra: true, amphibious: true },
+  dozer:  { name: 'Bulldozer',    cost: 1400, hp: 420, speed: 1.3, range: 0,   dmg: 0,  rof: 1,   builtAt: 'factory',  buildTime: 12, kind: 'veh', terra: true, amphibious: true, unique: true },
   hive:    { name: 'Drone Hive',  cost: 1500, hp: 900, speed: 1.1, range: 13,  dmg: 0,  rof: 1,   builtAt: 'barracks', buildTime: 16, kind: 'inf', fortify: true, emits: 'minidrone' },
   minidrone: { name: 'Mini Drone', cost: 0,   hp: 40,  speed: 4.2, range: 4.0, dmg: 200, rof: 1, builtAt: '',         buildTime: 0,  kind: 'air', fly: true, alt: 1.6, ephemeral: 26, internal: true, kamikaze: true },
   // Melody's anti-vehicle drone: fast homing kamikaze, big shaped-charge hit
@@ -143,6 +144,7 @@ export interface BuildingDef {
   emp?: number;                                   // tesla: stuns the struck unit for this many seconds
   noAir?: boolean;                                // defensive gun that cannot elevate to hit aircraft
   sight?: number;                                 // explicit fog-of-war reveal radius (radar dome sees far)
+  forceFire?: boolean;                            // player may Ctrl+force-fire this gun at a ground point/entity
 }
 
 export const BUILDINGS: Record<string, BuildingDef> = {
@@ -152,12 +154,12 @@ export const BUILDINGS: Record<string, BuildingDef> = {
   barracks: { name: 'Barracks',          cost: 450,  hp: 750,  power: -20,  buildTime: 7,  size: 2, prereq: 'power' },
   factory:  { name: 'War Factory',       cost: 1900, hp: 1100, power: -40,  buildTime: 14, size: 3, prereq: 'refinery' },
   turret:   { name: 'Defense Turret',    cost: 650,  hp: 560,  power: -25,  buildTime: 8,  size: 1, prereq: 'barracks',
-              attack: { range: 7.5, dmg: 26, rof: 1.0 } },
+              attack: { range: 7.5, dmg: 26, rof: 1.0 }, forceFire: true },
   dronefac: { name: 'Drone Works',       cost: 1500, hp: 850,  power: -35,  buildTime: 11, size: 2, prereq: 'factory' },
   sam:      { name: 'Missile Battery',   cost: 900,  hp: 700,  power: -30,  buildTime: 9,  size: 1, prereq: 'factory',
               attack: { range: 7, dmg: 50, rof: 2.5 } },
   cannon:   { name: 'Heavy Cannon',      cost: 1200, hp: 760,  power: -30,  buildTime: 11, size: 1, prereq: 'factory',
-              attack: { range: 10, dmg: 95, rof: 2.6 }, noAir: true },   // long-range anti-armor emplacement
+              attack: { range: 10, dmg: 95, rof: 2.6 }, noAir: true, forceFire: true },   // long-range anti-armor emplacement
   tesla:    { name: 'Tesla Coil',        cost: 1300, hp: 620,  power: -55,  buildTime: 12, size: 1, prereq: 'lab',
               attack: { range: 6.5, dmg: 70, rof: 1.7 }, emp: 1.2, noAir: true }, // zaps + briefly stuns
   irondome: { name: 'Iron Dome',         cost: 1500, hp: 780,  power: -45,  buildTime: 13, size: 2, prereq: 'radar',
@@ -173,12 +175,12 @@ export const BUILDINGS: Record<string, BuildingDef> = {
 };
 
 // Researchable technologies (at the Research Lab). Each unlocks tech-gated units.
-export interface TechDef { id: string; name: string; cost: number; time: number; desc: string }
+export interface TechDef { id: string; name: string; cost: number; time: number; desc: string; minLab?: number }
 export const TECHS: Record<string, TechDef> = {
   chem:    { id: 'chem',    name: 'Chemical Weapons',  cost: 1500, time: 30, desc: 'Unlocks Chem Trooper, Chem Tank, Chem Drone' },
   bio:     { id: 'bio',     name: 'Biological Weapons', cost: 1800, time: 35, desc: 'Unlocks Bio Trooper, Bio Tank, Bio Drone' },
   stealth: { id: 'stealth', name: 'Stealth Systems',   cost: 2000, time: 38, desc: 'Unlocks the cloaked Stealth Tank' },
-  satellite: { id: 'satellite', name: 'Spy Satellite', cost: 3000, time: 50, desc: 'Launches a satellite — permanently reveals the entire map (removes fog of war)' },
+  satellite: { id: 'satellite', name: 'Spy Satellite', cost: 25000, time: 50, minLab: 3, desc: 'Reveals the entire map (removes fog) while powered and a Research Lab stands. Needs a level-3 lab.' },
 };
 
 // Faction balance philosophy: nobody is strictly strongest. Superpowers get

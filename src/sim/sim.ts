@@ -57,6 +57,7 @@ export interface Entity {
   wpLoop?: Order[]; // waypoint repeat: the saved chain to re-run when the orders empty (until cancelled)
   holdFire?: boolean; // weapons-hold: never fires, even when attacked, until toggled off
   forceTgt?: number; forceT?: number; // defensive building: force-fire target id + ticks left
+  forceX?: number; forceZ?: number;   // defensive building: force-fire ground point (no entity)
 }
 
 export interface PlayerState {
@@ -69,6 +70,7 @@ export interface PlayerState {
   bonusCost: number; bonusIncome: number; // brutal-AI handicaps
   godmode?: boolean;                       // cheat: instant builds (taints the game)
   tech: Record<string, boolean>;          // researched technologies
+  satOk?: boolean;                         // satellite researched AND powered AND a lab still stands
   spawn: { x: number; z: number };
 }
 
@@ -318,8 +320,8 @@ export class Sim {
       if (!b || !b.b || b.owner !== c.p || !def || (def.builtAt !== b.type && def.altBuiltAt !== b.type)) return;
       if (def.tech && !pl.tech[def.tech]) return; // not yet researched
       if (def.internal) return;
-      // the commando is a hero unit: only one alive (or in production) at a time
-      if (def.commando) {
+      // hero/unique units (Melody, Bulldozer): only one alive (or in production) at a time
+      if (def.commando || def.unique) {
         let have = 0;
         for (const e of this.ents.values()) if (e.owner === c.p && e.type === c.type && e.hp > 0) have++;
         for (const bb of this.ents.values()) if (bb.b && bb.owner === c.p) for (const it of bb.queue) if (it.type === c.type) have++;
@@ -474,11 +476,14 @@ export class Sim {
       return;
     }
     if (c.k === 'bforcefire') {
-      // force a defensive building to fire on a specific target for a short window,
-      // overriding its hold-fire toggle
+      // force a defensive building to fire on a target entity OR a ground point for
+      // a short window, overriding hold-fire. Only guns flagged forceFire (Defense
+      // Turret, Heavy Cannon) accept it — Tesla Coil / Missile Battery do not.
       for (const i of (c.ids || [])) {
         const b = this.ents.get(i);
-        if (b && b.b && b.owner === c.p && BUILDINGS[b.type]?.attack && c.tgt != null) { b.forceTgt = c.tgt; b.forceT = 30; }
+        if (!b || !b.b || b.owner !== c.p || !BUILDINGS[b.type]?.forceFire) continue;
+        if (c.tgt != null) { b.forceTgt = c.tgt; b.forceX = undefined; b.forceZ = undefined; b.forceT = 30; }
+        else if (c.x != null) { b.forceTgt = undefined; b.forceX = c.x; b.forceZ = c.z; b.forceT = 30; }
       }
       return;
     }
@@ -498,6 +503,7 @@ export class Sim {
       const tech = TECHS[c.tech];
       if (!b || !b.b || b.owner !== c.p || b.type !== 'lab' || b.progress < b.total || b.research) return;
       if (!tech || pl.tech[c.tech]) return;
+      if (tech.minLab && b.lvl < tech.minLab) return; // e.g. Spy Satellite needs a level-3 lab
       const rcost = Math.round(tech.cost * pl.fac.costMul * pl.bonusCost);
       if (pl.credits < rcost) return;
       pl.credits -= rcost;
@@ -798,6 +804,7 @@ export class Sim {
     }
 
     // power factors
+    const labs = new Array(this.players.length).fill(0);
     for (const pl of this.players) { pl.powerMade = 10; pl.powerUsed = 0; }
     for (const e of this.ents.values()) {
       if (!e.b || e.progress < e.total) continue;
@@ -805,9 +812,15 @@ export class Sim {
       const pl = this.players[e.owner];
       if (pw > 0) pl.powerMade += pw * pl.fac.powerMul * (1 + 0.5 * (e.lvl - 1));
       else pl.powerUsed -= pw;
+      if (e.type === 'lab') labs[e.owner]++;
     }
-    for (const pl of this.players)
+    for (let i = 0; i < this.players.length; i++) {
+      const pl = this.players[i];
       pl.pf = pl.powerMade >= pl.powerUsed ? 1 : Math.max(0.4, pl.powerMade / Math.max(1, pl.powerUsed));
+      // Spy Satellite only stays online while powered AND a research lab survives;
+      // lose either and the map goes dark again (but it stays researched)
+      pl.satOk = !!pl.tech.satellite && pl.powerMade >= pl.powerUsed && labs[i] > 0;
+    }
 
     this.rebuildGrid();
 
@@ -1231,13 +1244,28 @@ export class Sim {
       b.cd -= TICK;
       const rng = def.attack.range + 0.8 * (b.lvl - 1);
       let tgt = this.findEnemy(b, rng, !!def.noAir);
-      // force-fire: lock onto the commanded target for a short window, overriding
-      // the hold-fire toggle, as long as it stays in range
+      // force-fire: lock onto the commanded target (entity OR ground point) for a
+      // short window, overriding the hold-fire toggle, as long as it stays in range
       let forced = false;
       if (b.forceT && b.forceT > 0) {
         b.forceT -= 1;
         const ft = b.forceTgt != null ? this.ents.get(b.forceTgt) : undefined;
         if (ft && ft.hp > 0 && (b.x - ft.x) * (b.x - ft.x) + (b.z - ft.z) * (b.z - ft.z) <= rng * rng) { tgt = ft; forced = true; }
+        else if (b.forceX !== undefined) {
+          const px = b.forceX, pz = b.forceZ!;
+          if ((b.x - px) * (b.x - px) + (b.z - pz) * (b.z - pz) <= rng * rng) {
+            // resolve whatever sits at the point (any owner — friend or foe)
+            let hit: Entity | null = null, hd = 1.8;
+            for (const o of this.nearbyUnits(px, pz, 2.4)) { if (o.hp <= 0 || o.id === b.id) continue; const dd = hyp(o.x - px, o.z - pz); if (dd < hd) { hd = dd; hit = o; } }
+            for (const o of this.ents.values()) { if (!o.b || o.hp <= 0 || o.id === b.id) continue; const dd = this.distToEnt(px, pz, o); if (dd < hd) { hd = dd; hit = o; } }
+            if (hit) { tgt = hit; forced = true; }
+            else if (ready) { // empty ground: a suppressive shot at the spot
+              b.cd = def.attack.rof / pl.pf; b.aimX = px; b.aimZ = pz;
+              this.events.push({ e: 'shot', x: b.x, z: b.z, tx: px, tz: pz, w: 2 });
+              tgt = null;
+            }
+          }
+        }
       }
       if (tgt) {
         this.fire(b, tgt, def.attack.dmg * (1 + 0.25 * (b.lvl - 1)), def.attack.rof / pl.pf, forced);
@@ -1555,7 +1583,7 @@ export class Sim {
       }
       // suicide truck: a force-fire order means "drive there and detonate", not shoot
       if (def.bombTruck) {
-        if (hyp(px - u.x, pz - u.z) <= 1.4) { this.truckBoom(u); return; }
+        if (hyp(px - u.x, pz - u.z) <= 1.4) { this.truckBoom(u, true); return; }
         this.moveToward(u, px, pz, def);
         return;
       }
@@ -1850,11 +1878,14 @@ export class Sim {
 
   // suicide truck: fuel-and-explosives fireball — incinerates infantry and
   // leaves buildings BURNING (damage over time) long after the blast
-  private truckBoom(u: Entity) {
+  private truckBoom(u: Entity, force = false) {
     const def = UNITS[u.type];
     const R = 3.0;
     for (const e of [...this.ents.values()]) {
-      if (!this.foe(e.owner, u.owner) || e.hp <= 0 || !this.players[e.owner].alive) continue;
+      // a normal detonation only burns enemies; a FORCE-fire detonation (the player
+      // deliberately drove it onto a spot) hits friend OR foe at full strength —
+      // including your own buildings, e.g. to clear them off the map
+      if (e.hp <= 0 || !this.players[e.owner].alive || (!force && !this.foe(e.owner, u.owner)) || (force && e.id === u.id)) continue;
       const d = e.b ? this.distToEnt(u.x, u.z, e) : hyp(e.x - u.x, e.z - u.z);
       if (d > R) continue;
       this.dealDamage(u, e, def.dmg * (1 - 0.4 * (d / R)));
@@ -1948,11 +1979,12 @@ export class Sim {
     }
   }
 
-  private scanOre(ox: number, oz: number, R: number, ban?: Set<number>): { x: number; z: number } | null {
+  private scanOre(ox: number, oz: number, R: number, ban?: Set<number>, reg?: number): { x: number; z: number } | null {
     let best: { x: number; z: number } | null = null, bd = 1e9;
     for (let z = Math.max(0, oz - R); z < Math.min(H, oz + R); z++) {
       for (let x = Math.max(0, ox - R); x < Math.min(W, ox + R); x++) {
         if (this.map.ore[z * W + x] > 0 && !(ban && ban.has(z * W + x))) {
+          if (reg !== undefined && reg >= 0 && this.map.regionAt(x, z) !== reg) continue; // different landmass
           const d = (x - ox) * (x - ox) + (z - oz) * (z - oz);
           if (d < bd) { bd = d; best = { x, z }; }
         }
@@ -1976,9 +2008,11 @@ export class Sim {
 
   private findOreNear(ord: Order): { x: number; z: number } | null {
     // try locally first, then anywhere on the map — harvesters should never
-    // sit idle just because the nearest field is far away
+    // sit idle just because the nearest field is far away. Stay on the same
+    // landmass: ore across water is unreachable on foot.
     const ban = ord.ban && ord.ban.length ? new Set(ord.ban) : undefined;
-    return this.scanOre(ord.ox!, ord.oz!, 22, ban) || this.scanOre(ord.ox!, ord.oz!, Math.max(W, H), ban);
+    const reg = this.map.regionAt(ord.ox!, ord.oz!);
+    return this.scanOre(ord.ox!, ord.oz!, 22, ban, reg) || this.scanOre(ord.ox!, ord.oz!, Math.max(W, H), ban, reg);
   }
 
   // Pick an ore cell for this harvester so the fleet SPREADS instead of blobbing
@@ -1995,6 +2029,7 @@ export class Sim {
       u.hzr = 0;
     }
     const ox = Math.floor(u.x), oz = Math.floor(u.z);
+    const reg = this.map.regionAt(ox, oz); // only consider ore on the same landmass
     // tally where friendly harvesters are already working / heading (crowding)
     const targets: { x: number; z: number }[] = [];
     for (const e of this.ents.values()) {
@@ -2011,6 +2046,7 @@ export class Sim {
         const i = z * W + x;
         const ore = this.map.ore[i];
         if (ore <= 0 || (ban && ban.has(i))) continue;
+        if (reg >= 0 && this.map.regionAt(x, z) !== reg) continue; // unreachable: different landmass
         const value = ore * (this.map.gem[i] === 1 ? 3 : 1);
         const dist = hyp(x - ox, z - oz);
         let crowd = 0;

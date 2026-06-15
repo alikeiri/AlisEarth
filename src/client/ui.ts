@@ -183,6 +183,9 @@ export class UI {
   private btns: Record<string, HTMLElement> = {};
   private mmCtx: CanvasRenderingContext2D;
   private terrainCache: HTMLCanvasElement | null = null;
+  private terrainCacheVer = -1;                 // map.terraVersion the cache was built at
+  private mmHp = new Map<number, number>();      // entity hp last minimap frame
+  private mmFlash = new Map<number, number>();   // entity id -> flash time remaining (under attack)
   private pings: { x: number; z: number; t: number }[] = [];
   placing: string | null = null;
 
@@ -521,11 +524,16 @@ export class UI {
     }
     const myTech: Record<string, boolean> = {};
     for (const tch of (pl.tech || [])) myTech[tch] = true;
+    // tally my live units so one-per-player heroes/uniques can grey out
+    const aliveByUnit: Record<string, number> = {};
+    for (const v of views) if (!v.b && v.o === me) aliveByUnit[v.t] = (aliveByUnit[v.t] || 0) + 1;
     for (const t of U_LIST) {
       const def = UNITS[t];
       const cost = Math.round(def.cost * fac.costMul);
       let ok = (myDone[def.builtAt] || 0) > 0 || (def.altBuiltAt ? (myDone[def.altBuiltAt] || 0) > 0 : false);
       if (ok && def.pad && padHave >= padCap) ok = false; // airfields full
+      let uniqueBlocked = false;
+      if (ok && (def.unique || def.commando) && ((aliveByUnit[t] || 0) + (queueByUnit[t]?.n || 0)) >= 1) { ok = false; uniqueBlocked = true; } // one per player
       if (def.tech && !myTech[def.tech]) ok = false;      // not yet researched
       // hide tech-gated buttons until the tech exists, and (when a production
       // building is selected) any unit that building can't make
@@ -537,6 +545,8 @@ export class UI {
       if (def.pad) {
         const tip = counterTip(t);
         this.btns[t].title = `Airfield capacity ${padHave}/${padCap}` + (tip ? '\n' + tip : '');
+      } else if (uniqueBlocked) {
+        this.btns[t].title = `${def.name}: only one per player at a time`;
       }
     }
     this.updateResearchPanel(views, me, pl, fac, myTech);
@@ -561,10 +571,12 @@ export class UI {
       const tch = TECHS[id];
       const done = myTech[id];
       const cost = Math.round(tch.cost * fac.costMul);
-      const dis = done || busy || pl.c < cost;
-      sig += `|${id}:${done ? 'd' : dis ? 'x' : 'o'}`;
+      const labLow = !!tch.minLab && (lab.lv || 1) < tch.minLab;   // lab not upgraded enough
+      const dis = done || busy || pl.c < cost || labLow;
+      sig += `|${id}:${done ? 'd' : dis ? 'x' : 'o'}${labLow ? 'L' : ''}`;
+      const note = labLow ? ` <span style="color:#ff9a6a">(needs L${tch.minLab} lab)</span>` : '';
       html += `<div class="rpBtn${done ? ' done' : ''}${dis && !done ? ' dis' : ''}" data-tech="${id}">` +
-        `${tch.name} ${done ? '✓' : '$' + cost}<span class="rpDesc">${tch.desc}</span></div>`;
+        `${tch.name} ${done ? '✓' : '$' + cost}${note}<span class="rpDesc">${tch.desc}</span></div>`;
     }
     // only touch the DOM when something actually changed — rewriting innerHTML
     // every frame replaced the buttons mid-press, eating every click
@@ -586,6 +598,9 @@ export class UI {
 
   minimap(map: GameMap, views: any[], camQuad: { x: number; z: number }[] | null, dt: number, fog?: (cx: number, cz: number) => number) {
     const ctx = this.mmCtx;
+    // rebuild the cached terrain image when bulldozing has reshaped the ground
+    if (this.terrainCache && map.terraVersion !== this.terrainCacheVer) this.terrainCache = null;
+    this.terrainCacheVer = map.terraVersion;
     if (!this.terrainCache) {
       const c = document.createElement('canvas');
       c.width = W; c.height = H;
@@ -630,11 +645,28 @@ export class UI {
         ctx.fillRect(mx(cx + 1), my(cz + 1), sx + 1, sz + 1);
       }
     }
+    // detect entities that just took damage → flash them on the minimap
+    const newHp = new Map<number, number>();
+    for (const v of views) {
+      const prev = this.mmHp.get(v.i);
+      if (prev !== undefined && v.h < prev - 0.5) this.mmFlash.set(v.i, 1.0); // 1s flash
+      newHp.set(v.i, v.h);
+    }
+    this.mmHp = newHp;
+    for (const [id, t] of this.mmFlash) { const nt = t - dt; if (nt <= 0) this.mmFlash.delete(id); else this.mmFlash.set(id, nt); }
     // entities (already fog-filtered by the caller's view list)
     for (const v of views) {
       ctx.fillStyle = '#' + (PLAYER_COLORS[v.o] ?? 0xffffff).toString(16).padStart(6, '0');
       const s = v.b ? 4 : 2.2;
       ctx.fillRect(mx(v.x) - s / 2, my(v.z) - s / 2, s, s);
+      // under-attack flash: a pulsing red marker over the unit/building
+      const fl = this.mmFlash.get(v.i);
+      if (fl !== undefined) {
+        const pulse = 0.35 + 0.55 * Math.abs(Math.sin(fl * 14));
+        ctx.fillStyle = `rgba(255,70,55,${pulse})`;
+        const s2 = (v.b ? 6 : 4);
+        ctx.fillRect(mx(v.x) - s2 / 2, my(v.z) - s2 / 2, s2, s2);
+      }
     }
     // pings
     this.pings = this.pings.filter(p => (p.t -= dt) > 0);

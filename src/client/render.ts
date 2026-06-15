@@ -925,8 +925,11 @@ export class Renderer {
     // translucent box that previews a pending terraform area + its target height
     this.terraPrev = new THREE.Mesh(
       new THREE.BoxGeometry(1, 1, 1),
-      new THREE.MeshBasicMaterial({ color: 0x57d977, transparent: true, opacity: 0.34, depthWrite: false }),
+      // depthTest off + high renderOrder so the bulldozer's area preview stays
+      // visible even when it sits below the (semi-opaque) water surface
+      new THREE.MeshBasicMaterial({ color: 0x57d977, transparent: true, opacity: 0.34, depthWrite: false, depthTest: false }),
     );
+    this.terraPrev.renderOrder = 6;
     this.terraPrev.visible = false;
     this.scene.add(this.terraPrev);
 
@@ -1892,7 +1895,10 @@ export class Renderer {
       let f = this.facing.get(v.i);
       if (!f) { f = { a: 0, lx: v.x, lz: v.z }; this.facing.set(v.i, f); }
       const dx = v.x - f.lx, dz = v.z - f.lz;
-      const isMoving = dx * dx + dz * dz > 0.0004;
+      // prefer the sim's per-tick "really moving" flag (v.mv) so units only walk
+      // when actually travelling — a shove/nudge of a few pixels just slides them.
+      // Fall back to the per-frame delta for snapshot views that don't carry mv.
+      const isMoving = v.mv !== undefined ? !!v.mv : (dx * dx + dz * dz > 0.0004);
       if (isMoving) {
         const want = Math.atan2(dx, dz);
         let da = want - f.a;

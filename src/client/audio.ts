@@ -226,6 +226,30 @@ class AudioMan {
       case 'sdbeep': // self-destruct countdown tick
         this.tone('square', 1500, 1500, 0.06, 0.14 * v);
         break;
+      case 'pwrlow': // power running low: soft falling two-tone warning
+        this.tone('sine', 440, 392, 0.16, 0.16 * v);
+        this.tone('sine', 392, 330, 0.2, 0.14 * v, 0.16);
+        break;
+      case 'pwrout': // power INSUFFICIENT: urgent low buzz
+        this.tone('sawtooth', 220, 160, 0.3, 0.16 * v);
+        this.tone('sawtooth', 160, 120, 0.34, 0.14 * v, 0.18);
+        break;
+      case 'underattack': // a unit of ours is taking fire: quick urgent triple beep
+        for (let i = 0; i < 3; i++) this.tone('square', 880, 880, 0.05, 0.1 * v, i * 0.09);
+        break;
+      case 'bldgattack': // a building of ours is under attack: lower urgent double tone
+        this.tone('square', 523, 523, 0.09, 0.13 * v);
+        this.tone('square', 415, 415, 0.12, 0.12 * v, 0.1);
+        break;
+      case 'siloup': // a missile silo came online (anywhere): ominous rising swell
+        this.tone('sawtooth', 110, 220, 0.5, 0.14 * v);
+        this.tone('sine', 55, 110, 0.55, 0.12 * v, 0.02);
+        break;
+      case 'satup': // a spy satellite went up (anywhere): cool tech chime
+        this.tone('triangle', 784, 784, 0.1, 0.13 * v);
+        this.tone('triangle', 1047, 1047, 0.12, 0.12 * v, 0.09);
+        this.tone('triangle', 1319, 1319, 0.16, 0.1 * v, 0.18);
+        break;
       case 'win':
         [523, 659, 784, 1047].forEach((f, i) => this.tone('triangle', f, f, 0.35, 0.2, i * 0.16));
         break;
