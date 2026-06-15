@@ -55,9 +55,14 @@ Verification (`node det-harness.mjs`, and `__detmath()` / `__detmathDet()` /
 - `__detmathDet()` (the dmath replacements) MATCHES: `a9925333` on both.
 - `__detsim(12345,1500).final` MATCHES: `df56b2f1` on both, and is same-engine stable.
 
-**Remaining**: confirm `__detmathDet()` == `a9925333` and `__detsim(12345,1500).final`
-== `df56b2f1` in **Firefox** (SpiderMonkey) / **Safari** (JSC). They're built from
-IEEE-mandated ops, so they should — that's the definitive cross-engine pass.
+**CONFIRMED cross-engine (Jun 15 2026).** Firefox (SpiderMonkey) results:
+- `__detmathDet()` = `a9925333` ✅ (== V8)
+- `__detsim(12345,1500).final` = `df56b2f1` ✅ (== V8)
+- `__detmath()` (native) = `fe92c1ef` — a THIRD distinct value vs Node `b8a24999`
+  and Chrome `3e95c2d5`, proving native Math is engine-specific.
+
+Verdict: the sim is bit-identical across V8 (Chrome/Node) and SpiderMonkey
+(Firefox). **The determinism gate is PASSED — deterministic lockstep is viable.**
 
 ## Step 3 — the lockstep loop (after the cross-engine gate passes)
 
