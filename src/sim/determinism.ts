@@ -13,6 +13,7 @@
 import { Sim } from './sim';
 import { aiTick } from './ai';
 import { setMapSize } from './map';
+import { hyp, dsin, dcos } from './dmath';
 
 // FNV-1a (32-bit) over a byte stream. Math.imul keeps the multiply integer and
 // identical across engines, so the hash itself never introduces divergence.
@@ -75,6 +76,21 @@ export function mathCanary(): string {
     h.f64(Math.atan2(y, x)); h.f64(Math.atan2(x, y));
     h.f64(Math.hypot(x, y)); h.f64(Math.hypot(x - y, y * 0.3));
     h.f64(Math.sqrt(x * y)); // control: should match everywhere
+  }
+  return h.hex();
+}
+
+// The same battery through the sim's DETERMINISTIC replacements (dmath). Built
+// only from +,-,*,/,sqrt,round, so this digest MUST be identical on every
+// engine. If __detmath() differs across engines but __detmathDet() matches,
+// the deterministic-math migration is working.
+export function detMathCanary(): string {
+  const h = new Hasher();
+  for (let i = 1; i <= 2000; i++) {
+    const x = i * 0.123456789, y = (i % 37) + 0.5;
+    h.f64(dsin(x)); h.f64(dcos(x));
+    h.f64(hyp(x, y)); h.f64(hyp(x - y, y * 0.3));
+    h.f64(Math.sqrt(x * y));
   }
   return h.hex();
 }

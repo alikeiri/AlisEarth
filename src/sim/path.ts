@@ -58,7 +58,7 @@ export function findPath(
         ? (cx: number, cz: number) => m.passableSea(cx, cz)
         : (cx: number, cz: number) => m.passable(cx, cz);
   const lineClear = (x0: number, z0: number, x1: number, z1: number): boolean => {
-    const d = Math.sqrt((x1 - x0) ** 2 + (z1 - z0) ** 2);
+    const d = Math.sqrt((x1 - x0) * (x1 - x0) + (z1 - z0) * (z1 - z0));
     const steps = Math.max(1, Math.ceil(d / 0.25));
     let pcx = Math.floor(x0), pcz = Math.floor(z0);
     if (!ok(pcx, pcz)) return false;

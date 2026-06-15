@@ -2,6 +2,7 @@
 // Runs in the browser for skirmish and on the Node server for multiplayer.
 
 import { TICK, UNITS, BUILDINGS, FACTIONS, Faction, dmgMul, AIRFIELD_CAP, UPG_MAX, upgCost, ORE_VALUE, START_CREDITS, ORE_REGEN, ORE_REGEN_CAP, TECHS } from './data';
+import { hyp, dsin, dcos } from './dmath';
 import { GameMap, genMap, nearestPassable, nearestSea, W, H, SEA } from './map';
 import { findPath } from './path';
 import { RNG } from './rng';
@@ -82,7 +83,7 @@ for (let r = 1; r <= 3; r++) {
   const n = r * 8;
   for (let i = 0; i < n; i++) {
     const a = (i / n) * Math.PI * 2;
-    FORM.push({ x: Math.cos(a) * r * 1.25, z: Math.sin(a) * r * 1.25 });
+    FORM.push({ x: dcos(a) * r * 1.25, z: dsin(a) * r * 1.25 });
   }
 }
 
@@ -256,21 +257,21 @@ export class Sim {
     const mx = cx + def.size / 2, mz = cz + def.size / 2;
     for (const e of this.ents.values()) {
       if (!e.b || e.owner !== p || e.type === 'wall' || e.type === 'barrier') continue;
-      const d = Math.sqrt((e.x - mx) ** 2 + (e.z - mz) ** 2);
+      const d = Math.sqrt((e.x - mx) * (e.x - mx) + (e.z - mz) * (e.z - mz));
       if (d <= reach) return true;
     }
     const rr = 5; // build reach around roads
     for (let z = Math.max(0, Math.floor(mz - rr)); z < Math.min(H, mz + rr); z++)
       for (let x = Math.max(0, Math.floor(mx - rr)); x < Math.min(W, mx + rr); x++)
-        if (this.map.road[z * W + x] === p + 1 && (x - mx) ** 2 + (z - mz) ** 2 <= rr * rr) return true;
+        if (this.map.road[z * W + x] === p + 1 && (x - mx) * (x - mx) + (z - mz) * (z - mz) <= rr * rr) return true;
     return false;
   }
 
   distToEnt(x: number, z: number, t: Entity): number {
-    if (!t.b) return Math.sqrt((t.x - x) ** 2 + (t.z - z) ** 2);
+    if (!t.b) return Math.sqrt((t.x - x) * (t.x - x) + (t.z - z) * (t.z - z));
     const qx = Math.max(t.cx, Math.min(x, t.cx + t.size));
     const qz = Math.max(t.cz, Math.min(z, t.cz + t.size));
-    return Math.sqrt((qx - x) ** 2 + (qz - z) ** 2);
+    return Math.sqrt((qx - x) * (qx - x) + (qz - z) * (qz - z));
   }
 
   // ---------- commands ----------
@@ -350,7 +351,7 @@ export class Sim {
       const targets: Entity[] = [];
       for (const e of this.ents.values()) {
         if (!this.foe(e.owner, c.p) || e.hp <= 0 || !this.players[e.owner].alive) continue;
-        const d = e.b ? this.distToEnt(c.x, c.z, e) : Math.hypot(e.x - c.x, e.z - c.z);
+        const d = e.b ? this.distToEnt(c.x, c.z, e) : hyp(e.x - c.x, e.z - c.z);
         if (d <= r) targets.push(e);
       }
       if (!targets.length) return;
@@ -359,7 +360,7 @@ export class Sim {
         if (!u || u.b || u.owner !== c.p) continue;
         if ((UNITS[u.type]?.dmg ?? 0) <= 0) continue;
         const list = [...targets]
-          .sort((a, b) => ((a.x - u.x) ** 2 + (a.z - u.z) ** 2) - ((b.x - u.x) ** 2 + (b.z - u.z) ** 2))
+          .sort((a, b) => ((a.x - u.x) * (a.x - u.x) + (a.z - u.z) * (a.z - u.z)) - ((b.x - u.x) * (b.x - u.x) + (b.z - u.z) * (b.z - u.z)))
           .slice(0, 24);
         u.orders = list.map(t => ({ k: 'attack' as const, tgt: t.id }));
         u.path = null;
@@ -651,11 +652,11 @@ export class Sim {
   private assignPatrol(units: Entity[], rawPts: any[], q: boolean) {
     const pts = rawPts.slice(0, 32).map((p: any) => ({ x: p.x, z: p.z }));
     const loop = pts.length > 2 &&
-      Math.hypot(pts[0].x - pts[pts.length - 1].x, pts[0].z - pts[pts.length - 1].z) < 3;
+      hyp(pts[0].x - pts[pts.length - 1].x, pts[0].z - pts[pts.length - 1].z) < 3;
     const nearestIdx = (x: number, z: number) => {
       let bi = 0, bd = 1e9;
       for (let i = 0; i < pts.length; i++) {
-        const d = (pts[i].x - x) ** 2 + (pts[i].z - z) ** 2;
+        const d = (pts[i].x - x) * (pts[i].x - x) + (pts[i].z - z) * (pts[i].z - z);
         if (d < bd) { bd = d; bi = i; }
       }
       return bi;
@@ -680,7 +681,7 @@ export class Sim {
     const segLen = [0];
     let L = 0;
     for (let i = 1; i < pts.length; i++) {
-      L += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].z - pts[i - 1].z);
+      L += hyp(pts[i].x - pts[i - 1].x, pts[i].z - pts[i - 1].z);
       segLen.push(L);
     }
     const n = units.length;
@@ -697,7 +698,7 @@ export class Sim {
     }
     // assign slots in travel order to minimize crossing
     let ax = pts[pts.length - 1].x - pts[0].x, az = pts[pts.length - 1].z - pts[0].z;
-    const al = Math.hypot(ax, az) || 1;
+    const al = hyp(ax, az) || 1;
     ax /= al; az /= al;
     const sorted = [...units].sort((a, b) => (a.x * ax + a.z * az) - (b.x * ax + b.z * az));
     sorted.forEach((u, i) => {
@@ -821,7 +822,7 @@ export class Sim {
     let best: Entity | null = null, bd = 1e9;
     for (const u of this.nearbyUnits(cx, cz, r)) {
       if (u.id === selfId || u.owner !== owner || u.hp <= 0 || u.hp >= u.maxHp) continue;
-      const d = Math.hypot(u.x - cx, u.z - cz);
+      const d = hyp(u.x - cx, u.z - cz);
       if (d <= r && d < bd) { bd = d; best = u; }
     }
     for (const u of this.ents.values()) {
@@ -881,7 +882,7 @@ export class Sim {
   // nearest enemy wall/barrier within reach that sits toward the target — the
   // thing to blast through when a unit is walled off from its objective
   private nearestWallToward(u: Entity, tgt: Entity): Entity | null {
-    const dxT = tgt.x - u.x, dzT = tgt.z - u.z, dl = Math.hypot(dxT, dzT) || 1;
+    const dxT = tgt.x - u.x, dzT = tgt.z - u.z, dl = hyp(dxT, dzT) || 1;
     let best: Entity | null = null, bd = 1e9;
     for (const e of this.ents.values()) {
       if (!e.b || e.hp <= 0 || (e.type !== 'wall' && e.type !== 'barrier')) continue;
@@ -905,7 +906,7 @@ export class Sim {
       if (!this.foe(o.owner, u.owner) || o.hp <= 0 || !this.players[o.owner]?.alive) continue;
       if (!this.canHarm(u, o)) continue;
       if (UNITS[o.type]?.fly && dmgMul(u.type, false, 'air', o.type) <= 0) continue;
-      const d2 = (o.x - t.x) ** 2 + (o.z - t.z) ** 2;
+      const d2 = (o.x - t.x) * (o.x - t.x) + (o.z - t.z) * (o.z - t.z);
       if (d2 < bd) { bd = d2; best = o; }
     }
     return best;
@@ -1156,7 +1157,7 @@ export class Sim {
             // no rally/patrol set: drive a couple of cells clear of the building
             // so the new unit is visible instead of hidden in the doorway
             const sx = c.x + 0.5, sz = c.z + 0.5;
-            const dx = sx - b.x, dz = sz - b.z, dl = Math.hypot(dx, dz) || 1;
+            const dx = sx - b.x, dz = sz - b.z, dl = hyp(dx, dz) || 1;
             u.orders = [{ k: 'move', x: sx + (dx / dl) * 2.5, z: sz + (dz / dl) * 2.5 }];
           }
           b.queue.shift();
@@ -1185,7 +1186,7 @@ export class Sim {
       if (b.forceT && b.forceT > 0) {
         b.forceT -= 1;
         const ft = b.forceTgt != null ? this.ents.get(b.forceTgt) : undefined;
-        if (ft && ft.hp > 0 && (b.x - ft.x) ** 2 + (b.z - ft.z) ** 2 <= rng * rng) { tgt = ft; forced = true; }
+        if (ft && ft.hp > 0 && (b.x - ft.x) * (b.x - ft.x) + (b.z - ft.z) * (b.z - ft.z) <= rng * rng) { tgt = ft; forced = true; }
       }
       if (tgt) {
         this.fire(b, tgt, def.attack.dmg * (1 + 0.25 * (b.lvl - 1)), def.attack.rof / pl.pf, forced);
@@ -1214,14 +1215,14 @@ export class Sim {
       let armed = false;
       for (const o of this.nearbyUnits(u.x, u.z, trig + 1)) {
         if (o.b || !this.foe(o.owner, u.owner) || o.hp <= 0 || UNITS[o.type]?.fly) continue;
-        if ((o.x - u.x) ** 2 + (o.z - u.z) ** 2 <= trig * trig) { armed = true; break; }
+        if ((o.x - u.x) * (o.x - u.x) + (o.z - u.z) * (o.z - u.z) <= trig * trig) { armed = true; break; }
       }
       if (armed) {
         const R = def.blastR || 2.4;
         const fake: any = { id: u.id, owner: u.owner, type: 'mine', b: false };
         for (const o of [...this.ents.values()]) {
           if (!this.foe(o.owner, u.owner) || o.hp <= 0 || (!o.b && UNITS[o.type]?.fly)) continue;
-          const d = o.b ? this.distToEnt(u.x, u.z, o) : Math.hypot(o.x - u.x, o.z - u.z);
+          const d = o.b ? this.distToEnt(u.x, u.z, o) : hyp(o.x - u.x, o.z - u.z);
           if (d <= R) this.dealDamage(fake, o, def.dmg * (1 - 0.4 * (d / R)));
         }
         u.hp = 0;
@@ -1247,7 +1248,7 @@ export class Sim {
         const R = 2.6;
         for (const o of this.nearbyUnits(u.x, u.z, R + 1)) {
           if (!this.foe(o.owner, u.owner) || o.hp <= 0 || o.id === u.id) continue;
-          const d = Math.hypot(o.x - u.x, o.z - u.z);
+          const d = hyp(o.x - u.x, o.z - u.z);
           if (d <= R) this.dealDamage(u, o, u.maxHp * 0.6 * (1 - 0.5 * (d / R)));
         }
         u.hp = 0;
@@ -1273,14 +1274,14 @@ export class Sim {
       let near: { x: number; z: number } | null = null, nd = 1e9;
       for (const c of u.terraPath) {
         if (settled(c)) continue;
-        const dd = (u.x - (c.x + 0.5)) ** 2 + (u.z - (c.z + 0.5)) ** 2;
+        const dd = (u.x - (c.x + 0.5)) * (u.x - (c.x + 0.5)) + (u.z - (c.z + 0.5)) * (u.z - (c.z + 0.5));
         if (dd < nd) { nd = dd; near = c; }
       }
       if (!near) { u.terraPath = undefined; this.events.push({ e: 'done', x: u.x, z: u.z }); return; }
       if (nd > 4) this.moveToward(u, near.x + 0.5, near.z + 0.5, def); // crawl to the work
       if (this.tickN % 2 === 0 && pl.credits >= 1) {
         for (const c of u.terraPath) {                       // reshape a 5x5-ish brush
-          if ((u.x - (c.x + 0.5)) ** 2 + (u.z - (c.z + 0.5)) ** 2 > 7 || settled(c)) continue;
+          if ((u.x - (c.x + 0.5)) * (u.x - (c.x + 0.5)) + (u.z - (c.z + 0.5)) * (u.z - (c.z + 0.5)) > 7 || settled(c)) continue;
           if (pl.credits < 1) break;
           pl.credits -= 1;                                   // cost per cell pulse
           this.map.terraform(c.x, c.z, target, 0.25);
@@ -1331,7 +1332,7 @@ export class Sim {
 
     // stuck detection: tried to move last tick but went nowhere → wiggle out
     if (!def.fly) {
-      const movedSq = (u.x - u.wx) ** 2 + (u.z - u.wz) ** 2;
+      const movedSq = (u.x - u.wx) * (u.x - u.wx) + (u.z - u.wz) * (u.z - u.wz);
       if (u.mvi === this.tickN - 1 && movedSq < 0.0012) u.stuckT += TICK;
       else u.stuckT = 0;
       u.wx = u.x; u.wz = u.z;
@@ -1342,7 +1343,7 @@ export class Sim {
         const sea = def.move === 'sea', crawl = !!def.terra, amphi = !!def.amphibious;
         for (let k = 0; k < 8; k++) {
           const a = ((a0 + k) & 7) * 0.7854;
-          const nx = u.x + Math.cos(a) * 0.7, nz = u.z + Math.sin(a) * 0.7;
+          const nx = u.x + dcos(a) * 0.7, nz = u.z + dsin(a) * 0.7;
           const okC = crawl ? this.map.passableCrawler(Math.floor(nx), Math.floor(nz))
             : amphi ? this.map.passableAmphi(Math.floor(nx), Math.floor(nz))
               : sea ? this.map.passableSea(Math.floor(nx), Math.floor(nz))
@@ -1402,13 +1403,13 @@ export class Sim {
       for (const e of this.ents.values()) {
         if (!e.b || e.owner !== u.owner || e.hp <= 0 || e.progress < e.total) continue;
         if (!BUILDINGS[e.type]?.attack && e.type !== 'conyard') continue;
-        const dd = (e.x - u.x) ** 2 + (e.z - u.z) ** 2;
+        const dd = (e.x - u.x) * (e.x - u.x) + (e.z - u.z) * (e.z - u.z);
         if (dd < bd) { bd = dd; safe = e; }
       }
       let fx: number, fz: number;
       if (safe) { fx = safe.x; fz = safe.z; }
       else {
-        const dx = u.x - att.x, dz = u.z - att.z, d = Math.hypot(dx, dz) || 1;
+        const dx = u.x - att.x, dz = u.z - att.z, d = hyp(dx, dz) || 1;
         fx = Math.max(1, Math.min(W - 1, u.x + (dx / d) * 9));
         fz = Math.max(1, Math.min(H - 1, u.z + (dz / d) * 9));
       }
@@ -1431,7 +1432,7 @@ export class Sim {
         // drift back toward the zone when there's nothing to do nearby
         const t = this.findDamagedFriendlyAt(u.owner, u.rzx!, u.rzz!, u.rzr, u.id);
         if (t) u.orders.unshift({ k: 'repair', tgt: t.id });
-        else if (Math.hypot(u.x - u.rzx!, u.z - u.rzz!) > u.rzr) u.orders.unshift({ k: 'move', x: u.rzx!, z: u.rzz! });
+        else if (hyp(u.x - u.rzx!, u.z - u.rzz!) > u.rzr) u.orders.unshift({ k: 'move', x: u.rzx!, z: u.rzz! });
       } else {
         const t = this.findDamagedFriendly(u, 9);
         if (t) u.orders.unshift({ k: 'repair', tgt: t.id });
@@ -1443,7 +1444,7 @@ export class Sim {
       for (const o of this.nearbyUnits(u.x, u.z, 0.7)) {
         if (!this.foe(o.owner, u.owner) || o.hp <= 0) continue;
         if (UNITS[o.type]?.kind !== 'inf') continue;
-        if ((o.x - u.x) ** 2 + (o.z - u.z) ** 2 > 0.42) continue;
+        if ((o.x - u.x) * (o.x - u.x) + (o.z - u.z) * (o.z - u.z) > 0.42) continue;
         this.dealDamage(u, o, 9999);
         this.events.push({ e: 'crush', x: o.x, z: o.z });
       }
@@ -1462,7 +1463,7 @@ export class Sim {
         const threat = this.escortThreat(u, t, def.range + 6);
         if (threat) { u.orders.unshift({ k: 'attack', tgt: threat.id }); u.path = null; return; }
       }
-      const d = Math.hypot(t.x - u.x, t.z - u.z);
+      const d = hyp(t.x - u.x, t.z - u.z);
       if (d > 3.2) this.moveToward(u, t.x, t.z, def); else u.path = null; // hold near it when close
     } else if (ord.k === 'force') {
       // force-fire at a fixed point (or a tracked entity), hitting friend OR foe
@@ -1474,12 +1475,12 @@ export class Sim {
       }
       // suicide truck: a force-fire order means "drive there and detonate", not shoot
       if (def.bombTruck) {
-        if (Math.hypot(px - u.x, pz - u.z) <= 1.4) { this.truckBoom(u); return; }
+        if (hyp(px - u.x, pz - u.z) <= 1.4) { this.truckBoom(u); return; }
         this.moveToward(u, px, pz, def);
         return;
       }
       const range = (te?.b && def.siegeRange) ? def.siegeRange : def.range;
-      const d = Math.hypot(px - u.x, pz - u.z);
+      const d = hyp(px - u.x, pz - u.z);
       if (d <= range) {
         u.path = null;
         if (u.cd <= 0) {
@@ -1487,7 +1488,7 @@ export class Sim {
           let hit: Entity | null = te && te.hp > 0 ? te : null;
           if (!hit) {
             let hd = 1.8;
-            for (const o of this.nearbyUnits(px, pz, 2.4)) { if (o.hp <= 0 || o.id === u.id) continue; const dd = Math.hypot(o.x - px, o.z - pz); if (dd < hd) { hd = dd; hit = o; } }
+            for (const o of this.nearbyUnits(px, pz, 2.4)) { if (o.hp <= 0 || o.id === u.id) continue; const dd = hyp(o.x - px, o.z - pz); if (dd < hd) { hd = dd; hit = o; } }
             for (const o of this.ents.values()) { if (!o.b || o.hp <= 0) continue; const dd = this.distToEnt(px, pz, o); if (dd < hd) { hd = dd; hit = o; } }
           }
           if (hit) this.fire(u, hit, def.dmg, def.rof, true); // force = bypass allegiance
@@ -1570,7 +1571,7 @@ export class Sim {
       if (u.orders[1]?.k === 'patrol' && this.tickN % 10 === u.id % 10) {
         const pp = u.orders[1].pts || [];
         let nearSq = 1e9;
-        for (const q of pp) nearSq = Math.min(nearSq, (q.x - u.x) ** 2 + (q.z - u.z) ** 2);
+        for (const q of pp) nearSq = Math.min(nearSq, (q.x - u.x) * (q.x - u.x) + (q.z - u.z) * (q.z - u.z));
         if (nearSq > 256) { u.orders.shift(); u.path = null; return; }
       }
       const d = this.distToEnt(u.x, u.z, tgt);
@@ -1679,7 +1680,7 @@ export class Sim {
     const type = stock.shift()!;
     const mdef = UNITS[type];
     const tx = Math.max(0, Math.min(W - 0.01, x)), tz = Math.max(0, Math.min(H - 0.01, z));
-    const ft = Math.max(12, Math.round((Math.hypot(tx - b.x, tz - b.z) / (mdef.speed || 7)) * 10));
+    const ft = Math.max(12, Math.round((hyp(tx - b.x, tz - b.z) / (mdef.speed || 7)) * 10));
     this.pendingBlasts.push({ t: this.tickN + ft, x: tx, z: tz, type, owner: b.owner });
     this.events.push({ e: 'silo', x: b.x, z: b.z, tx, tz, ft });
     b.lastMissile = type;
@@ -1704,7 +1705,7 @@ export class Sim {
     if (!inZone.length) { b.strikeR = 0; return; } // zone cleared — order complete
     for (const e of inZone) {
       let n = 0;
-      for (const o of inZone) if ((o.x - e.x) ** 2 + (o.z - e.z) ** 2 <= 9) n++;
+      for (const o of inZone) if ((o.x - e.x) * (o.x - e.x) + (o.z - e.z) * (o.z - e.z) <= 9) n++;
       if (e.b) n += 1; // bias slightly toward structures
       if (n > best) { best = n; target = e; }
     }
@@ -1760,7 +1761,7 @@ export class Sim {
     const fake: any = { id: 0, owner: bl.owner, type: bl.type, b: false };
     for (const e of [...this.ents.values()]) {
       if (!this.foe(e.owner, bl.owner) || e.hp <= 0 || !this.players[e.owner].alive) continue;
-      const d = e.b ? this.distToEnt(bl.x, bl.z, e) : Math.hypot(e.x - bl.x, e.z - bl.z);
+      const d = e.b ? this.distToEnt(bl.x, bl.z, e) : hyp(e.x - bl.x, e.z - bl.z);
       if (d > R) continue;
       this.dealDamage(fake, e, mdef.dmg * (1 - 0.45 * (d / R)));
     }
@@ -1774,7 +1775,7 @@ export class Sim {
     const R = 3.0;
     for (const e of [...this.ents.values()]) {
       if (!this.foe(e.owner, u.owner) || e.hp <= 0 || !this.players[e.owner].alive) continue;
-      const d = e.b ? this.distToEnt(u.x, u.z, e) : Math.hypot(e.x - u.x, e.z - u.z);
+      const d = e.b ? this.distToEnt(u.x, u.z, e) : hyp(e.x - u.x, e.z - u.z);
       if (d > R) continue;
       this.dealDamage(u, e, def.dmg * (1 - 0.4 * (d / R)));
       if (e.b && e.hp > 0) { e.burnT = Math.max(e.burnT || 0, 10); e.burnPs = 14; }
@@ -1793,7 +1794,7 @@ export class Sim {
     const R = 2.6;
     for (const e of [...this.ents.values()]) {
       if (e.owner === u.owner || e.hp <= 0 || !this.players[e.owner].alive) continue;
-      const dist = e.b ? this.distToEnt(tgt.x, tgt.z, e) : Math.hypot(e.x - tgt.x, e.z - tgt.z);
+      const dist = e.b ? this.distToEnt(tgt.x, tgt.z, e) : hyp(e.x - tgt.x, e.z - tgt.z);
       if (dist > R) continue;
       this.dealDamage(u, e, total * (1 - 0.5 * (dist / R)));
     }
@@ -1834,7 +1835,7 @@ export class Sim {
       u.path = null;
     }
     const tx = ord.ox! + 0.5, tz = ord.oz! + 0.5;
-    const d = Math.sqrt((u.x - tx) ** 2 + (u.z - tz) ** 2);
+    const d = Math.sqrt((u.x - tx) * (u.x - tx) + (u.z - tz) * (u.z - tz));
     if (d > 1.2) {
       const done = this.moveToward(u, tx, tz, def);
       // two unreachable signals: pathfinder gave up while we're far away, or
@@ -1872,7 +1873,7 @@ export class Sim {
     for (let z = Math.max(0, oz - R); z < Math.min(H, oz + R); z++) {
       for (let x = Math.max(0, ox - R); x < Math.min(W, ox + R); x++) {
         if (this.map.ore[z * W + x] > 0 && !(ban && ban.has(z * W + x))) {
-          const d = (x - ox) ** 2 + (z - oz) ** 2;
+          const d = (x - ox) * (x - ox) + (z - oz) * (z - oz);
           if (d < bd) { bd = d; best = { x, z }; }
         }
       }
@@ -1887,7 +1888,7 @@ export class Sim {
     for (let z = Math.max(0, oz - R); z < Math.min(H, oz + R + 1); z++)
       for (let x = Math.max(0, ox - R); x < Math.min(W, ox + R + 1); x++) {
         if (this.map.ore[z * W + x] <= 0) continue;
-        const d = (x - cx) ** 2 + (z - cz) ** 2;
+        const d = (x - cx) * (x - cx) + (z - cz) * (z - cz);
         if (d <= r2 && d < bd) { bd = d; best = { x, z }; }
       }
     return best;
@@ -1931,9 +1932,9 @@ export class Sim {
         const ore = this.map.ore[i];
         if (ore <= 0 || (ban && ban.has(i))) continue;
         const value = ore * (this.map.gem[i] === 1 ? 3 : 1);
-        const dist = Math.hypot(x - ox, z - oz);
+        const dist = hyp(x - ox, z - oz);
         let crowd = 0;
-        for (const t of targets) if ((t.x - x) ** 2 + (t.z - z) ** 2 < 49) crowd++; // within ~7 cells
+        for (const t of targets) if ((t.x - x) * (t.x - x) + (t.z - z) * (t.z - z) < 49) crowd++; // within ~7 cells
         const score = prospector
           ? value * 0.04 - dist * 0.25 - crowd * 1.5   // value first, distance/risk shrugged off
           : value * 0.012 - dist * 0.7 - crowd * 3.0;  // nearest + least-crowded field
@@ -1951,13 +1952,13 @@ export class Sim {
 
   // returns true when arrived
   private moveToward(u: Entity, x: number, z: number, def: any): boolean {
-    const d = Math.sqrt((u.x - x) ** 2 + (u.z - z) ** 2);
+    const d = Math.sqrt((u.x - x) * (u.x - x) + (u.z - z) * (u.z - z));
     if (d < 0.25) return true;
     const speed = def.speed * this.players[u.owner].fac.speedMul;
     if (def.fly) {
       // flyers travel in a straight line over anything
       const end = u.path?.[u.path.length - 1];
-      if (!u.path || !end || (end.x - x) ** 2 + (end.z - z) ** 2 > 1) {
+      if (!u.path || !end || (end.x - x) * (end.x - x) + (end.z - z) * (end.z - z) > 1) {
         u.path = [{ x, z }];
         u.pi = 0;
       }
@@ -1968,7 +1969,7 @@ export class Sim {
     const amphi = !!def.amphibious && !crawl;
     if (!u.path || u.pi >= u.path.length) {
       const end = u.path?.[u.path.length - 1];
-      if (!end || (end.x - x) ** 2 + (end.z - z) ** 2 > 1) {
+      if (!end || (end.x - x) * (end.x - x) + (end.z - z) * (end.z - z) > 1) {
         u.path = findPath(this.map, u.x, u.z, x, z, 9000, sea, amphi, crawl);
         u.pi = 0;
         if (!u.path) return true; // unreachable — give up

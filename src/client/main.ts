@@ -9,13 +9,16 @@ import { Renderer } from './render';
 import { UI } from './ui';
 import { Net } from './net';
 import { audio } from './audio';
-import { runDeterminismProbe, mathCanary } from '../sim/determinism';
+import { runDeterminismProbe, mathCanary, detMathCanary } from '../sim/determinism';
 
 // lockstep determinism gate (available from page load, even on the menu): run
-// __detmath() / __detsim() in two browser engines and diff the digests — same
-// hashes = cross-engine deterministic. See LOCKSTEP.md.
+// these in two browser engines and diff the digests — same hashes = cross-engine
+// deterministic. __detmath() = native Math (expected to differ); __detmathDet()
+// = the sim's deterministic replacements (must match); __detsim() = full run.
+// See LOCKSTEP.md.
 (window as any).__detsim = (seed = 12345, ticks = 3000, size = 112) => runDeterminismProbe(seed >>> 0, size, ticks);
 (window as any).__detmath = () => mathCanary();
+(window as any).__detmathDet = () => detMathCanary();
 
 // build stamp, injected by vite (see vite.config.ts)
 declare const __APP_REV__: string;

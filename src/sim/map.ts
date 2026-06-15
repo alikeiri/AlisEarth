@@ -3,6 +3,7 @@
 // (integer-hash noise only — no engine-dependent math).
 
 import { RNG, hash2 } from './rng';
+import { hyp, dsin, dcos } from './dmath';
 
 export let W = 96, H = 96;
 export const MAXD = 160;           // largest supported map dimension
@@ -264,7 +265,7 @@ export function genMap(seed: number, nPlayers: number): GameMap {
         // each node takes the height of its nearest island: a warped radial blob
         // that rises from the sea, leaving open water between the landmasses
         let nd = 1e9;
-        for (const c of isleC) { const d = Math.hypot(x - c.x, z - c.z); if (d < nd) nd = d; }
+        for (const c of isleC) { const d = hyp(x - c.x, z - c.z); if (d < nd) nd = d; }
         const warp = (fbm(seed + 555, x * 0.05, z * 0.05) - 0.5) * isleR * 0.55; // organic coast
         const r = (nd + warp) / isleR;                 // 0 at island core .. 1 at coast
         const land = 1 - smoothstep(0.6, 1.0, r);
@@ -352,7 +353,7 @@ export function genMap(seed: number, nPlayers: number): GameMap {
     let a = cand[0], b = cand[0], far = -1;
     for (let i = 0; i < cand.length; i++)
       for (let j = i + 1; j < cand.length; j++) {
-        const d = (cand[i].x - cand[j].x) ** 2 + (cand[i].z - cand[j].z) ** 2;
+        const d = (cand[i].x - cand[j].x) * (cand[i].x - cand[j].x) + (cand[i].z - cand[j].z) * (cand[i].z - cand[j].z);
         if (d > far) { far = d; a = cand[i]; b = cand[j]; }
       }
     starts = need >= 2 ? [a, b] : [a];
@@ -360,7 +361,7 @@ export function genMap(seed: number, nPlayers: number): GameMap {
       let best = cand[0], bestMin = -1;
       for (const c of cand) {
         let mn = Infinity;
-        for (const s of starts) { const d = (c.x - s.x) ** 2 + (c.z - s.z) ** 2; if (d < mn) mn = d; }
+        for (const s of starts) { const d = (c.x - s.x) * (c.x - s.x) + (c.z - s.z) * (c.z - s.z); if (d < mn) mn = d; }
         if (mn > bestMin) { bestMin = mn; best = c; }
       }
       starts.push(best);
@@ -370,8 +371,8 @@ export function genMap(seed: number, nPlayers: number): GameMap {
     const ang = (((seed >>> 7) % 1000) / 1000) * Math.PI * 2;
     const ringR = 0.4 * Math.min(W, H);
     const pos = (a: number) => snap({
-      x: Math.max(14, Math.min(W - 14, Math.round(W / 2 + Math.cos(a) * ringR))),
-      z: Math.max(14, Math.min(H - 14, Math.round(H / 2 + Math.sin(a) * ringR))),
+      x: Math.max(14, Math.min(W - 14, Math.round(W / 2 + dcos(a) * ringR))),
+      z: Math.max(14, Math.min(H - 14, Math.round(H / 2 + dsin(a) * ringR))),
     });
     starts = [];
     for (let p = 0; p < need; p++) starts.push(pos(ang + (p * 2 * Math.PI) / need));
@@ -437,7 +438,7 @@ export function genMap(seed: number, nPlayers: number): GameMap {
       if (h < SEA + 0.45 || h > 6.2) continue;
       let nearSpawn = false;
       for (const s of starts)
-        if ((cx - s.x) ** 2 + (cz - s.z) ** 2 < 15 * 15) { nearSpawn = true; break; }
+        if ((cx - s.x) * (cx - s.x) + (cz - s.z) * (cz - s.z) < 15 * 15) { nearSpawn = true; break; }
       if (nearSpawn) continue;
       if (fbm(seed + 555, cx * 0.055, cz * 0.055) > 0.635) { m.forest[i] = 1; m.tBlocked[i] = 1; }
     }
@@ -447,7 +448,7 @@ export function genMap(seed: number, nPlayers: number): GameMap {
   // so fields stay distinct (don't merge into one sprawling mega-patch).
   const oreCenters: { x: number; z: number }[] = [];
   const farFromOre = (cx: number, cz: number, gap: number) => {
-    for (const c of oreCenters) if ((c.x - cx) ** 2 + (c.z - cz) ** 2 < gap * gap) return false;
+    for (const c of oreCenters) if ((c.x - cx) * (c.x - cx) + (c.z - cz) * (c.z - cz) < gap * gap) return false;
     return true;
   };
   const addOre = (cx: number, cz: number, r: number, amt: number) => {
@@ -488,13 +489,13 @@ export function genMap(seed: number, nPlayers: number): GameMap {
     if (m.blockedT(cx, cz) || !farFromOre(cx, cz, MIN_GAP)) continue;
     let farFromSpawns = true;
     for (const s of starts)
-      if ((cx - s.x) ** 2 + (cz - s.z) ** 2 < 24 * 24) { farFromSpawns = false; break; }
+      if ((cx - s.x) * (cx - s.x) + (cz - s.z) * (cz - s.z) < 24 * 24) { farFromSpawns = false; break; }
     if (!farFromSpawns) continue;
     oreCenters.push({ x: cx, z: cz });
     for (let z = cz - 2; z <= cz + 2; z++)
       for (let x = cx - 2; x <= cx + 2; x++) {
         if (!m.inB(x, z) || m.blockedT(x, z)) continue;
-        const d = Math.sqrt((x - cx) ** 2 + (z - cz) ** 2);
+        const d = Math.sqrt((x - cx) * (x - cx) + (z - cz) * (z - cz));
         if (d > 2.4) continue;
         m.ore[z * W + x] = 600 * (0.7 + 0.6 * rng.next());
         m.gem[z * W + x] = 1;

@@ -5,6 +5,7 @@
 // window: harassment raids on harvesters plus massed siege-led assault waves.
 
 import { Sim, Entity, Cmd } from './sim';
+import { hyp } from './dmath';
 import { UNITS, BUILDINGS, TICKS_PER_SEC } from './data';
 import { W, H, nearestPassable } from './map';
 import { findPath } from './path';
@@ -269,7 +270,7 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
         // expansion creep: if the ore frontier is beyond build range, push a
         // cheap power node toward it to extend the base footprint
         if (want === 'refinery' && toward && spot &&
-          Math.hypot(spot.x - toward.x, spot.z - toward.z) > 11 &&
+          hyp(spot.x - toward.x, spot.z - toward.z) > 11 &&
           pl.credits > cost('power') + 500) {
           const creep = findSpot(sim, p, 'power', toward);
           if (creep) { cmds.push({ k: 'place', p, type: 'power', cx: creep.x, cz: creep.z }); spot = null; }
@@ -556,7 +557,7 @@ function defenseDir(sim: Sim, p: number, mem: AiMem): { x: number; z: number } {
   let tx: number, tz: number;
   if ((mem.threatN || 0) >= 3 && mem.threatX !== undefined) { tx = mem.threatX; tz = mem.threatZ!; }
   else { const en = nearestEnemyBuilding(sim, p); if (en) { tx = en.x; tz = en.z; } else { tx = W / 2; tz = H / 2; } }
-  const dx = tx - b.x, dz = tz - b.z; const dl = Math.hypot(dx, dz) || 1;
+  const dx = tx - b.x, dz = tz - b.z; const dl = hyp(dx, dz) || 1;
   return { x: dx / dl, z: dz / dl };
 }
 
@@ -581,7 +582,7 @@ function defenseSpot(sim: Sim, p: number, type: string, base: { x: number; z: nu
       if (!sim.canPlace(p, type, cx, cz)) continue;
       let score = -Math.abs(along - frontDepth) * 0.25; // hug the front line
       let near = Infinity;
-      for (const d of mine) near = Math.min(near, Math.hypot(d.x - cx, d.z - cz));
+      for (const d of mine) near = Math.min(near, hyp(d.x - cx, d.z - cz));
       if (!mine.length) score -= Math.abs(lat) * 0.15;             // first one: centre the front
       else if (near < range * 0.6) score -= (range * 0.6 - near) * 1.5; // too clumped
       else score += Math.min(near, range * 1.3) * 0.4;             // spread ~range apart, tiled coverage
@@ -611,7 +612,7 @@ function frontPosts(sim: Sim, base: { x: number; z: number }, dir: { x: number; 
 function deployFortify(cmds: Cmd[], p: number, u: Entity, post: { x: number; z: number }): void {
   if (u.fortified || u.fortT > 0) return;                       // already dug in / mid-deploy
   if (u.orders.length && u.orders[0].k === 'move') return;      // already marching to a post
-  if (Math.hypot(u.x - post.x, u.z - post.z) <= 2.5) cmds.push({ k: 'fortify', p, ids: [u.id] });
+  if (hyp(u.x - post.x, u.z - post.z) <= 2.5) cmds.push({ k: 'fortify', p, ids: [u.id] });
   else cmds.push({ k: 'move', p, ids: [u.id], x: post.x, z: post.z });
 }
 
@@ -643,9 +644,9 @@ function oreFrontier(sim: Sim, p: number): { x: number; z: number } | null {
     for (let cx = 0; cx < W; cx += 2) {
       if (sim.map.ore[cz * W + cx] <= 0) continue;
       let served = false;
-      for (const r of refs) if ((r.x - cx) ** 2 + (r.z - cz) ** 2 < 10 * 10) { served = true; break; }
+      for (const r of refs) if ((r.x - cx) * (r.x - cx) + (r.z - cz) * (r.z - cz) < 10 * 10) { served = true; break; }
       if (served) continue;
-      const d = (from.x - cx) ** 2 + (from.z - cz) ** 2;
+      const d = (from.x - cx) * (from.x - cx) + (from.z - cz) * (from.z - cz);
       if (d < bd) { bd = d; best = { x: cx, z: cz }; }
     }
   }
@@ -657,7 +658,7 @@ function enemyHarvester(sim: Sim, p: number): Entity | null {
   let best: Entity | null = null, bd = 1e9;
   for (const e of sim.ents.values()) {
     if (e.b || !sim.foe(e.owner, p) || e.type !== 'harv' || !sim.players[e.owner].alive) continue;
-    const d = (e.x - s.x) ** 2 + (e.z - s.z) ** 2;
+    const d = (e.x - s.x) * (e.x - s.x) + (e.z - s.z) * (e.z - s.z);
     if (d < bd) { bd = d; best = e; }
   }
   return best;
@@ -679,8 +680,8 @@ function bestStrikeTarget(sim: Sim, p: number): Entity | null {
   let best: Entity | null = null, bestScore = 1e9;
   for (const e of enemyB) {
     let near = 0;
-    for (const d of defenders) if ((d.x - e.x) ** 2 + (d.z - e.z) ** 2 < 12 * 12) near++;
-    const dHome = Math.hypot(e.x - s.x, e.z - s.z);
+    for (const d of defenders) if ((d.x - e.x) * (d.x - e.x) + (d.z - e.z) * (d.z - e.z) < 12 * 12) near++;
+    const dHome = hyp(e.x - s.x, e.z - s.z);
     const priority = e.type === 'refinery' || e.type === 'power' || e.type === 'conyard' ? -1.2 : 0;
     const score = near * 1.2 + dHome * 0.1 + priority;
     if (score < bestScore) { bestScore = score; best = e; }
@@ -696,7 +697,7 @@ function airDefenseTarget(sim: Sim, p: number): Entity | null {
   for (const e of sim.ents.values()) {
     if (!sim.foe(e.owner, p) || e.hp <= 0 || !sim.players[e.owner].alive) continue;
     if (e.type !== 'sam' && e.type !== 'aatank' && e.type !== 'flak') continue;
-    const d = (e.x - s.x) ** 2 + (e.z - s.z) ** 2;
+    const d = (e.x - s.x) * (e.x - s.x) + (e.z - s.z) * (e.z - s.z);
     if (d < bd) { bd = d; best = e; }
   }
   return best;
@@ -707,7 +708,7 @@ function nearestEnemyBuilding(sim: Sim, p: number): Entity | null {
   let best: Entity | null = null, bd = 1e9;
   for (const e of sim.ents.values()) {
     if (!e.b || !sim.foe(e.owner, p) || !sim.players[e.owner].alive) continue;
-    const d = (e.x - s.x) ** 2 + (e.z - s.z) ** 2;
+    const d = (e.x - s.x) * (e.x - s.x) + (e.z - s.z) * (e.z - s.z);
     if (d < bd) { bd = d; best = e; }
   }
   return best;
@@ -720,7 +721,7 @@ function nearestEnemyWall(sim: Sim, p: number): Entity | null {
   for (const e of sim.ents.values()) {
     if (!e.b || (e.type !== 'wall' && e.type !== 'barrier') || e.hp <= 0) continue;
     if (!sim.foe(e.owner, p) || !sim.players[e.owner].alive) continue;
-    const d = (e.x - s.x) ** 2 + (e.z - s.z) ** 2;
+    const d = (e.x - s.x) * (e.x - s.x) + (e.z - s.z) * (e.z - s.z);
     if (d < bd) { bd = d; best = e; }
   }
   return best;
@@ -734,7 +735,7 @@ function findSpot(sim: Sim, p: number, type: string, toward?: { x: number; z: nu
   if (!bases.length) return null;
   // when creeping toward a point, ring-search from the buildings nearest it
   if (toward) bases.sort((a, b) =>
-    ((a.x - toward.x) ** 2 + (a.z - toward.z) ** 2) - ((b.x - toward.x) ** 2 + (b.z - toward.z) ** 2));
+    ((a.x - toward.x) * (a.x - toward.x) + (a.z - toward.z) * (a.z - toward.z)) - ((b.x - toward.x) * (b.x - toward.x) + (b.z - toward.z) * (b.z - toward.z)));
   const candidates: { x: number; z: number; score: number }[] = [];
   const sz = BUILDINGS[type]?.size || 2;
   for (const base of bases.slice(0, 4)) {
@@ -744,7 +745,7 @@ function findSpot(sim: Sim, p: number, type: string, toward?: { x: number; z: nu
         const cz = Math.round(base.z + sim.rng.range(-r, r));
         if (!sim.canPlace(p, type, cx, cz)) continue;
         let score = sim.rng.next();
-        if (toward) score -= Math.sqrt((cx - toward.x) ** 2 + (cz - toward.z) ** 2) * 0.08;
+        if (toward) score -= Math.sqrt((cx - toward.x) * (cx - toward.x) + (cz - toward.z) * (cz - toward.z)) * 0.08;
         // breathing room: wall-to-wall placement traps harvesters and units —
         // penalize spots that touch an existing building
         const mx = cx + sz / 2, mz = cz + sz / 2;

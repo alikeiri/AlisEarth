@@ -12,13 +12,14 @@ import { writeFileSync } from 'fs';
 
 const res = await build({ entryPoints: ['src/sim/headless-entry.ts'], bundle: true, format: 'esm', platform: 'node', write: false });
 writeFileSync('.sim-bundle.mjs', res.outputFiles[0].text);
-const { runDeterminismProbe, mathCanary } = await import('./.sim-bundle.mjs?' + Date.now());
+const { runDeterminismProbe, mathCanary, detMathCanary } = await import('./.sim-bundle.mjs?' + Date.now());
 
 const SEEDS = [12345, 0x1000, 777, 2026];
 const TICKS = Number(process.argv[2] || 3000);
 
 console.log(`engine: node ${process.version} (V8)`);
-console.log(`mathCanary: ${mathCanary()}`);
+console.log(`mathCanary (native Math, may differ across engines): ${mathCanary()}`);
+console.log(`detMathCanary (deterministic dmath, MUST match everywhere): ${detMathCanary()}`);
 for (const seed of SEEDS) {
   // run twice — same engine MUST agree, or the sim is nondeterministic even
   // within one engine (a bug to fix regardless of lockstep)

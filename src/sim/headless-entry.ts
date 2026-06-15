@@ -3,4 +3,4 @@ export { Sim } from './sim';
 export { aiTick } from './ai';
 export { FACTIONS, UNITS, BUILDINGS } from './data';
 export { setMapSize } from './map';
-export { runDeterminismProbe, mathCanary } from './determinism';
+export { runDeterminismProbe, mathCanary, detMathCanary } from './determinism';

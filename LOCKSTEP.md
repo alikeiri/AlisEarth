@@ -39,16 +39,27 @@ an AI-vs-AI run (a deterministic input stream).
    - Same `final` and per-tick `hash` across engines → **gate passed**, lockstep is viable.
    - First differing `tick` = where divergence starts → points at the offending math.
 
-## Step 2 — if it diverges, make the sim cross-engine deterministic
+## Step 2 — make the sim cross-engine deterministic ✅ DONE (pending Firefox/Safari confirmation)
 
-In rough order of likely impact:
-- `Math.hypot(a,b)` → `Math.sqrt(a*a + b*b)` (`sqrt` *is* IEEE-mandated correctly-rounded).
-- `x ** 2` → `x * x` (avoid `pow` for integer powers).
-- `Math.sin/cos/atan2` on the sim path → deterministic fixed-point trig or a
-  shared integer lookup table (only sim/movement headings; rendering can keep native Math).
-- Re-run the gate after each change until cross-engine digests match.
+The sim path now uses only IEEE-mandated ops (`+ - * / sqrt round`) via
+`src/sim/dmath.ts`:
+- `Math.hypot(a,b)` → `hyp(a,b)` = `Math.sqrt(a*a + b*b)` (26 sites).
+- `x ** 2` → `x * x` (~40 sites; avoids `pow`).
+- `Math.sin/cos` → `dsin/dcos` (range-reduced Taylor polynomial; 3 sites).
+  `atan2` had zero sim uses. Rendering keeps native `Math`.
 
-## Step 3 — the lockstep loop (only after the gate passes)
+Verification (`node det-harness.mjs`, and `__detmath()` / `__detmathDet()` /
+`__detsim()` in the browser console):
+- `__detmath()` (native Math) still DIFFERS across V8 versions — `b8a24999`
+  (Node) vs `3e95c2d5` (Chrome) — confirming native trig/hypot is engine-sensitive.
+- `__detmathDet()` (the dmath replacements) MATCHES: `a9925333` on both.
+- `__detsim(12345,1500).final` MATCHES: `df56b2f1` on both, and is same-engine stable.
+
+**Remaining**: confirm `__detmathDet()` == `a9925333` and `__detsim(12345,1500).final`
+== `df56b2f1` in **Firefox** (SpiderMonkey) / **Safari** (JSC). They're built from
+IEEE-mandated ops, so they should — that's the definitive cross-engine pass.
+
+## Step 3 — the lockstep loop (after the cross-engine gate passes)
 
 - Input-delay buffer: ~300 ms+ at 500 ms ping (classic RTS, acceptable).
 - Stalled-client policy: buffer + AI-substitute a lagging player, never freeze-all.
