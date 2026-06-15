@@ -20,7 +20,15 @@ class AudioMan {
   muted = false;
   musicVol = 0.4;   // 0..1, music bus
   sfxVol = 1.0;     // 0..1, sound effects + unit voices
-  musicStyle = 'battle'; // 'battle' | 'ambient' | 'march' | 'off'
+  // 'playlist' cycles all songs (Iron Directive first) one after another then
+  // repeats; the named styles play a single track on loop. Default = playlist so
+  // Iron Directive leads on the homepage and the music rotates during play.
+  musicStyle = 'playlist';
+  private static PLAYLIST = ['iron', 'battle', 'hellmarch', 'march', 'ambient'];
+  private plIdx = 0;                 // position within the playlist
+  private plTimer: ReturnType<typeof setTimeout> | null = null; // advance timer for synth styles
+  // the actual style sounding right now (resolves 'playlist' to its current song)
+  private curStyle() { return this.musicStyle === 'playlist' ? AudioMan.PLAYLIST[this.plIdx % AudioMan.PLAYLIST.length] : this.musicStyle; }
 
   constructor() {
     try {
@@ -80,9 +88,18 @@ class AudioMan {
   }
   setMusicStyle(s: string) {
     this.musicStyle = s;
+    if (s === 'playlist') this.plIdx = 0; // restart the playlist from Iron Directive
     try { localStorage.setItem('fe_musstyle', s); } catch {}
     this.stopMusic();
     if (s !== 'off') this.startMusic();
+  }
+  // playlist mode: advance to the next song, wrapping back to the start (repeat)
+  private advancePlaylist() {
+    if (this.musicStyle !== 'off' && this.ctx) {
+      this.plIdx = (this.plIdx + 1) % AudioMan.PLAYLIST.length;
+      this.stopMusic();
+      this.startMusic();
+    }
   }
 
   // ---------- synth primitives ----------
@@ -369,11 +386,12 @@ class AudioMan {
 
   startMusic() {
     if (!this.ctx || this.musicStyle === 'off') return;
-    // pre-recorded tracks (e.g. Iron Directive) play a looped mp3 instead of synth
-    if (this.trackSrc[this.musicStyle]) { this.startTrack(this.musicStyle); return; }
+    const style = this.curStyle();
+    // pre-recorded tracks (e.g. Iron Directive) play an mp3 instead of synth
+    if (this.trackSrc[style]) { this.startTrack(style); return; }
     if (this.musicTimer) return;
-    const bpm = this.musicStyle === 'ambient' ? 60 : this.musicStyle === 'march' ? 104
-      : this.musicStyle === 'hellmarch' ? 142 : 124;
+    const bpm = style === 'ambient' ? 60 : style === 'march' ? 104
+      : style === 'hellmarch' ? 142 : 124;
     const spe = 60 / bpm / 2; // seconds per eighth note
     this.nextT = this.ctx.currentTime + 0.15;
     this.musicTimer = setInterval(() => {
@@ -383,10 +401,13 @@ class AudioMan {
         this.nextT += spe;
       }
     }, 250);
+    // generative styles never "end"; in playlist mode move on after ~2.75 min
+    if (this.musicStyle === 'playlist') this.plTimer = setTimeout(() => this.advancePlaylist(), 165000);
   }
 
   stopMusic() {
     if (this.musicTimer) { clearInterval(this.musicTimer); this.musicTimer = null; }
+    if (this.plTimer) { clearTimeout(this.plTimer); this.plTimer = null; }
     this.stopTrack();
   }
 
@@ -406,7 +427,7 @@ class AudioMan {
         this.trackBuf[style] = await this.ctx.decodeAudioData(arr);
       } catch { this.trackLoading = ''; return; }
       this.trackLoading = '';
-      if (this.musicStyle !== style) return; // user switched away while it loaded
+      if (this.curStyle() !== style) return; // switched away (or playlist advanced) while it loaded
     }
     this.playTrack(style);
   }
@@ -415,13 +436,16 @@ class AudioMan {
     this.stopTrack();
     const src = this.ctx.createBufferSource();
     src.buffer = this.trackBuf[style];
-    src.loop = true;
+    // single-song mode loops the track; in the playlist it plays once then the
+    // next song follows (then the list repeats)
+    src.loop = this.musicStyle !== 'playlist';
+    if (this.musicStyle === 'playlist') src.onended = () => this.advancePlaylist();
     src.connect(this.musG);
     src.start();
     this.trackNode = src;
   }
   private stopTrack() {
-    if (this.trackNode) { try { this.trackNode.stop(); } catch { /* already stopped */ } this.trackNode.disconnect(); this.trackNode = null; }
+    if (this.trackNode) { this.trackNode.onended = null; try { this.trackNode.stop(); } catch { /* already stopped */ } this.trackNode.disconnect(); this.trackNode = null; }
   }
 
   private musTone(type: OscillatorType, freq: number, t: number, atk: number, dur: number, peak: number, lpf: number, echo = false) {
@@ -472,7 +496,7 @@ class AudioMan {
     const pos = e % 8;
     const barAbs = Math.floor(e / 8);
     const bar = barAbs % 4;
-    const style = this.musicStyle;
+    const style = this.curStyle();
     // walk the song: each phrase is 4 bars; the chord + feel come from it
     const phrase = Math.floor(barAbs / 4);
     const si = phrase % this.SONG.length;

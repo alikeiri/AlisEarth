@@ -163,11 +163,32 @@ function handleFeatures(req: any, res: any) {
   });
 }
 
+// operator-only: mark request(s) delivered (by date), gated by the server secret
+// so random visitors can't flip the status. Submissions stay data either way.
+function handleFeatureComplete(req: any, res: any) {
+  let raw = '';
+  req.on('data', (c: Buffer) => { raw += c; if (raw.length > 2048) req.destroy(); });
+  req.on('end', () => {
+    try {
+      const j = JSON.parse(raw);
+      if (!ADVISOR_KEY || j.key !== ADVISOR_KEY) { res.writeHead(403); res.end(); return; }
+      const dates: number[] = Array.isArray(j.dates) ? j.dates : (j.date != null ? [j.date] : []);
+      const list = readFeatures();
+      let n = 0;
+      for (const it of list) if (dates.includes(it.date)) { it.done = true; if (j.note) it.note = String(j.note).slice(0, 200); n++; }
+      writeFileSync(FEATURES_FILE, JSON.stringify(list));
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, marked: n }));
+    } catch { res.writeHead(400); res.end(); }
+  });
+}
+
 const http = createServer(async (req, res) => {
   try {
     let p = (req.url || '/').split('?')[0];
     if (req.method === 'POST' && p === '/advisor') { handleAdvisor(req, res); return; }
     if (p === '/intel') { handleIntel(req, res); return; }
+    if (req.method === 'POST' && p === '/features/complete') { handleFeatureComplete(req, res); return; }
     if (p === '/features') { handleFeatures(req, res); return; }
     if (req.method === 'GET' && p === '/replays') {
       let idx = '[]';

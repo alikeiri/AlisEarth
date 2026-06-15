@@ -3047,8 +3047,8 @@ function initMenus() {
   muteBtn.addEventListener('click', () => { audio.init(); audio.setMuted(!audio.muted); muteIcon(); });
   // in-game music swap: cycle the track on click and flash the name
   const musBtn = $('musBtn'), musLabel = $('musLabel');
-  const MUS_STYLES = ['battle', 'hellmarch', 'iron', 'march', 'ambient', 'off'];
-  const MUS_NAMES: Record<string, string> = { battle: 'Battle', hellmarch: 'Hell March', iron: 'Iron Directive', march: 'Military March', ambient: 'Ambient', off: 'Off' };
+  const MUS_STYLES = ['playlist', 'battle', 'hellmarch', 'iron', 'march', 'ambient', 'off'];
+  const MUS_NAMES: Record<string, string> = { playlist: 'Playlist', battle: 'Battle', hellmarch: 'Hell March', iron: 'Iron Directive', march: 'Military March', ambient: 'Ambient', off: 'Off' };
   let musLabelTimer: any;
   const flashMus = () => {
     musBtn.title = 'Music: ' + (MUS_NAMES[audio.musicStyle] || audio.musicStyle) + ' — click to change';
@@ -3165,9 +3165,13 @@ function initMenus() {
       count.textContent = String(items.length);
       const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
       list.innerHTML = items.length
-        ? items.slice().reverse().slice(0, 100).map(it =>
-            `<div style="padding:4px 0;border-bottom:1px solid #1d2935"><span style="color:#7bdcff">${esc(String(it.name || 'Anonymous'))}</span> ` +
-            `<span style="color:#5f7384;font-size:10px">${new Date(it.date).toLocaleDateString()}</span><br>${esc(String(it.text || ''))}</div>`).join('')
+        ? items.slice().reverse().slice(0, 100).map(it => {
+            const done = !!it.done;
+            const badge = done ? ' <span style="color:#57d977;font-size:10px">✓ DELIVERED</span>' : '';
+            const note = done && it.note ? `<br><span style="color:#57d977;font-size:10px">↳ ${esc(String(it.note))}</span>` : '';
+            return `<div style="padding:4px 0;border-bottom:1px solid #1d2935${done ? ';opacity:0.7' : ''}"><span style="color:#7bdcff">${esc(String(it.name || 'Anonymous'))}</span> ` +
+              `<span style="color:#5f7384;font-size:10px">${new Date(it.date).toLocaleDateString()}</span>${badge}<br>${esc(String(it.text || ''))}${note}</div>`;
+          }).join('')
         : '<span style="color:#5f7384">No requests yet — be the first!</span>';
     } catch { list.innerHTML = '<span style="color:#5f7384">Feature requests live on the game server — open the deployed site.</span>'; }
   };
