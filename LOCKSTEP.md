@@ -90,14 +90,29 @@ desynced. Fixed with a **per-player AI RNG** (`sim.aiRngP[p]`) separate from the
 gameplay `rng` — this also lets a dropped player's AI be recomputed identically by
 every survivor.
 
-### Remaining (Step 4 — playable integration)
-- Wire `LockstepEngine` into a `NetLockstepGame` (GameLike) + a lobby "Lockstep"
-  toggle, so it's playable in the UI (not just harnesses).
-- Tune input delay for 400–500 ms ping; add a netgraph/stall indicator.
-- Transport upgrade (optional): WebTransport (HTTP/3 datagrams) or WebRTC
-  DataChannel for true unreliable delivery — the redundant rolling window already
-  exploits it. TCP/WebSocket head-of-line blocking is the current stall cause at
-  high ping/loss; it works today but UDP would smooth it.
+**Step 4 — playable browser mode ✅**: `NetLockstepGame` (GameLike) drives a local
+sim via `LockstepEngine` over the WS transport; a "Lockstep netcode (beta)" toggle
+in the multiplayer create UI starts a lockstep room. A solo game (you + a
+server-added AI) runs entirely locally, so it's testable in one tab; 2+ humans
+play over the network. Verified: solo lockstep renders and runs cleanly (local
+sim advancing, per-player AI RNG, no errors).
+
+### How to test
+- **Solo (one tab):** Multiplayer Lobby → tick "Lockstep netcode (beta)" → Create
+  Game → Start. You play vs a locally-computed AI; the whole sim runs on your client.
+- **Networked (two tabs / machines):** both open the app, one creates a Lockstep
+  room, the other joins by code, host starts. Each runs its own sim; the server
+  only relays inputs.
+- **Harnesses:** `node lockstep-harness.mjs` (netless model), `node
+  lockstep-net-harness.mjs ws://<host>:8080 <n> <ticks> [--drop]` (real WS).
+
+### Remaining (optional polish)
+- Tune input delay for 400–500 ms ping; add a netgraph/stall indicator in the HUD.
+- Transport upgrade: WebTransport (HTTP/3 datagrams) or WebRTC DataChannel for
+  true unreliable delivery — the redundant rolling window already exploits it.
+  TCP/WebSocket head-of-line blocking is the current stall cause at high ping/loss;
+  it works today but UDP would smooth it.
+- End-game/replay handling for lockstep rooms (snapshot rooms already covered).
 
 The live 5-server fleet keeps running the snapshot build (`main`) while this fork
 (`lockstep` branch) is developed and gated.

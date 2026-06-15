@@ -10,7 +10,7 @@ import { UI } from './ui';
 import { Net } from './net';
 import { audio } from './audio';
 import { runDeterminismProbe, mathCanary, detMathCanary } from '../sim/determinism';
-import { runNetlessLockstep } from '../sim/lockstep';
+import { runNetlessLockstep, LockstepEngine } from '../sim/lockstep';
 
 // lockstep determinism gate (available from page load, even on the menu): run
 // these in two browser engines and diff the digests — same hashes = cross-engine
@@ -43,6 +43,54 @@ interface GameLike {
   issue(cmd: any): void;
   status(): { over: boolean; winner: number };
   leave(): void;
+}
+
+// sim entities -> client view objects (with `a` = 0..1 interpolation between the
+// previous and current tick). Shared by LocalGame and NetLockstepGame.
+function simViews(sim: Sim, a: number): any[] {
+  const out: any[] = [];
+  for (const e of sim.ents.values()) {
+    const v: any = {
+      i: e.id, o: e.owner, t: e.type, b: e.b ? 1 : 0,
+      x: e.b ? e.x : e.px + (e.x - e.px) * a,
+      z: e.b ? e.z : e.pz + (e.z - e.pz) * a,
+      h: e.hp, m: e.maxHp, pr: e.b ? e.progress / e.total : 1,
+    };
+    if (e.b) {
+      v.cx = e.cx; v.cz = e.cz; v.sz = e.size; v.lv = e.lvl; v.qn = e.queue.length;
+      if (e.queue.length) { v.qt = 1 - e.queue[0].t / e.queue[0].t0; v.qy = e.queue[0].type; v.qq = e.queue.map(q => q.type); }
+      if (e.rallyX >= 0) { v.rx = e.rallyX; v.rz = e.rallyZ; }
+      if (e.patPts) v.pp = e.patPts;
+      if (e.rpt) v.rp = 1;
+      if (e.primary) v.pm = 1;
+      if (e.research) { v.rs = e.research.tech; v.rsf = 1 - e.research.t / e.research.t0; }
+      if (e.upg) v.up = 1 - e.upg.t / e.upg.t0;
+      if (e.storedMissile) v.ms = e.storedMissile;
+      if (e.missileStock && e.missileStock.length) v.msn = e.missileStock.length;
+      if (e.strikeR && e.strikeR > 0) { v.kx = e.strikeX; v.kz = e.strikeZ; v.kr = e.strikeR; }
+      if (e.burnT && e.burnT > 0) v.bn = 1;
+      if (e.holdFire) v.hf = 1;
+    } else {
+      if (e.stance) v.st = e.stance;
+      if (e.fortified) v.fo = 1;
+      if (e.fortT > 0) v.ft = e.fortGoal ? 1 : 2;
+      if (UNITS[e.t]?.cloak || UNITS[e.type]?.cloak) v.ck = 1;
+      if (e.cd > 0 && UNITS[e.type]?.dmg > 0) { v.fr = 1; if (e.aimX !== undefined) { v.ax = e.aimX; v.az = e.aimZ; } }
+      if (e.sd > 0) v.sd = Math.ceil(e.sd);
+      if (e.rzr && e.rzr > 0) { v.rzx = e.rzx; v.rzz = e.rzz; v.rzr = e.rzr; }
+      if (e.hzr && e.hzr > 0) { v.hzx = e.hzx; v.hzz = e.hzz; v.hzr = e.hzr; }
+      if (e.holdFire) v.hf = 1;
+      if (e.orders[0]?.k === 'patrol') v.pa = 1;
+    }
+    out.push(v);
+  }
+  return out;
+}
+function simPlayers(sim: Sim): any[] {
+  return sim.players.map(pl => ({
+    c: Math.floor(pl.credits), a: pl.alive, pm: Math.round(pl.powerMade), pu: Math.round(pl.powerUsed),
+    n: pl.name, f: pl.faction, tm: pl.team, ai: pl.isAI, tech: Object.keys(pl.tech).filter(k => pl.tech[k]),
+  }));
 }
 
 // ---------------- Local skirmish ----------------
@@ -151,59 +199,8 @@ class LocalGame implements GameLike {
     }
     if (guard >= gMax) this.acc = 0; // tab was backgrounded — drop the backlog
   }
-  views(): any[] {
-    const a = Math.max(0, Math.min(1, this.acc / 100));
-    const out: any[] = [];
-    for (const e of this.sim.ents.values()) {
-      const v: any = {
-        i: e.id, o: e.owner, t: e.type, b: e.b ? 1 : 0,
-        x: e.b ? e.x : e.px + (e.x - e.px) * a,
-        z: e.b ? e.z : e.pz + (e.z - e.pz) * a,
-        h: e.hp, m: e.maxHp, pr: e.b ? e.progress / e.total : 1,
-      };
-      if (e.b) {
-        v.cx = e.cx; v.cz = e.cz; v.sz = e.size; v.lv = e.lvl; v.qn = e.queue.length;
-        if (e.queue.length) {
-          v.qt = 1 - e.queue[0].t / e.queue[0].t0;
-          v.qy = e.queue[0].type;
-          v.qq = e.queue.map(q => q.type);
-        }
-        if (e.rallyX >= 0) { v.rx = e.rallyX; v.rz = e.rallyZ; }
-        if (e.patPts) v.pp = e.patPts;
-        if (e.rpt) v.rp = 1;
-        if (e.primary) v.pm = 1;
-        if (e.research) { v.rs = e.research.tech; v.rsf = 1 - e.research.t / e.research.t0; }
-        if (e.upg) v.up = 1 - e.upg.t / e.upg.t0; // upgrade progress 0..1
-        if (e.storedMissile) v.ms = e.storedMissile;
-        if (e.missileStock && e.missileStock.length) v.msn = e.missileStock.length;
-        if (e.strikeR && e.strikeR > 0) { v.kx = e.strikeX; v.kz = e.strikeZ; v.kr = e.strikeR; }
-        if (e.burnT && e.burnT > 0) v.bn = 1;
-        if (e.holdFire) v.hf = 1;                       // defensive building on weapons-hold
-      } else {
-        if (e.stance) v.st = e.stance;
-        if (e.fortified) v.fo = 1;
-        if (e.fortT > 0) v.ft = e.fortGoal ? 1 : 2; // 1 = digging in, 2 = packing up
-        if (UNITS[e.t]?.cloak || UNITS[e.type]?.cloak) v.ck = 1;
-        if (e.cd > 0 && UNITS[e.type]?.dmg > 0) {
-          v.fr = 1; // firing — drives infantry aim pose
-          if (e.aimX !== undefined) { v.ax = e.aimX; v.az = e.aimZ; } // turn toward the target
-        }
-        if (e.sd > 0) v.sd = Math.ceil(e.sd); // self-destruct countdown
-        if (e.rzr && e.rzr > 0) { v.rzx = e.rzx; v.rzz = e.rzz; v.rzr = e.rzr; } // engineer repair zone
-        if (e.hzr && e.hzr > 0) { v.hzx = e.hzx; v.hzz = e.hzz; v.hzr = e.hzr; } // harvester work area
-        if (e.holdFire) v.hf = 1;                       // weapons-hold
-        if (e.orders[0]?.k === 'patrol') v.pa = 1;      // currently patrolling
-      }
-      out.push(v);
-    }
-    return out;
-  }
-  players(): any[] {
-    return this.sim.players.map(pl => ({
-      c: Math.floor(pl.credits), a: pl.alive, pm: Math.round(pl.powerMade), pu: Math.round(pl.powerUsed),
-      n: pl.name, f: pl.faction, tm: pl.team, ai: pl.isAI, tech: Object.keys(pl.tech).filter(k => pl.tech[k]),
-    }));
-  }
+  views(): any[] { return simViews(this.sim, Math.max(0, Math.min(1, this.acc / 100))); }
+  players(): any[] { return simPlayers(this.sim); }
   drainEvents() { const e = this.evQ; this.evQ = []; return e; }
   status() { return this.sim.done ? { over: true, winner: this.sim.winner } : { over: false, winner: -2 }; }
   leave() {}
@@ -364,6 +361,66 @@ class NetGame implements GameLike {
   netStats() {
     return { ...this.net.stats, sinceSnap: this.tCur ? performance.now() - this.tCur : 0, interpSpan: this.tCur - this.tPrev };
   }
+}
+
+// ---------------- Networked LOCKSTEP game ----------------
+// Each client runs its OWN deterministic sim; the server only relays inputs
+// (no server sim, no snapshots). Bandwidth = O(inputs), so it scales to thousands
+// of units. AI players (incl. dropped peers) are computed locally by every client.
+class NetLockstepGame implements GameLike {
+  map: GameMap;
+  me: number;
+  sim: Sim;
+  isNet = true;
+  private engine: LockstepEngine;
+  private pending: any[] = [];      // user commands queued since the last tick
+  private acc = 0;
+  private targetTick = 0;           // real-time gate: +1 every 100 ms
+  private evQ: any[] = [];
+  private chatQ: any[] = [];
+  private roster: { name: string; isAI: boolean }[] = [];
+
+  constructor(private net: Net, m: any) {
+    setMapSize(m.size || 112);
+    this.me = m.you;
+    this.roster = m.players || [];
+    const specs = (m.players || []).map((p: any) => ({ name: p.name, faction: p.faction, isAI: !!p.isAI }));
+    this.sim = new Sim(m.seed, specs);
+    this.map = this.sim.map;
+    this.engine = new LockstepEngine(this.sim, this.me, specs.length, { delay: 6, redundancy: 16 });
+    this.engine.aiFor = (s, p) => aiTick(s as any, p);
+    this.engine.localInput = () => { const c = this.pending; this.pending = []; return c; };
+    this.engine.send = msg => this.net.send({ t: 'lsin', frames: msg.frames });
+    this.engine.recordHashes = false;                 // no per-tick hashing in real play
+    this.engine.onTick = () => { this.evQ.push(...this.sim.events); }; // drain each executed tick's events
+    // AI slots are computed locally by EVERY client from tick 0 (deterministic)
+    for (const slot of (m.aiSlots || [])) this.engine.dropToAI(slot, 0);
+    net.on('lsin', (x: any) => this.engine.receive({ player: x.player, frames: x.frames }));
+    net.on('lsdropvote', (x: any) => this.net.send({ t: 'lslast', player: x.player, tick: this.engine.lastInputTickFor(x.player) }));
+    net.on('lsdrop', (x: any) => this.engine.dropToAI(x.player, x.tick));
+    net.on('chat', (x: any) => { if (this.chatQ.length < 50) this.chatQ.push(x); });
+  }
+  get tickN() { return this.sim.tickN; }
+  issue(cmd: any) { this.pending.push(cmd); }
+  update(dtMs: number) {
+    // advance at a steady 10 Hz of wall time; the engine executes up to targetTick
+    // as inputs allow (stalling when a peer is late, catching up afterwards)
+    this.acc += dtMs;
+    while (this.acc >= 100) { this.acc -= 100; this.targetTick++; }
+    this.engine.pump(this.targetTick); // executes ticks up to targetTick; onTick drains events per tick
+  }
+  views(): any[] { return simViews(this.sim, Math.max(0, Math.min(1, this.acc / 100))); }
+  players(): any[] { return simPlayers(this.sim); }
+  drainEvents() { const e = this.evQ; this.evQ = []; return e; }
+  status() { return this.sim.done ? { over: true, winner: this.sim.winner } : { over: false, winner: -2 }; }
+  sendChat(to: any, msg: string) { this.net.send({ t: 'chat', to, msg }); }
+  drainChat() { const q = this.chatQ; this.chatQ = []; return q; }
+  chatTargets() {
+    const t: { v: any; label: string }[] = [{ v: 'all', label: 'Everyone' }, { v: 'allies', label: 'Allies' }];
+    this.roster.forEach((p, i) => { if (i !== this.me && !p.isAI) t.push({ v: i, label: '@ ' + p.name }); });
+    return t;
+  }
+  leave() { this.net.close(); }
 }
 
 // ---------------- Game client (render + input loop) ----------------
@@ -2772,7 +2829,9 @@ async function connectNet(): Promise<Net> {
   });
   n.on('start', (m: any) => {
     setMapSize(m.size || 96);
-    const g = new NetGame(n, m.seed, m.players.length, m.you, m.players);
+    // lockstep rooms run a local deterministic sim driven by relayed inputs;
+    // snapshot rooms render server-authoritative snapshots
+    const g = m.lockstep ? new NetLockstepGame(n, m) : new NetGame(n, m.seed, m.players.length, m.you, m.players);
     startGame(g);
   });
   n.on('lobby', (m: any) => renderMpLobby(m));
@@ -2906,7 +2965,7 @@ function initMenus() {
   // create a game others can see and join from the lobby
   $('btnMpCreate').addEventListener('click', () => {
     $('mpErr').textContent = '';
-    net?.send({ t: 'create', name: playerName(), faction: selFaction, size: selSize, diff: selDiff, islands: ($('islandChk') as HTMLInputElement)?.checked ?? false });
+    net?.send({ t: 'create', name: playerName(), faction: selFaction, size: selSize, diff: selDiff, islands: ($('islandChk') as HTMLInputElement)?.checked ?? false, lockstep: ($('lockstepChk') as HTMLInputElement)?.checked ?? false });
   });
   $('btnMpJoinCode').addEventListener('click', () => {
     $('mpErr').textContent = '';

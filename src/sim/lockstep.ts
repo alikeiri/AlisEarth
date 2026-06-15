@@ -37,6 +37,8 @@ export class LockstepEngine {
   send: (msg: InputMsg) => void = () => {};        // wired to the transport
   localInput: (sim: Sim) => Cmd[] = () => [];      // produces this client's commands for the current tick
   aiFor: (sim: Sim, player: number) => Cmd[] = () => []; // input for a dropped (now AI-run) player
+  onTick: () => void = () => {};                    // called after each executed tick (drain events, etc.)
+  recordHashes = true;                              // hash state per tick (for verification; off in real play)
   // inputs[tick] = per-player command lists (undefined = not yet known)
   private inputs = new Map<number, (Cmd[] | undefined)[]>();
   private localHistory: Frame[] = [];
@@ -123,7 +125,8 @@ export class LockstepEngine {
       const executed = this.sim.tickN;
       this.sim.tick(merged);
       this.inputs.delete(executed);                    // gc consumed inputs
-      this.hashes.set(this.sim.tickN, hashSim(this.sim));
+      if (this.recordHashes) this.hashes.set(this.sim.tickN, hashSim(this.sim));
+      this.onTick();                                   // let the host drain per-tick events
     }
   }
 }
