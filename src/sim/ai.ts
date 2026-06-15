@@ -6,7 +6,7 @@
 
 import { Sim, Entity, Cmd } from './sim';
 import { UNITS, BUILDINGS, TICKS_PER_SEC } from './data';
-import { W, H, nearestPassable } from './map';
+import { W, H, nearestPassable, nearestSea } from './map';
 import { findPath } from './path';
 
 interface AiMem {
@@ -380,6 +380,16 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
     }
   }
 
+  // island invasion fleet: a transport ship to ferry the ground army across the
+  // water (the air force and navy alone can't capture a base — boots on the
+  // ground finish it). Build one (two on a true island) once a landing force exists.
+  const syT = (myB['shipyard'] || []).find(b => b.progress >= b.total && b.queue.length < 2);
+  if (syT && island) {
+    const landForce = nU('tank') + nU('heavy') + nU('ifv') + nU('mlrs') + nU('aatank') + nU('rifle') + nU('rocket');
+    if (nU('transport') < 2 && landForce >= 4 && pl.credits > 1400)
+      cmds.push({ k: 'train', p, bid: syT.id, type: 'transport' });
+  }
+
   // counter a submarine raid on the base: a cloaked sub harassing the buildings
   // can only be answered with sonar — rush idle Sub Hunters / Destroyers / a Heli
   // at it (they detect + depth-charge/rocket it). Checked ~once a second.
@@ -513,6 +523,46 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
           mem.waveSize = Math.min(cap - 6, mem.waveSize + L.wInc);
         } else mem.nextWave = sim.tickN + 8 * TICKS_PER_SEC;
       }
+    }
+  }
+
+  // === amphibious invasion: ferry the ground army across the water and assault ===
+  // Air and ships soften the enemy island; transports deliver the killing blow.
+  // Stateless cycle per transport: empty+away -> sail home; empty+home -> load;
+  // loaded+far -> sail to the enemy coast; loaded+near -> unload. Freshly-landed
+  // ground units near the enemy then get attack orders.
+  if (island) {
+    const transports = myU['transport'] || [];
+    const enemyB = nearestEnemyBuilding(sim, p);
+    const base = basePos(sim, p);
+    if (enemyB && transports.length) {
+      for (const tr of transports) {
+        if (tr.hp <= 0) continue;
+        const cargo = tr.cargoUnits?.length || 0;
+        if (cargo === 0) {
+          if (Math.hypot(tr.x - base.x, tr.z - base.z) > 22) {
+            cmds.push({ k: 'move', p, ids: [tr.id], x: base.x, z: base.z }); // return for the next load
+          } else {
+            const force = armyOf(sim, p, true)
+              .filter(u => { const k = UNITS[u.type].kind; return (k === 'inf' || k === 'veh') && Math.hypot(u.x - base.x, u.z - base.z) < 28; })
+              .slice(0, 40);
+            if (force.length >= 4) cmds.push({ k: 'load', p, ids: force.map(u => u.id), tgt: tr.id });
+          }
+        } else {
+          // loaded: sail to a sea cell on the ENEMY coast, then unload on arrival
+          // (the enemy base may sit well inland, so we target its shore, not it)
+          const sea = nearestSea(sim.map, Math.round(enemyB.x), Math.round(enemyB.z), 48);
+          if (sea && Math.hypot(tr.x - (sea.x + 0.5), tr.z - (sea.z + 0.5)) > 4) {
+            cmds.push({ k: 'move', p, ids: [tr.id], x: sea.x + 0.5, z: sea.z + 0.5 });
+          } else {
+            cmds.push({ k: 'unload', p, ids: [tr.id] }); // at the coast — drop the troops
+          }
+        }
+      }
+      // landed units (idle, on the enemy's landmass) press the attack
+      const landed = armyOf(sim, p, true)
+        .filter(u => { const k = UNITS[u.type].kind; return (k === 'inf' || k === 'veh') && Math.hypot(u.x - enemyB.x, u.z - enemyB.z) < 32; });
+      if (landed.length) cmds.push({ k: 'attack', p, ids: landed.map(u => u.id), tgt: enemyB.id, x: enemyB.x, z: enemyB.z });
     }
   }
 
