@@ -6,6 +6,7 @@ server.mjs
 batch-progress.txt
 batch-results.json
 ai-profile.json
+feature-requests.json
 replays/
 *.log
 .DS_Store

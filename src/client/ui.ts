@@ -845,25 +845,18 @@ export class UI {
         ctx.fillRect(p.x - w / 2, p.y + 3, w * Math.min(1, v.pr), 2);
       }
     }
-    // cargo fill % above my harvesters / oil miners (rises while gathering, drops
-    // to 0 on unload) so you can see at a glance how loaded each one is
-    {
-      ctx.font = 'bold 10px system-ui';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      for (const v of views) {
-        if (v.cg === undefined || v.o !== me) continue;
-        const p = project(v.x, v.z, 1.7);
-        if (!p.ok) continue;
-        const pct = Math.round(v.cg * 100);
-        const txt = pct + '%';
-        const tw = ctx.measureText(txt).width;
-        ctx.fillStyle = 'rgba(0,0,0,0.6)';
-        ctx.fillRect(p.x - tw / 2 - 3, p.y - 7, tw + 6, 12);
-        ctx.fillStyle = pct >= 100 ? '#57d977' : pct > 0 ? '#ffd24a' : '#9fb4c2';
-        ctx.fillText(txt, p.x, p.y - 1);
-      }
-      ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+    // cargo progress bar above my harvesters / oil miners while they're working —
+    // fills (gold) as they gather, turns green when full, empties on unload
+    for (const v of views) {
+      if (v.cg === undefined || v.o !== me) continue;
+      if (!v.hv && v.cg <= 0) continue;          // only while harvesting / carrying
+      const p = project(v.x, v.z, 1.7);
+      if (!p.ok) continue;
+      const w = 22, frac = Math.max(0, Math.min(1, v.cg));
+      ctx.fillStyle = 'rgba(0,0,0,0.65)';
+      ctx.fillRect(p.x - w / 2 - 1, p.y - 4, w + 2, 5);
+      ctx.fillStyle = frac >= 1 ? '#57d977' : '#e0ad28';
+      ctx.fillRect(p.x - w / 2, p.y - 3, w * frac, 3);
     }
     // "packing up" indicator: a pulsing amber up-chevron above any unit that is
     // un-fortifying (pulling up stakes), so it reads clearly as leaving its dig-in

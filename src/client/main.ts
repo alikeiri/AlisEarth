@@ -85,6 +85,7 @@ function simViews(sim: Sim, a: number): any[] {
       if (e.hzr && e.hzr > 0) { v.hzx = e.hzx; v.hzz = e.hzz; v.hzr = e.hzr; }
       if (e.holdFire) v.hf = 1;
       if (e.orders[0]?.k === 'patrol') v.pa = 1;
+      if (e.orders[0]?.k === 'harvest') v.hv = 1; // actively on a gather/deliver run
       if (e.cargoUnits && e.cargoUnits.length) v.cu = e.cargoUnits.length; // transport: units aboard
       { const cap = UNITS[e.type]?.cargo; if (cap) v.cg = Math.max(0, Math.min(1, e.cargo / cap)); } // harvester/oil-miner fill %
       if (e.wpLoop && e.wpLoop.length) v.lp = 1;                          // waypoint repeat on
@@ -2457,7 +2458,7 @@ function buildTeamRow() {
 }
 
 function show(id: string) {
-  for (const s of ['menu', 'mpLobby', 'lobby', 'endScreen']) $(s).classList.toggle('hidden', s !== id);
+  for (const s of ['menu', 'mpLobby', 'lobby', 'endScreen', 'features']) $(s).classList.toggle('hidden', s !== id);
   if (id === 'menu') { rollCallsign(); renderAiIntel(); } // fresh name + AI study readout
 }
 
@@ -2521,7 +2522,7 @@ function rollCallsign() {
   inp.value = pick;
 }
 function hideAll() {
-  for (const s of ['menu', 'mpLobby', 'lobby', 'endScreen']) $(s).classList.add('hidden');
+  for (const s of ['menu', 'mpLobby', 'lobby', 'endScreen', 'features']) $(s).classList.add('hidden');
 }
 
 function buildFactionCards() {
@@ -3154,6 +3155,37 @@ function initMenus() {
       net.send({ t: 'hello', name: playerName(), faction: selFaction });
       show('mpLobby');
     } catch (e: any) { $('menuErr').textContent = e.message + ' — is the Node server running?'; }
+  });
+  // FEATURE REQUESTS: a public suggestion box (stored server-side, human-reviewed)
+  const loadFeatures = async () => {
+    const list = $('frList'), count = $('frCount');
+    try {
+      const res = await fetch('/features');
+      const items: any[] = res.ok ? await res.json() : [];
+      count.textContent = String(items.length);
+      const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      list.innerHTML = items.length
+        ? items.slice().reverse().slice(0, 100).map(it =>
+            `<div style="padding:4px 0;border-bottom:1px solid #1d2935"><span style="color:#7bdcff">${esc(String(it.name || 'Anonymous'))}</span> ` +
+            `<span style="color:#5f7384;font-size:10px">${new Date(it.date).toLocaleDateString()}</span><br>${esc(String(it.text || ''))}</div>`).join('')
+        : '<span style="color:#5f7384">No requests yet — be the first!</span>';
+    } catch { list.innerHTML = '<span style="color:#5f7384">Feature requests live on the game server — open the deployed site.</span>'; }
+  };
+  $('btnFeatures').addEventListener('click', () => { $('frErr').textContent = ''; show('features'); loadFeatures(); });
+  $('frBack').addEventListener('click', () => show('menu'));
+  $('frSubmit').addEventListener('click', async () => {
+    const text = ($('frText') as HTMLTextAreaElement).value.trim();
+    const name = ($('frName') as HTMLInputElement).value.trim();
+    const err = $('frErr');
+    if (!text) { err.textContent = 'Type a request first.'; return; }
+    err.textContent = '';
+    try {
+      const res = await fetch('/features', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text, name }) });
+      if (!res.ok) { err.textContent = res.status === 429 ? 'Slow down a moment, then try again.' : 'Could not submit — try again.'; return; }
+      ($('frText') as HTMLTextAreaElement).value = '';
+      err.textContent = '✓ Thanks! Your request was saved.';
+      loadFeatures();
+    } catch { err.textContent = 'Feature requests need the deployed game server.'; }
   });
   // create a game others can see and join from the lobby
   $('btnMpCreate').addEventListener('click', () => {

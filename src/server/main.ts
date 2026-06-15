@@ -128,11 +128,47 @@ function handleIntel(req: any, res: any) {
   });
 }
 
+// ---- feature requests: a public suggestion box. Anyone can submit; everything
+// is appended and persisted. This is a STORE ONLY — submissions are data, never
+// executed or auto-deployed; a human reviews them before anything is built. ----
+const FEATURES_FILE = join(fileURLToPath(new URL('.', import.meta.url)), 'feature-requests.json');
+function readFeatures(): any[] { try { return JSON.parse(readFileSync(FEATURES_FILE, 'utf8')); } catch { return []; } }
+const featLast = new Map<string, number>();
+function handleFeatures(req: any, res: any) {
+  if (req.method === 'GET') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(readFeatures().slice(-300)));
+    return;
+  }
+  if (req.method !== 'POST') { res.writeHead(405); res.end(); return; }
+  const ip = (req.socket?.remoteAddress || '') as string;
+  const now = Date.now();
+  if (now - (featLast.get(ip) || 0) < 4000) { res.writeHead(429); res.end(); return; } // anti-spam
+  let raw = '';
+  req.on('data', (c: Buffer) => { raw += c; if (raw.length > 4096) req.destroy(); });
+  req.on('end', () => {
+    try {
+      const j = JSON.parse(raw);
+      const text = String(j.text || '').trim().slice(0, 600);
+      const name = (String(j.name || '').trim().slice(0, 40)) || 'Anonymous';
+      if (!text) { res.writeHead(400); res.end(); return; }
+      featLast.set(ip, now);
+      const list = readFeatures();
+      list.push({ text, name, date: now });
+      while (list.length > 1000) list.shift(); // bounded
+      writeFileSync(FEATURES_FILE, JSON.stringify(list));
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, count: list.length }));
+    } catch { res.writeHead(400); res.end(); }
+  });
+}
+
 const http = createServer(async (req, res) => {
   try {
     let p = (req.url || '/').split('?')[0];
     if (req.method === 'POST' && p === '/advisor') { handleAdvisor(req, res); return; }
     if (p === '/intel') { handleIntel(req, res); return; }
+    if (p === '/features') { handleFeatures(req, res); return; }
     if (req.method === 'GET' && p === '/replays') {
       let idx = '[]';
       try { idx = readFileSync(REPLAY_INDEX, 'utf8'); } catch { /* none yet */ }
