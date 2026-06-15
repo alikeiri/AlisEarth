@@ -29,7 +29,7 @@ class Hasher {
   hex() { return (this.h >>> 0).toString(16).padStart(8, '0'); }
 }
 
-function hashState(sim: any): string {
+export function hashSim(sim: any): string {
   const h = new Hasher();
   const ents = [...sim.ents.values()].sort((a: any, b: any) => a.id - b.id);
   h.u32(ents.length);
@@ -57,9 +57,9 @@ export function runDeterminismProbe(seed: number, size = 112, ticks = 3000, samp
     const cmds: any[] = [];
     for (let p = 0; p < 2; p++) cmds.push(...aiTick(sim, p));
     sim.tick(cmds);
-    if (sim.tickN % sampleEvery === 0) samples.push({ tick: sim.tickN, hash: hashState(sim), ents: sim.ents.size });
+    if (sim.tickN % sampleEvery === 0) samples.push({ tick: sim.tickN, hash: hashSim(sim), ents: sim.ents.size });
   }
-  return { seed, size, ticks: sim.tickN, samples, final: hashState(sim) };
+  return { seed, size, ticks: sim.tickN, samples, final: hashSim(sim) };
 }
 
 // Isolated canary for ONLY the transcendentals the sim actually uses on its

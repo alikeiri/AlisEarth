@@ -10,6 +10,7 @@ import { UI } from './ui';
 import { Net } from './net';
 import { audio } from './audio';
 import { runDeterminismProbe, mathCanary, detMathCanary } from '../sim/determinism';
+import { runNetlessLockstep } from '../sim/lockstep';
 
 // lockstep determinism gate (available from page load, even on the menu): run
 // these in two browser engines and diff the digests — same hashes = cross-engine
@@ -19,6 +20,8 @@ import { runDeterminismProbe, mathCanary, detMathCanary } from '../sim/determini
 (window as any).__detsim = (seed = 12345, ticks = 3000, size = 112) => runDeterminismProbe(seed >>> 0, size, ticks);
 (window as any).__detmath = () => mathCanary();
 (window as any).__detmathDet = () => detMathCanary();
+// netless lockstep validation: two in-process sims through a fake lossy link
+(window as any).__lockstep = (seed = 12345, ticks = 1000, opts = {}) => runNetlessLockstep(seed >>> 0, ticks, opts);
 
 // build stamp, injected by vite (see vite.config.ts)
 declare const __APP_REV__: string;
