@@ -70,6 +70,8 @@ export const UNITS: Record<string, UnitDef> = {
   // oil economy: dedicated miners that work OIL wells and refine them at the Ore Refinery
   oiltruck: { name: 'Oil Miner',  cost: 1000, hp: 480, speed: 1.7, range: 0,   dmg: 0,  rof: 1,   builtAt: 'factory',  buildTime: 13, kind: 'veh', cargo: 450, oilMiner: true },
   oilship:  { name: 'Oil Rig Ship', cost: 1150, hp: 540, speed: 2.8, range: 0, dmg: 0,  rof: 1,   builtAt: 'shipyard', buildTime: 13, kind: 'sea', move: 'sea', cargo: 520, oilMiner: true },
+  // sea counterpart to the Engineer: repairs friendly ships (and coastal structures) on the water
+  navengineer: { name: 'Naval Engineer', cost: 700, hp: 240, speed: 2.6, range: 0, dmg: 0, rof: 1, builtAt: 'shipyard', buildTime: 11, kind: 'sea', move: 'sea', repair: true },
   // TEWS: electronic-warfare vehicle — jams enemy radar/satellite in a bubble and
   // pulses an area EMP that only fries drones (harmless to everything else)
   tews:   { name: 'TEWS',         cost: 1600, hp: 360, speed: 2.2, range: 0, dmg: 0, rof: 1, builtAt: 'factory', buildTime: 14, kind: 'veh', jam: 12, droneEmp: { range: 10, dmg: 22, cd: 1.5 } },

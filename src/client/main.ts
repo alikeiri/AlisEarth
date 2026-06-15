@@ -1682,8 +1682,8 @@ class GameClient {
     if (!ids.length) return;
 
     audio.play('confirm');
-    // engineers: right-click a damaged friendly unit/building to repair it
-    const hasEngineer = ids.some(id => this.byId.get(id)?.t === 'engineer');
+    // engineers (land or naval): right-click a damaged friendly unit/building to repair it
+    const hasEngineer = ids.some(id => UNITS[this.byId.get(id)?.t]?.repair);
     if (hasEngineer) {
       const friendly = this.pickView(sx, sy, v => v.o === me && v.h < v.m && !ids.includes(v.i));
       if (friendly) {

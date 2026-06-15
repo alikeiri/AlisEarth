@@ -19,7 +19,7 @@ const U_ICONS: Record<string, string> = {
   subhunter: '\u{1F42C}', mslcruiser: '\u{1F6A2}', flakship: '\u{1F387}', transport: '\u{26F4}️',
   fighter: '\u{1F6E9}️', bomber: '\u{1F4A3}', dbomber: '\u{1F916}', heli: '\u{1F681}', helidrone: '\u{1FA81}',
   mcv: '\u{1F3D7}️', dozer: '\u{1F69C}', patriot: '\u{1F6F0}️',
-  oiltruck: '\u{1F6E2}️', oilship: '\u{1F6E2}️', tews: '\u{1F4E1}',
+  oiltruck: '\u{1F6E2}️', oilship: '\u{1F6E2}️', tews: '\u{1F4E1}', navengineer: '\u{1F6E0}️',
 };
 export const B_LIST = ['power', 'refinery', 'radar', 'barracks', 'factory', 'turret', 'sam', 'cannon', 'tesla', 'irondome', 'wall', 'barrier', 'dronefac', 'shipyard', 'airforce', 'airfield', 'lab', 'silo'];
 
@@ -38,7 +38,7 @@ const UPG_INFO: Record<string, string> = {
 };
 export const U_LIST = ['rifle', 'rocket', 'melody', 'hive', 'tank', 'heavy', 'ifv', 'aatank', 'flak', 'patriot', 'fueltruck', 'harv', 'oiltruck', 'engineer', 'mcv', 'dozer', 'mlrs', 'recon', 'strike', 'msldrone',
   'tews', 'chemtrooper', 'chemtank', 'chemdrone', 'biotrooper', 'biotank', 'biodrone', 'stealthtank',
-  'gunboat', 'destroyer', 'sub', 'subhunter', 'mslcruiser', 'flakship', 'navdrone', 'oilship', 'transport', 'fighter', 'bomber', 'dbomber', 'heli', 'helidrone',
+  'gunboat', 'destroyer', 'sub', 'subhunter', 'mslcruiser', 'flakship', 'navdrone', 'oilship', 'navengineer', 'transport', 'fighter', 'bomber', 'dbomber', 'heli', 'helidrone',
   'cmissile', 'bbmissile', 'chemissile'];
 
 // strengths/weaknesses tooltip, derived from the live damage matrix so it can
@@ -94,6 +94,7 @@ const DESCRIPTIONS: Record<string, string> = {
   harv: 'Harvester: gathers ore and returns it to a refinery. Unarmed.',
   oiltruck: 'Oil Miner: works land OIL wells and refines them at the Ore Refinery for credits. Unarmed.',
   oilship: 'Oil Rig Ship: works offshore OIL wells and pumps the oil to a coastal Ore Refinery. Unarmed.',
+  navengineer: 'Naval Engineer: repairs friendly ships (and coastal structures) out on the water. Unarmed. Right-click a damaged ship to repair; right-drag to set an auto-repair zone.',
   tews: 'TEWS: jams enemy Radar Dome + Spy Satellite vision in a bubble (their units’ own eyes and Patriots still see). Pulses an area EMP that only damages drones.',
   mcv: 'Construction Vehicle: deploys (F) into a new Construction Yard for a forward base.',
   dozer: 'Bulldozer: reshapes terrain (T) — raise/lower ground, build land bridges.',
@@ -429,7 +430,7 @@ export class UI {
       const kbd = (k: string, label: string) => `<span class="kbd">${k}</span>${label}`;
       if (units.length) {
         parts.push(kbd('RMB', 'move / attack' + (units.some(u => u.t === 'harv') ? ' / harvest' : '')));
-        if (units.some(u => u.t === 'engineer')) parts.push(kbd('RMB', 'repair') + ' · ' + kbd('B', 'build road'));
+        if (units.some(u => UNITS[u.t]?.repair)) parts.push(kbd('RMB', 'repair') + (units.some(u => UNITS[u.t]?.road) ? ' · ' + kbd('B', 'build road') : ''));
         if (units.some(u => u.t === 'hive')) parts.push(kbd('F', 'fortify / deploy'));
         if (units.some(u => u.t === 'mcv')) parts.push(kbd('F', 'deploy forward base'));
         if (units.some(u => u.t === 'dozer')) parts.push(kbd('T', 'terraform (drag an area, then mouse up/down sets height, click to build)'));

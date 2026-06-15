@@ -312,7 +312,7 @@ function unitGeoSmooth(type: string): [THREE.BufferGeometry, THREE.BufferGeometr
   const ALIAS: Record<string, string> = {
     hive: 'harv', minidrone: 'recon', melodydrone: 'recon', chemtrooper: 'rifle', biotrooper: 'rifle',
     chemtank: 'tank', biotank: 'tank', stealthtank: 'tank', chemdrone: 'recon', biodrone: 'recon',
-    mcv: 'harv', dozer: 'harv', oiltruck: 'harv', oilship: 'gunboat', tews: 'mlrs', transport: 'destroyer',
+    mcv: 'harv', dozer: 'harv', oiltruck: 'harv', oilship: 'gunboat', tews: 'mlrs', transport: 'destroyer', navengineer: 'gunboat',
   };
   if (ALIAS[type]) type = ALIAS[type];
   const B: THREE.BufferGeometry[] = [], A: THREE.BufferGeometry[] = [];
@@ -985,7 +985,7 @@ export class Renderer {
     for (const t of ['rifle', 'rocket', 'melody', 'tank', 'heavy', 'harv', 'engineer', 'recon', 'strike', 'msldrone', 'mlrs',
       'gunboat', 'destroyer', 'sub', 'navdrone', 'fighter', 'bomber', 'dbomber', 'heli', 'helidrone',
       'hive', 'minidrone', 'melodydrone', 'chemtrooper', 'chemtank', 'chemdrone', 'biotrooper', 'biotank', 'biodrone', 'stealthtank',
-      'oiltruck', 'oilship', 'tews', 'transport']) {
+      'oiltruck', 'oilship', 'tews', 'transport', 'navengineer']) {
       const [body, accent] = unitGeoSmooth(t);
       const bm = new THREE.InstancedMesh(body, new THREE.MeshStandardMaterial({ vertexColors: true, map: armorTex(), roughness: 0.72, metalness: 0.2 }), MAX_INST);
       const am = new THREE.InstancedMesh(accent, new THREE.MeshStandardMaterial({ color: 0xffffff, map: detailTex(), roughness: 0.5, metalness: 0.25 }), MAX_INST);
