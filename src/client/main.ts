@@ -1472,8 +1472,11 @@ class GameClient {
 
   // recompute the fog mask from my units' sight: demote visible→explored,
   // then light up cells around everything I own
+  private natMask: Uint8Array | null = null; // cells seen by NATURAL sight (not radar/satellite) — TEWS can't jam these
   private updateFog(allViews: any[]) {
     const f = this.fog!;
+    if (!this.natMask || this.natMask.length !== f.length) this.natMask = new Uint8Array(f.length);
+    const nat = this.natMask; nat.fill(0);
     for (let i = 0; i < f.length; i++) if (f[i] === 2) f[i] = 1;
     const players = this.game.players?.() || [];
     const powered = (owner: number) => { const p = players[owner]; return !p || (p.pm ?? 1) >= (p.pu ?? 0); };
@@ -1481,15 +1484,36 @@ class GameClient {
       if (!this.allies.has(v.o)) continue; // my team (incl. allies) grants vision
       const def = (UNITS as any)[v.t] || (BUILDINGS as any)[v.t];
       let sight = v.b ? 7 : Math.max(5, (def?.range || 4) + 3);
-      // explicit sight reveals far (Radar Dome, Patriot). The Radar Dome's wide
-      // sweep needs power and a finished build; otherwise it sees like any building.
-      if (def?.sight && !(v.b && (powered(v.o) === false || (v.pr ?? 1) < 1))) sight = def.sight;
+      // the Radar Dome's wide sweep is long-range INTEL (jammable by a TEWS); a
+      // unit's own eyes and a deployed Patriot are NATURAL sight (never jammed).
+      const radar = !!(v.b && def?.sight) && !(powered(v.o) === false || (v.pr ?? 1) < 1);
+      if (radar) sight = def.sight;
       if (!v.b && v.t === 'patriot' && v.fo) sight = 20; // fortified Patriot: bigger deployed radar
       const cx = Math.floor(v.x), cz = Math.floor(v.z), r = Math.ceil(sight);
       for (let dz = -r; dz <= r; dz++) for (let dx = -r; dx <= r; dx++) {
         if (dx * dx + dz * dz > sight * sight) continue;
         const x = cx + dx, z = cz + dz;
-        if (x >= 0 && z >= 0 && x < W && z < H) f[z * W + x] = 2;
+        if (x >= 0 && z >= 0 && x < W && z < H) { const i = z * W + x; f[i] = 2; if (!radar) nat[i] = 1; }
+      }
+    }
+  }
+
+  // enemy TEWS units jam radar + satellite intel inside their bubble: any cell
+  // there that was lit ONLY by long-range intel (not natural sight) goes dark.
+  private applyJamming(allViews: any[]) {
+    const f = this.fog, nat = this.natMask;
+    if (!f || !nat) return;
+    for (const v of allViews) {
+      if (v.b || this.allies.has(v.o)) continue;
+      const jam = (UNITS as any)[v.t]?.jam;
+      if (!jam) continue;
+      const cx = Math.floor(v.x), cz = Math.floor(v.z), r = Math.ceil(jam), R2 = jam * jam;
+      for (let dz = -r; dz <= r; dz++) for (let dx = -r; dx <= r; dx++) {
+        if (dx * dx + dz * dz > R2) continue;
+        const x = cx + dx, z = cz + dz;
+        if (x < 0 || z < 0 || x >= W || z >= H) continue;
+        const i = z * W + x;
+        if (f[i] === 2 && nat[i] !== 1) f[i] = 1; // strip intel-only vision
       }
     }
   }
@@ -1925,6 +1949,9 @@ class GameClient {
       // Spy Satellite: full-map visibility — but only while it's online (powered
       // and a Research Lab still stands); if it goes dark, fog returns
       if (plList[this.game.me]?.satOk) this.fog.fill(2);
+      // enemy TEWS jamming strips radar/satellite intel inside its bubble (run
+      // AFTER the satellite fill so it can claw that vision back)
+      this.applyJamming(allViews);
       const f = this.fog;
       views = allViews.filter(v => {
         if (this.allies.has(v.o)) return true;

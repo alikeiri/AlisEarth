@@ -39,6 +39,8 @@ export interface UnitDef {
   terra?: boolean;                               // bulldozer: can reshape terrain along a drawn path
   unique?: boolean;                              // at most one alive (or in production) per player
   oilMiner?: boolean;                            // mines OIL wells (not ore) and refines them for credits
+  jam?: number;                                  // TEWS: jams enemy radar/satellite vision within this radius
+  droneEmp?: { range: number; dmg: number; cd: number }; // TEWS: area EMP pulse that only hurts drones
   amphibious?: boolean;                          // can travel over BOTH land and water
   carrier?: boolean;                             // transport ship: carries ground units across water (load/unload)
   altBuiltAt?: string;                           // a second building that can also produce this unit
@@ -68,6 +70,9 @@ export const UNITS: Record<string, UnitDef> = {
   // oil economy: dedicated miners that work OIL wells and refine them at the Ore Refinery
   oiltruck: { name: 'Oil Miner',  cost: 1000, hp: 480, speed: 1.7, range: 0,   dmg: 0,  rof: 1,   builtAt: 'factory',  buildTime: 13, kind: 'veh', cargo: 450, oilMiner: true },
   oilship:  { name: 'Oil Rig Ship', cost: 1150, hp: 540, speed: 2.8, range: 0, dmg: 0,  rof: 1,   builtAt: 'shipyard', buildTime: 13, kind: 'sea', move: 'sea', cargo: 520, oilMiner: true },
+  // TEWS: electronic-warfare vehicle — jams enemy radar/satellite in a bubble and
+  // pulses an area EMP that only fries drones (harmless to everything else)
+  tews:   { name: 'TEWS',         cost: 1600, hp: 360, speed: 2.2, range: 0, dmg: 0, rof: 1, builtAt: 'factory', buildTime: 14, kind: 'veh', jam: 12, droneEmp: { range: 10, dmg: 22, cd: 1.5 } },
   recon:  { name: 'Recon Drone',  cost: 400,  hp: 70,  speed: 3.4, range: 4.0, dmg: 6,  rof: 0.6, builtAt: 'dronefac', buildTime: 7,  kind: 'air', fly: true },
   strike: { name: 'Strike Drone', cost: 1100, hp: 150, speed: 2.8, range: 5.0, dmg: 32, rof: 1.8, builtAt: 'dronefac', buildTime: 13, kind: 'air', fly: true },
   msldrone: { name: 'Missile Drone', cost: 1500, hp: 120, speed: 2.4, range: 7.0, dmg: 45, rof: 3.0, builtAt: 'dronefac', buildTime: 15, kind: 'air', fly: true },

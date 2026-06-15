@@ -1,7 +1,7 @@
 // Authoritative game simulation. Fixed timestep (10 Hz), no rendering imports.
 // Runs in the browser for skirmish and on the Node server for multiplayer.
 
-import { TICK, UNITS, BUILDINGS, FACTIONS, Faction, dmgMul, AIRFIELD_CAP, UPG_MAX, upgCost, ORE_VALUE, START_CREDITS, ORE_REGEN, ORE_REGEN_CAP, TECHS } from './data';
+import { TICK, UNITS, BUILDINGS, FACTIONS, Faction, dmgMul, AIRFIELD_CAP, UPG_MAX, upgCost, ORE_VALUE, START_CREDITS, ORE_REGEN, ORE_REGEN_CAP, TECHS, DRONE_TYPES } from './data';
 import { hyp, dsin, dcos } from './dmath';
 import { GameMap, genMap, nearestPassable, nearestSea, W, H, SEA } from './map';
 import { findPath } from './path';
@@ -1286,6 +1286,20 @@ export class Sim {
   private tickUnit(u: Entity) {
     const def = UNITS[u.type];
     u.cd -= TICK;
+
+    // TEWS area EMP: a periodic pulse that ONLY damages enemy drones in range
+    // (and briefly stuns survivors). Harmless to infantry/vehicles/aircraft/ships.
+    if (def.droneEmp && u.cd <= 0) {
+      const e = def.droneEmp; let hit = false;
+      for (const o of this.nearbyUnits(u.x, u.z, e.range)) {
+        if (o.b || o.hp <= 0 || !this.foe(o.owner, u.owner) || !DRONE_TYPES.has(o.type)) continue;
+        if ((o.x - u.x) * (o.x - u.x) + (o.z - u.z) * (o.z - u.z) > e.range * e.range) continue;
+        this.dealDamage(u, o, e.dmg); hit = true;
+        if (o.hp > 0) o.stunT = Math.max(o.stunT || 0, 0.6);
+      }
+      u.cd = e.cd;
+      if (hit) this.events.push({ e: 'emp', x: u.x, z: u.z });
+    }
 
     // proximity mine: lie dormant until an enemy ground unit steps within the
     // trigger radius, then detonate in an area blast (aircraft fly safely over)
