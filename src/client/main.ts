@@ -82,6 +82,17 @@ function simViews(sim: Sim, a: number): any[] {
       if (e.holdFire) v.hf = 1;
       if (e.orders[0]?.k === 'patrol') v.pa = 1;
       if (e.cargoUnits && e.cargoUnits.length) v.cu = e.cargoUnits.length; // transport: units aboard
+      if (e.wpLoop && e.wpLoop.length) v.lp = 1;                          // waypoint repeat on
+      if (e.orders && e.orders.length) {                                  // remaining waypoints (for the path overlay)
+        const wp: { x: number; z: number; a: number }[] = [];
+        for (const o of e.orders) {
+          if (o.k === 'move' || o.k === 'force') wp.push({ x: o.x!, z: o.z!, a: o.k === 'force' ? 1 : 0 });
+          else if (o.k === 'harvest' && o.ox !== undefined) wp.push({ x: o.ox + 0.5, z: o.oz! + 0.5, a: 0 });
+          else if (o.k === 'attack' && o.tgt != null) { const t = sim.ents.get(o.tgt); if (t) wp.push({ x: t.x, z: t.z, a: 1 }); }
+          if (wp.length >= 24) break;
+        }
+        if (wp.length) v.wp = wp;
+      }
     }
     out.push(v);
   }
@@ -654,6 +665,10 @@ class GameClient {
         if (pb) {
           this.game.issue({ k: 'repeat', p: this.game.me, bid: pb.i, on: !pb.rp });
           audio.play('click');
+        } else {
+          // units: toggle waypoint repeat (loop the queued waypoints until cancelled)
+          const ids = this.myUnitIds();
+          if (ids.length) { this.game.issue({ k: 'wprepeat', p: this.game.me, ids }); audio.play('click'); }
         }
       }
       if (e.code === 'KeyP' && (this.myUnitIds().length || this.selectedProdBuilding())) {
@@ -2036,29 +2051,42 @@ class GameClient {
 
     // shift-queued waypoint trail: a dotted chain through the queued points so
     // the player can see the route their selection will follow, in click order
-    if (this.wpTrail.length) {
+    // waypoint paths overlay. While SHIFT is held, every selected unit shows its
+    // REMAINING route (re-derived from its live orders), with a closed amber loop
+    // when repeat is on. Otherwise the freshly-issued chain flashes briefly.
+    type WP = { x: number; z: number; atk: boolean };
+    const ctxW = this.overlayCtx;
+    const drawPath = (anchor: WP | null, pts: WP[], loop: boolean) => {
+      if (!pts.length) return;
+      const proj = pts.map(w => ({ w, p: this.renderer.project(w.x, w.z, 0.3) }));
+      const a = anchor ? this.renderer.project(anchor.x, anchor.z, 0.3) : null;
+      ctxW.strokeStyle = loop ? 'rgba(255,200,90,0.6)' : 'rgba(120,210,255,0.55)';
+      ctxW.lineWidth = 2; ctxW.setLineDash(loop ? [4, 4] : [6, 5]);
+      ctxW.beginPath();
+      if (a && a.ok) ctxW.moveTo(a.x, a.y);
+      proj.forEach((q, i) => { if (!q.p.ok) return; (i === 0 && !(a && a.ok)) ? ctxW.moveTo(q.p.x, q.p.y) : ctxW.lineTo(q.p.x, q.p.y); });
+      if (loop && a && a.ok) ctxW.lineTo(a.x, a.y); // close the loop back to the unit
+      ctxW.stroke(); ctxW.setLineDash([]);
+      proj.forEach((q, i) => {
+        if (!q.p.ok) return;
+        ctxW.fillStyle = q.w.atk ? 'rgba(255,90,70,0.92)' : loop ? 'rgba(255,200,90,0.95)' : 'rgba(120,210,255,0.92)';
+        ctxW.beginPath(); ctxW.arc(q.p.x, q.p.y, 7, 0, Math.PI * 2); ctxW.fill();
+        ctxW.fillStyle = '#06121a'; ctxW.font = 'bold 10px system-ui'; ctxW.textAlign = 'center'; ctxW.textBaseline = 'middle';
+        ctxW.fillText(String(i + 1), q.p.x, q.p.y + 0.5);
+      });
+    };
+    const shiftHeld = this.keys.has('ShiftLeft') || this.keys.has('ShiftRight');
+    if (shiftHeld && this.myUnitIds().length) {
+      for (const id of this.myUnitIds()) {
+        const v = this.byId.get(id);
+        if (v && v.wp && v.wp.length) drawPath({ x: v.x, z: v.z, atk: false }, v.wp.map((w: any) => ({ x: w.x, z: w.z, atk: w.a === 1 })), !!v.lp);
+      }
+    } else if (this.wpTrail.length) {
       if (performance.now() - this.wpT > 12000 || !this.myUnitIds().length) this.wpTrail = [];
       else {
-        const ctx = this.overlayCtx;
-        const pts = this.wpTrail.map(w => this.renderer.project(w.x, w.z, 0.3)).filter(p => p.ok);
-        // line from the selection's centre through each waypoint
         let sx = 0, sz = 0, n = 0;
         for (const id of this.myUnitIds()) { const v = this.byId.get(id); if (v) { sx += v.x; sz += v.z; n++; } }
-        const start = n ? this.renderer.project(sx / n, sz / n, 0.3) : null;
-        ctx.strokeStyle = 'rgba(120,210,255,0.55)'; ctx.lineWidth = 2; ctx.setLineDash([6, 5]);
-        ctx.beginPath();
-        if (start && start.ok) ctx.moveTo(start.x, start.y);
-        for (let i = 0; i < pts.length; i++) (i === 0 && !(start && start.ok)) ? ctx.moveTo(pts[i].x, pts[i].y) : ctx.lineTo(pts[i].x, pts[i].y);
-        ctx.stroke(); ctx.setLineDash([]);
-        // numbered waypoint pips
-        this.wpTrail.forEach((w, i) => {
-          const p = this.renderer.project(w.x, w.z, 0.3);
-          if (!p.ok) return;
-          ctx.fillStyle = w.atk ? 'rgba(255,90,70,0.92)' : 'rgba(120,210,255,0.92)';
-          ctx.beginPath(); ctx.arc(p.x, p.y, 7, 0, Math.PI * 2); ctx.fill();
-          ctx.fillStyle = '#06121a'; ctx.font = 'bold 10px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-          ctx.fillText(String(i + 1), p.x, p.y + 0.5);
-        });
+        drawPath(n ? { x: sx / n, z: sz / n, atk: false } : null, this.wpTrail.slice(), false);
       }
     }
 

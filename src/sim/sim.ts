@@ -54,6 +54,7 @@ export interface Entity {
   rzx?: number; rzz?: number; rzr?: number; // engineer: assigned auto-repair zone (centre + radius)
   hzx?: number; hzz?: number; hzr?: number; // harvester: assigned ore-gathering work area (centre + radius)
   cargoUnits?: Entity[]; // transport ship: ground units stowed aboard (removed from the map while carried)
+  wpLoop?: Order[]; // waypoint repeat: the saved chain to re-run when the orders empty (until cancelled)
   holdFire?: boolean; // weapons-hold: never fires, even when attacked, until toggled off
   forceTgt?: number; forceT?: number; // defensive building: force-fire target id + ticks left
 }
@@ -598,7 +599,17 @@ export class Sim {
     if (!units.length) return;
 
     if (c.k === 'stop') {
-      for (const u of units) { u.orders = []; u.path = null; u.terraPath = undefined; u.rzr = 0; u.cmdT = this.tickN; }
+      for (const u of units) { u.orders = []; u.path = null; u.terraPath = undefined; u.rzr = 0; u.wpLoop = undefined; u.cmdT = this.tickN; }
+      return;
+    }
+    if (c.k === 'wprepeat') {
+      // toggle waypoint repeat: capture the current positional order chain so the
+      // unit re-runs it forever once its orders empty (off = clear the saved loop)
+      for (const u of units) {
+        if (u.wpLoop) { u.wpLoop = undefined; continue; }
+        const loop = u.orders.filter(o => o.k === 'move' || o.k === 'attack' || o.k === 'harvest' || o.k === 'force').map(o => ({ ...o }));
+        if (loop.length) u.wpLoop = loop;
+      }
       return;
     }
     if (c.k === 'repairzone') {
@@ -682,7 +693,7 @@ export class Sim {
       // reshaped — just stop here) so the bulldozer is free to drive off
       if (u.terraPath) u.terraPath = undefined;
       if (c.q) u.orders.push(ord);
-      else { u.orders = [ord]; u.path = null; }
+      else { u.orders = [ord]; u.path = null; u.wpLoop = undefined; } // a fresh order cancels the repeat loop
     });
   }
 
@@ -1490,6 +1501,9 @@ export class Sim {
       }
     }
 
+    // waypoint repeat: finished the chain but repeat is on → run it again
+    if (!u.orders.length && u.wpLoop && u.wpLoop.length) { u.orders = u.wpLoop.map(o => ({ ...o })); u.path = null; }
+
     const ord = u.orders[0];
     if (!ord) return;
 
@@ -2287,6 +2301,17 @@ export class Sim {
         if (e.holdFire) v.hf = 1;
         if (e.orders[0]?.k === 'patrol') v.pa = 1;
         if (e.cargoUnits && e.cargoUnits.length) v.cu = e.cargoUnits.length;
+        if (e.wpLoop && e.wpLoop.length) v.lp = 1;
+        if (e.orders && e.orders.length) {
+          const wp: { x: number; z: number; a: number }[] = [];
+          for (const o of e.orders) {
+            if (o.k === 'move' || o.k === 'force') wp.push({ x: o.x!, z: o.z!, a: o.k === 'force' ? 1 : 0 });
+            else if (o.k === 'harvest' && o.ox !== undefined) wp.push({ x: o.ox + 0.5, z: o.oz! + 0.5, a: 0 });
+            else if (o.k === 'attack' && o.tgt != null) { const t = this.ents.get(o.tgt); if (t) wp.push({ x: t.x, z: t.z, a: 1 }); }
+            if (wp.length >= 24) break;
+          }
+          if (wp.length) v.wp = wp;
+        }
         if (e.rzr && e.rzr > 0) { v.rzx = e.rzx; v.rzz = e.rzz; v.rzr = e.rzr; }
         if (e.hzr && e.hzr > 0) { v.hzx = e.hzx; v.hzz = e.hzz; v.hzr = e.hzr; }
         if (e.cd > 0 && UNITS[e.type]?.dmg > 0) {
