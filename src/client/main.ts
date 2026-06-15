@@ -86,6 +86,7 @@ function simViews(sim: Sim, a: number): any[] {
       if (e.holdFire) v.hf = 1;
       if (e.orders[0]?.k === 'patrol') v.pa = 1;
       if (e.cargoUnits && e.cargoUnits.length) v.cu = e.cargoUnits.length; // transport: units aboard
+      { const cap = UNITS[e.type]?.cargo; if (cap) v.cg = Math.max(0, Math.min(1, e.cargo / cap)); } // harvester/oil-miner fill %
       if (e.wpLoop && e.wpLoop.length) v.lp = 1;                          // waypoint repeat on
       if (e.orders && e.orders.length) {                                  // remaining waypoints (for the path overlay)
         const wp: { x: number; z: number; a: number }[] = [];
@@ -804,10 +805,16 @@ class GameClient {
       this.hb.onmessage = () => {
         if (this.over) return;
         const now = performance.now();
-        if (now - this.lastRaf < 120) { this.lastHidden = 0; return; } // rAF is healthy — it owns the sim
-        let dt = this.lastHidden ? (now - this.lastHidden) / 1000 : 0.05;
+        // Only take over when the page is GENUINELY backgrounded — a hidden tab
+        // (rAF=0), or a long rAF stall (≥400ms) on the rare systems where a
+        // window blur freezes rAF. A transient foreground frame hitch (a heavy
+        // sim tick) must NOT trigger this, or rAF + worker would both drive the
+        // sim and units would twitch. When visible, the rAF loop owns the sim.
+        const backgrounded = document.hidden || (now - this.lastRaf > 400);
+        if (!backgrounded) { this.lastHidden = 0; return; }
+        let dt = this.lastHidden ? (now - this.lastHidden) / 1000 : 0.1;
         this.lastHidden = now;
-        this.game.update(Math.min(0.25, dt) * 1000);   // advance sim + lockstep pump; no render while hidden
+        this.game.update(Math.min(0.2, dt) * 1000);    // advance sim + lockstep pump; no render while hidden
       };
     } catch { /* no Worker support: background play just won't advance */ }
   }
@@ -1487,7 +1494,7 @@ class GameClient {
       // the Radar Dome's wide sweep is long-range INTEL (jammable by a TEWS); a
       // unit's own eyes and a deployed Patriot are NATURAL sight (never jammed).
       const radar = !!(v.b && def?.sight) && !(powered(v.o) === false || (v.pr ?? 1) < 1);
-      if (radar) sight = def.sight;
+      if (radar) sight = def.sight * (1 + 0.25 * ((v.lv || 1) - 1)); // +25% coverage per upgrade level
       if (!v.b && v.t === 'patriot' && v.fo) sight = 20; // fortified Patriot: bigger deployed radar
       const cx = Math.floor(v.x), cz = Math.floor(v.z), r = Math.ceil(sight);
       for (let dz = -r; dz <= r; dz++) for (let dx = -r; dx <= r; dx++) {
@@ -1557,13 +1564,14 @@ class GameClient {
       if (warn && !warn.classList.contains('hidden')) warn.classList.add('hidden');
       return;
     }
-    const RANGE = 24, RANGE2 = RANGE * RANGE;
+    // detection radius per source: Radar Domes gain +25% per upgrade level
+    const srcRange = (b: any) => (b.b && b.t === 'radar') ? 24 * (1 + 0.25 * ((b.lv || 1) - 1)) : 24;
     const threats: any[] = [];
     for (const v of allViews) {
       if (this.allies.has(v.o) || v.b) continue; // allied units aren't threats
       if (!(UNITS[v.t]?.dmg > 0) && v.t !== 'fueltruck') continue; // only attackers
       let near = false;
-      for (const b of sources) if ((b.x - v.x) ** 2 + (b.z - v.z) ** 2 < RANGE2) { near = true; break; }
+      for (const b of sources) { const r = srcRange(b); if ((b.x - v.x) ** 2 + (b.z - v.z) ** 2 < r * r) { near = true; break; } }
       if (near) threats.push(v);
     }
     this.radarBlips = threats;
