@@ -4,7 +4,7 @@ export const TICK = 0.1;            // seconds per sim tick (10 Hz)
 export const TICKS_PER_SEC = 10;
 // bump whenever map generation or sim logic changes in a way that breaks
 // replay reproduction (same seed must produce the same game to replay it)
-export const SIM_VERSION = 4;
+export const SIM_VERSION = 5; // lockstep fork: deterministic dmath + per-player AI RNG (incompatible with main v4)
 export const ORE_VALUE = 0.8;      // credits per ore unit (economy pacing)
 export const START_CREDITS = 3000;
 export const ORE_REGEN = 0.9;     // ore regrown per field cell per second...
