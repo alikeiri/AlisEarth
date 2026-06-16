@@ -2292,9 +2292,14 @@ class GameClient {
     this.perfEl.style.display = 'block';
     const ents = this.lastViews.length;
     const fpsCol = this.fps < 30 ? '#ff6b5e' : this.fps < 50 ? '#ffc940' : '#7be08a';
+    // GPU geometry submitted last frame: triangles + draw calls (WebGL renderer.info)
+    const ri = (this.renderer as any).three?.info?.render;
+    const tris = ri ? (ri.triangles >= 1e6 ? (ri.triangles / 1e6).toFixed(2) + 'M' : ri.triangles >= 1e3 ? (ri.triangles / 1e3).toFixed(0) + 'k' : String(ri.triangles)) : '?';
+    const draws = ri ? ri.calls : '?';
     let s = `<span style="color:${fpsCol}">FPS ${this.fps.toFixed(0)}</span>  frame ${this.workMs.toFixed(1)}ms\n`
       + `render ${this.renderMs.toFixed(1)}ms  sim ${this.updateMs.toFixed(1)}ms\n`
-      + `entities ${ents}  selected ${this.selection.size}`;
+      + `entities ${ents}  selected ${this.selection.size}\n`
+      + `tris ${tris}  draws ${draws}`;
     // active GPU: green = discrete (good), red = software, amber = integrated/unknown.
     // If this isn't your RTX, the browser is on the wrong GPU (see graphics settings).
     const gpu = (this.renderer as any).gpuName || 'unknown';
