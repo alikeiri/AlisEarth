@@ -338,10 +338,10 @@ export class Sim {
       if (b.progress < b.total || b.queue.length >= 6) return;
       // aircraft are limited by per-class airfield capacity (helis 30 / planes 10)
       if (def.pad && !this.padCapacityFree(c.p, c.type)) return;
-      const cost = Math.round(def.cost * pl.fac.costMul * pl.bonusCost);
-      if (pl.credits < cost) return;
-      pl.credits -= cost;
-      b.queue.push({ type: c.type, t: def.buildTime, t0: def.buildTime });
+      // queue freely even when broke — the item is charged only when it reaches the
+      // front of the queue AND the credits are there (tickBuilding handles the
+      // pay-or-stall). So a queued unit waits its turn, then builds once affordable.
+      b.queue.push({ type: c.type, t: def.buildTime, t0: def.buildTime, paid: false });
       return;
     }
     if (c.k === 'godmode') {
@@ -1313,9 +1313,11 @@ export class Sim {
           }
           b.queue.shift();
           this.events.push({ e: 'ready', p: b.owner });
-          // repeat production: finished unit re-queues itself (charged on start)
-          if (b.rpt && b.queue.length < 6) {
-            const rdef = UNITS[it.type];
+          // repeat production: finished unit re-queues itself (charged on start).
+          // hero/unique units (Melody, Bulldozer) are one-per-player, so they never
+          // re-queue even with Repeat on.
+          const rdef = UNITS[it.type];
+          if (b.rpt && b.queue.length < 6 && !rdef.unique && !rdef.commando) {
             if (!rdef.pad || this.padCapacityFree(b.owner, it.type))
               b.queue.push({ type: it.type, t: rdef.buildTime, t0: rdef.buildTime, paid: false });
           }
