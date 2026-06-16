@@ -20,11 +20,14 @@ class AudioMan {
   muted = false;
   musicVol = 0.4;   // 0..1, music bus
   sfxVol = 1.0;     // 0..1, sound effects + unit voices
-  // 'playlist' cycles all songs (Iron Directive first) one after another then
-  // repeats; the named styles play a single track on loop. Default = playlist so
-  // Iron Directive leads on the homepage and the music rotates during play.
-  musicStyle = 'playlist';
-  private static PLAYLIST = ['iron', 'battle', 'hellmarch', 'march', 'ambient'];
+  // Only the Iron Directive mp3 plays for now — the synth tracks (battle,
+  // hellmarch, march, ambient) and the cycling playlist are temporarily disabled
+  // (see ENABLED). Default = the mp3 on loop.
+  musicStyle = 'iron';
+  // styles the player may actually select right now; anything else is coerced to
+  // 'iron'. Re-add the synth styles / 'playlist' here to bring them back.
+  static ENABLED = ['iron', 'off'];
+  private static PLAYLIST = ['iron'];
   private plIdx = 0;                 // position within the playlist
   private plTimer: ReturnType<typeof setTimeout> | null = null; // advance timer for synth styles
   // the actual style sounding right now (resolves 'playlist' to its current song)
@@ -37,6 +40,9 @@ class AudioMan {
       const sv = localStorage.getItem('fe_sfxvol'); if (sv !== null) this.sfxVol = +sv;
       const ms = localStorage.getItem('fe_musstyle'); if (ms) this.musicStyle = ms;
     } catch { /* no storage */ }
+    // a saved choice for a now-disabled track (e.g. an old 'playlist'/'hellmarch')
+    // falls back to the mp3 so nobody is stuck on a silent or disabled style
+    if (!AudioMan.ENABLED.includes(this.musicStyle)) this.musicStyle = 'iron';
   }
 
   // Must be called from a user gesture (autoplay policy). Idempotent.
@@ -87,6 +93,7 @@ class AudioMan {
     if (this.sfxG && this.ctx) this.sfxG.gain.setTargetAtTime(this.sfxVol, this.ctx.currentTime, 0.05);
   }
   setMusicStyle(s: string) {
+    if (!AudioMan.ENABLED.includes(s)) s = 'iron'; // disabled styles fall back to the mp3
     this.musicStyle = s;
     if (s === 'playlist') this.plIdx = 0; // restart the playlist from Iron Directive
     try { localStorage.setItem('fe_musstyle', s); } catch {}
