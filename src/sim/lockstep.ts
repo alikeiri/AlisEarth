@@ -276,17 +276,20 @@ export function runRealtimeLockstep(
   };
   A.send = sendVia(B); B.send = sendVia(A);
 
-  // per-client independent frame clock (~60fps, deliberately phased apart)
+  // per-client independent frame clock; each can use a different production mode
+  // and frame interval (e.g. a low-FPS peer)
+  const modeA = (opts as any).modeA ?? mode, modeB = (opts as any).modeB ?? mode;
+  const fpsMsA = (opts as any).fpsMsA ?? 16, fpsMsB = (opts as any).fpsMsB ?? 16;
   const cl = {
-    a: { e: A, sim: simA, next: 0, prodAcc: 0, prodTick: 0, last: 0 },
-    b: { e: B, sim: simB, next: 8, prodAcc: 0, prodTick: 0, last: 0 },
+    a: { e: A, sim: simA, next: 0, prodAcc: 0, prodTick: 0, last: 0, mode: modeA, fps: fpsMsA },
+    b: { e: B, sim: simB, next: 8, prodAcc: 0, prodTick: 0, last: 0, mode: modeB, fps: fpsMsB },
   };
   const frame = (c: typeof cl.a) => {
     const dt = now - c.last; c.last = now;
     c.prodAcc += dt;
     while (c.prodAcc >= 100) { c.prodAcc -= 100; c.prodTick++; }
-    if (mode === 'wall') c.e.produceTo(c.prodTick + delay); // the fix: wall-clock production
-    c.e.pump(Math.min(targetTicks, c.prodTick));            // execute toward real time
+    if (c.mode === 'wall') c.e.produceTo(c.prodTick + delay); // the fix: wall-clock production
+    c.e.pump(Math.min(targetTicks, c.prodTick));              // execute toward real time
   };
 
   const cap = targetTicks * 100 * 6; // generous wall-time budget
@@ -296,7 +299,7 @@ export function runRealtimeLockstep(
     if (q.length) {
       for (let i = q.length - 1; i >= 0; i--) if (q[i].at <= now) { q[i].to.receive(q[i].msg); q.splice(i, 1); }
     }
-    if (now >= cl.a.next) { cl.a.next += 16; frame(cl.a); }
+    if (now >= cl.a.next) { cl.a.next += cl.a.fps; frame(cl.a); }
     // peer B is frozen during its hitch window, then catches up in a burst on
     // resume (its frame dt spans the whole hitch) — like a throttled/janky tab
     const bHitched = hitchEveryMs > 0 && (now % hitchEveryMs) < hitchMs;

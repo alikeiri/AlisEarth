@@ -413,7 +413,9 @@ class NetLockstepGame implements GameLike {
     const specs = (m.players || []).map((p: any) => ({ name: p.name, faction: p.faction, isAI: !!p.isAI }));
     this.sim = new Sim(m.seed, specs);
     this.map = this.sim.map;
-    this.engine = new LockstepEngine(this.sim, this.me, specs.length, { delay: 6, redundancy: 16 });
+    // input delay is chosen by the server from the worst player's ping (6..18),
+    // so a far/janky peer's lag is buffered instead of stalling everyone
+    this.engine = new LockstepEngine(this.sim, this.me, specs.length, { delay: m.delay || 6, redundancy: 16 });
     this.engine.aiFor = (s, p) => aiTick(s as any, p);
     this.engine.localInput = () => { const c = this.pending; this.pending = []; return c; };
     this.engine.send = msg => this.net.send({ t: 'lsin', frames: msg.frames });
@@ -2327,7 +2329,7 @@ class GameClient {
             if (p === this.me) return null; // our own input is always far ahead
             const nm = (ns.roster?.[p]?.name || `P${p}`).slice(0, 8);
             const col = lead < 1 ? '#ff6b5e' : lead < 3 ? '#ffc940' : '#7be08a';
-            return `<span style="color:${col}">${nm} +${lead}</span>`;
+            return `<span style="color:${col}">${nm} ${lead >= 0 ? '+' : ''}${lead}</span>`;
           }).filter(Boolean);
           if (parts.length) s += `\n<span style="color:#8aa0b2">lead</span> ${parts.join('  ')}`;
         }

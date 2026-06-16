@@ -444,8 +444,14 @@ function startRoom(room: Room) {
   // runs its own deterministic sim and the server only relays input messages.
   // The host (slot 0) drives any AI slots. Bandwidth = O(inputs), not O(units).
   if (room.lockstep) {
+    // adaptive input delay: size the buffer to the WORST player's ping so a distant
+    // peer's latency + frame freezes are absorbed instead of stalling everyone. All
+    // clients get the SAME value (sent here), so the lockstep stays deterministic.
+    // ~6 ticks (0.6s) for a LAN-ish game up to 18 (1.8s) for a far peer.
+    const maxPing = Math.max(0, ...room.clients.map(c => c.ping || 0));
+    const lsDelay = Math.max(6, Math.min(18, Math.round(maxPing / 30)));
     room.clients.forEach((c, i) => send(c.ws, {
-      t: 'start', lockstep: true, seed, size: room.size, you: i, aiSlots: room.aiSlots,
+      t: 'start', lockstep: true, seed, size: room.size, you: i, aiSlots: room.aiSlots, delay: lsDelay,
       players: specs.map(s => ({ name: s.name, faction: s.faction, isAI: !!s.isAI })),
     }));
     return;
