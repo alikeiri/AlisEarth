@@ -1,6 +1,8 @@
 // Procedural audio: WebAudio-synthesized sound effects and a generative
 // ambient score. No audio files — everything is synthesized at runtime.
 
+import { safeLS } from './store';
+
 class AudioMan {
   private ctx: AudioContext | null = null;
   private master!: GainNode;
@@ -35,10 +37,10 @@ class AudioMan {
 
   constructor() {
     try {
-      this.muted = localStorage.getItem('fe_mute') === '1';
-      const mv = localStorage.getItem('fe_musvol'); if (mv !== null) this.musicVol = +mv;
-      const sv = localStorage.getItem('fe_sfxvol'); if (sv !== null) this.sfxVol = +sv;
-      const ms = localStorage.getItem('fe_musstyle'); if (ms) this.musicStyle = ms;
+      this.muted = safeLS.getItem('fe_mute') === '1';
+      const mv = safeLS.getItem('fe_musvol'); if (mv !== null) this.musicVol = +mv;
+      const sv = safeLS.getItem('fe_sfxvol'); if (sv !== null) this.sfxVol = +sv;
+      const ms = safeLS.getItem('fe_musstyle'); if (ms) this.musicStyle = ms;
     } catch { /* no storage */ }
     // a saved choice for a now-disabled track (e.g. an old 'playlist'/'hellmarch')
     // falls back to the mp3 so nobody is stuck on a silent or disabled style
@@ -79,24 +81,24 @@ class AudioMan {
 
   setMuted(m: boolean) {
     this.muted = m;
-    try { localStorage.setItem('fe_mute', m ? '1' : '0'); } catch {}
+    try { safeLS.setItem('fe_mute', m ? '1' : '0'); } catch {}
     if (this.master && this.ctx) this.master.gain.setTargetAtTime(m ? 0 : 0.6, this.ctx.currentTime, 0.05);
   }
   setMusicVol(v: number) {
     this.musicVol = Math.max(0, Math.min(1, v));
-    try { localStorage.setItem('fe_musvol', String(this.musicVol)); } catch {}
+    try { safeLS.setItem('fe_musvol', String(this.musicVol)); } catch {}
     if (this.musG && this.ctx) this.musG.gain.setTargetAtTime(this.musicVol, this.ctx.currentTime, 0.05);
   }
   setSfxVol(v: number) {
     this.sfxVol = Math.max(0, Math.min(1, v));
-    try { localStorage.setItem('fe_sfxvol', String(this.sfxVol)); } catch {}
+    try { safeLS.setItem('fe_sfxvol', String(this.sfxVol)); } catch {}
     if (this.sfxG && this.ctx) this.sfxG.gain.setTargetAtTime(this.sfxVol, this.ctx.currentTime, 0.05);
   }
   setMusicStyle(s: string) {
     if (!AudioMan.ENABLED.includes(s)) s = 'iron'; // disabled styles fall back to the mp3
     this.musicStyle = s;
     if (s === 'playlist') this.plIdx = 0; // restart the playlist from Iron Directive
-    try { localStorage.setItem('fe_musstyle', s); } catch {}
+    try { safeLS.setItem('fe_musstyle', s); } catch {}
     this.stopMusic();
     if (s !== 'off') this.startMusic();
   }

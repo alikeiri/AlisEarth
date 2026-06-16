@@ -8,6 +8,7 @@ import { GameMap, genMap, setMapSize, W, H, MAXD, SEA } from '../sim/map';
 import { Renderer, gfxQuality } from './render';
 import { UI } from './ui';
 import { twemojify, twemojiParse } from './twemoji';
+import { safeLS } from './store';
 import { Net } from './net';
 import { audio } from './audio';
 import { runDeterminismProbe, mathCanary, detMathCanary } from '../sim/determinism';
@@ -2493,7 +2494,7 @@ function renderAiIntel() {
   const el = document.getElementById('aiIntel');
   if (!el) return;
   let p: any = null;
-  try { p = JSON.parse(localStorage.getItem('ae_aiprofile') || 'null'); } catch { /* none */ }
+  try { p = JSON.parse(safeLS.getItem('ae_aiprofile') || 'null'); } catch { /* none */ }
   const totalGames = (p?.games || 0) + (p?.simGames || 0);
   if (!p || !totalGames) { el.classList.add('hidden'); return; }
   el.classList.remove('hidden');
@@ -2528,7 +2529,7 @@ function renderAiIntel() {
   el.innerHTML = rows.join('<br>');
   document.getElementById('aiIntelReset')?.addEventListener('click', e => {
     e.preventDefault();
-    localStorage.removeItem('ae_aiprofile');
+    safeLS.removeItem('ae_aiprofile');
     renderAiIntel();
   });
 }
@@ -2538,7 +2539,7 @@ function renderAiIntel() {
 function rollCallsign() {
   const inp = $('nameInput') as HTMLInputElement;
   // a name the player saved on a previous visit wins over a random callsign
-  let saved = ''; try { saved = (localStorage.getItem('fe_name') || '').trim(); } catch { /* no storage */ }
+  let saved = ''; try { saved = (safeLS.getItem('fe_name') || '').trim(); } catch { /* no storage */ }
   if (saved) { inp.value = saved; return; }
   const cur = (inp.value || '').trim();
   if (cur && !FUNNY_NAMES.includes(cur)) return;
@@ -2592,7 +2593,7 @@ class ClaudeAdvisor {
     };
     let lessons = '';
     try {
-      const p = JSON.parse(localStorage.getItem('ae_aiprofile') || 'null');
+      const p = JSON.parse(safeLS.getItem('ae_aiprofile') || 'null');
       if (p?.lessons?.length) lessons = '\nLessons you learned from previous matches (apply them): ' + p.lessons.join(' | ');
     } catch { /* none */ }
     return JSON.stringify({
@@ -2782,7 +2783,7 @@ function startGame(game: GameLike) {
       ($('endTitle') as HTMLElement).style.color = '#ffc940';
       let sub = `${winnerName} wins.`;
       try {
-        const prof = JSON.parse(localStorage.getItem('ae_aiprofile') || 'null');
+        const prof = JSON.parse(safeLS.getItem('ae_aiprofile') || 'null');
         const n = (prof?.games || 0) + (prof?.simGames || 0);
         if (n) sub += ` Match studied — ${n} game${n > 1 ? 's' : ''} in the AI's memory.`;
       } catch { /* no profile */ }
@@ -2810,7 +2811,7 @@ function startGame(game: GameLike) {
     $('btnAgain').textContent = endReturnsToLobby ? 'BACK TO LOBBY' : 'BACK TO MENU';
     if (!endReturnsToLobby) {
       try {
-        const prof = JSON.parse(localStorage.getItem('ae_aiprofile') || 'null');
+        const prof = JSON.parse(safeLS.getItem('ae_aiprofile') || 'null');
         if (prof?.games) sub += ` The AI studied this match — ${prof.games} game${prof.games > 1 ? 's' : ''} learned.`;
       } catch { /* no profile */ }
     }
@@ -2821,7 +2822,7 @@ function startGame(game: GameLike) {
   // BOTH sides of a simulation, and the tutorial wants a quiet enemy). Personal
   // key if entered, else the proxy.
   if (game instanceof LocalGame && !game.isSim && !game.tutorial) {
-    const key = (localStorage.getItem('ae_claude_key') || '').trim();
+    const key = (safeLS.getItem('ae_claude_key') || '').trim();
     advisor = new ClaudeAdvisor(game, key, taunt => client?.aiSays(taunt));
     advisor.start();
   }
@@ -2842,7 +2843,7 @@ const FUNNY_NAMES = [
 function playerName(): string {
   const typed = (($('nameInput') as HTMLInputElement).value || '').trim();
   // a name the player chose (not a random funny one) is remembered for next time
-  if (typed && !FUNNY_NAMES.includes(typed)) { try { localStorage.setItem('fe_name', typed.slice(0, 18)); } catch { /* no storage */ } }
+  if (typed && !FUNNY_NAMES.includes(typed)) { try { safeLS.setItem('fe_name', typed.slice(0, 18)); } catch { /* no storage */ } }
   return (typed || FUNNY_NAMES[Math.floor(Math.random() * FUNNY_NAMES.length)]).slice(0, 18);
 }
 
@@ -2862,7 +2863,7 @@ function pushIntelToServer(r: any) {
 }
 function mergedProfile(): any {
   let local: any = null;
-  try { local = JSON.parse(localStorage.getItem('ae_aiprofile') || 'null'); } catch { /* none */ }
+  try { local = JSON.parse(safeLS.getItem('ae_aiprofile') || 'null'); } catch { /* none */ }
   const sv = serverIntel;
   if (!sv && !local) return null;
   if (!sv) return local;
@@ -2878,7 +2879,7 @@ function mergedProfile(): any {
 function saveAiReport(r: any) {
   pushIntelToServer(r); // fire-and-forget: the server brain learns too
   try {
-    const p = JSON.parse(localStorage.getItem('ae_aiprofile') || '{}');
+    const p = JSON.parse(safeLS.getItem('ae_aiprofile') || '{}');
     if (r.simMatch) {
       // spectated AI-vs-AI match: absorb the winner's doctrine payoffs, but
       // don't touch the vs-you record (wins, rush timing, your weapon style)
@@ -2889,7 +2890,7 @@ function saveAiReport(r: any) {
         eff[k] = Math.round(((eff[k] || 0) * 0.7 + e * 0.3) * 10) / 10;
       }
       p.eff = eff;
-      localStorage.setItem('ae_aiprofile', JSON.stringify(p));
+      safeLS.setItem('ae_aiprofile', JSON.stringify(p));
       return;
     }
     p.games = (p.games || 0) + 1;
@@ -2909,7 +2910,7 @@ function saveAiReport(r: any) {
     }
     p.eff = eff;
     p.harvLost = Math.round(((p.harvLost || 0) * 0.6 + (r.harvLost || 0) * 0.4) * 10) / 10;
-    localStorage.setItem('ae_aiprofile', JSON.stringify(p));
+    safeLS.setItem('ae_aiprofile', JSON.stringify(p));
   } catch { /* storage unavailable */ }
 }
 
@@ -2917,7 +2918,7 @@ function saveAiReport(r: any) {
 // journal is fed back into the strategist's prompts in future games
 async function requestLesson(r: any) {
   try {
-    const key = (localStorage.getItem('ae_claude_key') || '').trim();
+    const key = (safeLS.getItem('ae_claude_key') || '').trim();
     const report = JSON.stringify(r);
     let lesson = '';
     if (key) {
@@ -2948,9 +2949,9 @@ async function requestLesson(r: any) {
       lesson = String((await res.json()).lesson || '');
     }
     if (!lesson) return;
-    const p = JSON.parse(localStorage.getItem('ae_aiprofile') || '{}');
+    const p = JSON.parse(safeLS.getItem('ae_aiprofile') || '{}');
     p.lessons = [...(p.lessons || []), lesson.slice(0, 160)].slice(-5);
-    localStorage.setItem('ae_aiprofile', JSON.stringify(p));
+    safeLS.setItem('ae_aiprofile', JSON.stringify(p));
   } catch { /* offline — no lesson this time */ }
 }
 
@@ -3004,7 +3005,7 @@ function appendLobbyChat(m: any) {
 }
 // per-browser preference: sound alert for new lobby messages while the tab is in
 // the background. Persisted so it sticks across sessions; toggled from the lobby.
-function notifyMuted(): boolean { return localStorage.getItem('feNotifyMuted') === '1'; }
+function notifyMuted(): boolean { return safeLS.getItem('feNotifyMuted') === '1'; }
 function syncNotifyToggles() {
   const muted = notifyMuted();
   document.querySelectorAll('.lobbyNotifyToggle').forEach(b => {
@@ -3013,7 +3014,7 @@ function syncNotifyToggles() {
 }
 function wireNotifyToggles() {
   document.querySelectorAll('.lobbyNotifyToggle').forEach(b => b.addEventListener('click', () => {
-    localStorage.setItem('feNotifyMuted', notifyMuted() ? '0' : '1');
+    safeLS.setItem('feNotifyMuted', notifyMuted() ? '0' : '1');
     syncNotifyToggles();
     if (!notifyMuted()) audio.play('notify'); // preview the sound when turning it back on
   }));
@@ -3112,7 +3113,7 @@ function initMenus() {
   const gfxSel = $('gfxQual') as HTMLSelectElement;
   gfxSel.value = gfxQuality();
   gfxSel.addEventListener('change', () => {
-    try { localStorage.setItem('fe_quality', gfxSel.value); } catch { /* no storage */ }
+    try { safeLS.setItem('fe_quality', gfxSel.value); } catch { /* no storage */ }
     if (client) client.renderer.setQuality(gfxSel.value); // apply live if a match is running
   });
   const mv = $('musVol') as HTMLInputElement, sv = $('sfxVol') as HTMLInputElement;
@@ -3125,7 +3126,7 @@ function initMenus() {
     () => selSize, v => { selSize = v; });
   $('btnSkirmish').addEventListener('click', () => {
     const key = (($('claudeKey') as HTMLInputElement).value || '').trim();
-    try { localStorage.setItem('ae_claude_key', key); } catch { /* no storage */ }
+    try { safeLS.setItem('ae_claude_key', key); } catch { /* no storage */ }
     fogEnabled = ($('fogChk') as HTMLInputElement)?.checked ?? true;
     islandsEnabled = ($('islandChk') as HTMLInputElement)?.checked ?? false;
     const levels = [selDiff, selDiff2, selDiff3].slice(0, selEnemies);
@@ -3314,10 +3315,10 @@ if (!glOk) {
     const nm = $('nameInput') as HTMLInputElement;
     nm.addEventListener('change', () => {
       const v = (nm.value || '').trim();
-      try { if (v && !FUNNY_NAMES.includes(v)) localStorage.setItem('fe_name', v.slice(0, 18)); } catch { /* no storage */ }
+      try { if (v && !FUNNY_NAMES.includes(v)) safeLS.setItem('fe_name', v.slice(0, 18)); } catch { /* no storage */ }
     });
   } catch { /* no input */ }
-  try { ($('claudeKey') as HTMLInputElement).value = localStorage.getItem('ae_claude_key') || ''; } catch { /* no storage */ }
+  try { ($('claudeKey') as HTMLInputElement).value = safeLS.getItem('ae_claude_key') || ''; } catch { /* no storage */ }
   // tell the startup-diagnostic in index.html that the app booted cleanly (so it
   // won't show the "code did not start" banner)
   (window as any).__feBooted = true;

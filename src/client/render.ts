@@ -6,6 +6,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { safeLS } from './store';
 
 // CC0/CC-BY models from poly.pizza (credits in README). size = world units,
 // axis: 'l' scales by length (z after ry), 'h' by height. ry orients +Z forward.
@@ -786,7 +787,7 @@ export const GFX_QUALITY: Record<string, { pr: number; shadows: boolean; shadowS
   high:   { pr: 1.0, shadows: true,  shadowSize: 2048 }, // crisp + sharper shadows
 };
 export function gfxQuality(): string {
-  try { return localStorage.getItem('fe_quality') || 'medium'; } catch { return 'medium'; }
+  try { return safeLS.getItem('fe_quality') || 'medium'; } catch { return 'medium'; }
 }
 
 export class Renderer {
@@ -1638,7 +1639,7 @@ export class Renderer {
   // apply a graphics-quality preset live (pixel ratio + shadows) and persist it
   setQuality(name: string) {
     const q = GFX_QUALITY[name] || GFX_QUALITY.medium;
-    try { localStorage.setItem('fe_quality', name); } catch { /* no storage */ }
+    try { safeLS.setItem('fe_quality', name); } catch { /* no storage */ }
     this.three.setPixelRatio(Math.min(q.pr, window.devicePixelRatio));
     this.three.shadowMap.enabled = q.shadows;
     if (this.sun) {
