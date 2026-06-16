@@ -93,8 +93,10 @@ function carriedCounts(ship: Entity): { veh: number; inf: number } {
 function canBoard(ship: Entity, type: string): boolean {
   const k = UNITS[type]?.kind;
   if (k !== 'veh' && k !== 'inf') return false;   // only ground units
+  const sd = UNITS[ship.type];
+  const maxVeh = sd?.carryVeh ?? CARRY_VEH, maxInf = sd?.carryInf ?? CARRY_INF;
   const c = carriedCounts(ship);
-  return k === 'veh' ? c.veh < CARRY_VEH : c.inf < CARRY_INF;
+  return k === 'veh' ? c.veh < maxVeh : c.inf < maxInf;
 }
 
 const FORM: { x: number; z: number }[] = [{ x: 0, z: 0 }];
@@ -996,7 +998,8 @@ export class Sim {
       const tdef = UNITS[u.type];
       if (tdef?.mine) continue;                     // buried proximity mines aren't visible targets
       if (subAtt && tdef?.kind !== 'sea') continue; // subs only torpedo other ships
-      if (tdef?.cloak) {
+      const cloaked = tdef?.cloak || (tdef?.stealthTech && this.players[u.owner]?.tech?.stealth);
+      if (cloaked) {
         if (tdef.move === 'sea') {
           // submarine: only a sonar ship (Destroyer / Sub Hunter) holds the
           // contact, and only inside its sonar reach (the destroyer's is short)
@@ -1604,8 +1607,9 @@ export class Sim {
       } else {
         const coast = nearestPassable(this.map, Math.floor(u.x), Math.floor(u.z), 80);
         if (!coast) { u.orders.shift(); u.path = null; return; } // no land anywhere — give up
-        const seaAdj = nearestSea(this.map, coast.x, coast.z, 8) || { x: Math.floor(u.x), z: Math.floor(u.z) };
-        this.moveToward(u, seaAdj.x + 0.5, seaAdj.z + 0.5, def);
+        // air transport flies straight over the land cell to drop; a ship parks in the sea beside it
+        const drop = def.fly ? coast : (nearestSea(this.map, coast.x, coast.z, 8) || { x: Math.floor(u.x), z: Math.floor(u.z) });
+        this.moveToward(u, drop.x + 0.5, drop.z + 0.5, def);
       }
     } else if (ord.k === 'force') {
       // force-fire at a fixed point (or a tracked entity), hitting friend OR foe
@@ -2377,7 +2381,7 @@ export class Sim {
         if (e.stance) v.st = e.stance;
         if (e.fortified) v.fo = 1;
         if (e.fortT > 0) v.ft = e.fortGoal ? 1 : 2; // 1 = digging in, 2 = packing up
-        if (UNITS[e.type]?.cloak) v.ck = 1;
+        if (UNITS[e.type]?.cloak || (UNITS[e.type]?.stealthTech && this.players[e.owner]?.tech?.stealth)) v.ck = 1;
         if (e.holdFire) v.hf = 1;
         if (e.orders[0]?.k === 'patrol') v.pa = 1;
         if (e.cargoUnits && e.cargoUnits.length) v.cu = e.cargoUnits.length;

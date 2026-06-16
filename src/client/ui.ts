@@ -20,7 +20,7 @@ const U_ICONS: Record<string, string> = {
   fighter: '\u{1F6E9}️', bomber: '\u{1F4A3}', dbomber: '\u{1F916}', heli: '\u{1F681}', helidrone: '\u{1FA81}',
   mcv: '\u{1F3D7}️', dozer: '\u{1F69C}', patriot: '\u{1F6F0}️',
   oiltruck: '\u{1F6E2}️', oilship: '\u{1F6E2}️', tews: '\u{1F4E1}', navengineer: '\u{1F6E0}️',
-  mortar: '\u{1F4A3}', artillery: '\u{1F4A5}', artyship: '\u{1F4A5}',
+  mortar: '\u{1F4A3}', artillery: '\u{1F4A5}', artyship: '\u{1F4A5}', airtransport: '\u{1F681}',
 };
 export const B_LIST = ['power', 'refinery', 'radar', 'barracks', 'factory', 'turret', 'sam', 'cannon', 'tesla', 'irondome', 'wall', 'barrier', 'dronefac', 'shipyard', 'airforce', 'airfield', 'lab', 'silo'];
 
@@ -39,7 +39,7 @@ const UPG_INFO: Record<string, string> = {
 };
 export const U_LIST = ['rifle', 'rocket', 'mortar', 'melody', 'hive', 'tank', 'heavy', 'ifv', 'aatank', 'flak', 'patriot', 'fueltruck', 'harv', 'oiltruck', 'engineer', 'mcv', 'dozer', 'mlrs', 'artillery', 'recon', 'strike', 'msldrone',
   'tews', 'chemtrooper', 'chemtank', 'chemdrone', 'biotrooper', 'biotank', 'biodrone', 'stealthtank',
-  'gunboat', 'destroyer', 'artyship', 'sub', 'subhunter', 'mslcruiser', 'flakship', 'navdrone', 'oilship', 'navengineer', 'transport', 'fighter', 'bomber', 'dbomber', 'heli', 'helidrone',
+  'gunboat', 'destroyer', 'artyship', 'sub', 'subhunter', 'mslcruiser', 'flakship', 'navdrone', 'oilship', 'navengineer', 'transport', 'airtransport', 'fighter', 'bomber', 'dbomber', 'heli', 'helidrone',
   'cmissile', 'bbmissile', 'chemissile'];
 
 // strengths/weaknesses tooltip, derived from the live damage matrix so it can
@@ -99,6 +99,7 @@ const DESCRIPTIONS: Record<string, string> = {
   oiltruck: 'Oil Miner: works land OIL wells and refines them at the Ore Refinery for credits. Unarmed.',
   oilship: 'Oil Rig Ship: works offshore OIL wells and pumps the oil to a coastal Ore Refinery. Unarmed.',
   navengineer: 'Naval Engineer: repairs friendly ships (and coastal structures) out on the water. Unarmed. Right-click a damaged ship to repair; right-drag to set an auto-repair zone.',
+  airtransport: 'Air Transport: carries up to 10 infantry (Melody included) over any terrain. Right-click it with infantry selected to load; press U to drop them. Unarmed — cloaks once Stealth Systems is researched.',
   tews: 'TEWS: jams enemy Radar Dome + Spy Satellite vision in a bubble (their units’ own eyes and Patriots still see). Pulses an area EMP that only damages drones.',
   mcv: 'Construction Vehicle: deploys (F) into a new Construction Yard for a forward base.',
   dozer: 'Bulldozer: reshapes terrain (T) — raise/lower ground, build land bridges.',

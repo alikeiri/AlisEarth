@@ -78,7 +78,7 @@ function simViews(sim: Sim, a: number): any[] {
       if (e.stance) v.st = e.stance;
       if (e.fortified) v.fo = 1;
       if (e.fortT > 0) v.ft = e.fortGoal ? 1 : 2;
-      if (UNITS[e.t]?.cloak || UNITS[e.type]?.cloak) v.ck = 1;
+      if (UNITS[e.type]?.cloak || (UNITS[e.type]?.stealthTech && sim.players[e.owner]?.tech?.stealth)) v.ck = 1;
       if (e.cd > 0 && UNITS[e.type]?.dmg > 0) { v.fr = 1; if (e.aimX !== undefined) { v.ax = e.aimX; v.az = e.aimZ; } }
       if (e.sd > 0) v.sd = Math.ceil(e.sd);
       if (e.rzr && e.rzr > 0) { v.rzx = e.rzx; v.rzz = e.rzz; v.rzr = e.rzr; }

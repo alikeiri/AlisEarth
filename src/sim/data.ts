@@ -42,6 +42,9 @@ export interface UnitDef {
   oilMiner?: boolean;                            // mines OIL wells (not ore) and refines them for credits
   jam?: number;                                  // TEWS: jams enemy radar/satellite vision within this radius
   droneEmp?: { range: number; dmg: number; cd: number }; // TEWS: area EMP pulse that only hurts drones
+  carryInf?: number;                             // carrier capacity override: infantry (default 30)
+  carryVeh?: number;                             // carrier capacity override: vehicles (default 10)
+  stealthTech?: boolean;                         // cloaks once the owner has researched Stealth Systems
   amphibious?: boolean;                          // can travel over BOTH land and water
   carrier?: boolean;                             // transport ship: carries ground units across water (load/unload)
   altBuiltAt?: string;                           // a second building that can also produce this unit
@@ -139,6 +142,9 @@ export const UNITS: Record<string, UnitDef> = {
   dbomber:   { name: 'Drone Bomber', cost: 2600, hp: 280, speed: 3.0, range: 4.0, dmg: 90,  rof: 4.0, builtAt: 'airforce', buildTime: 20, kind: 'air', fly: true, alt: 3.4, pad: true, payload: 3 },
   heli:      { name: 'Helicopter',   cost: 1600, hp: 260, speed: 3.2, range: 5.5, dmg: 40,  rof: 1.4, builtAt: 'airforce', buildTime: 14, kind: 'air', fly: true, alt: 2.7, pad: true, sonar: 9 }, // MAD: detects & rockets subs
   helidrone: { name: 'Helidrone',    cost: 800,  hp: 120, speed: 3.6, range: 4.5, dmg: 20,  rof: 0.9, builtAt: 'airforce', buildTime: 9,  kind: 'air', fly: true, alt: 2.7, pad: true },
+  // air transport: ferries up to 10 infantry (Melody included) over any terrain;
+  // gains cloak once Stealth Systems is researched. Unarmed.
+  airtransport: { name: 'Air Transport', cost: 1200, hp: 300, speed: 4.0, range: 0, dmg: 0, rof: 1, builtAt: 'airforce', buildTime: 13, kind: 'air', fly: true, alt: 3.0, carrier: true, carryInf: 10, carryVeh: 0, stealthTech: true },
   // suicide truck: fuel + explosives, huge fireball, sets buildings ablaze
   fueltruck: { name: 'Fuel Truck',   cost: 900,  hp: 220, speed: 3.6, range: 4.0, dmg: 280, rof: 1, builtAt: 'factory', buildTime: 10, kind: 'veh', bombTruck: true },
   // missiles: built AT the silo, stored there, launched at any map position
