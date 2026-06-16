@@ -11,9 +11,11 @@ import { safeLS } from './store';
 // CC0/CC-BY models from poly.pizza (credits in README). size = world units,
 // axis: 'l' scales by length (z after ry), 'h' by height. ry orients +Z forward.
 const MODEL_DEFS: Record<string, { file: string; size: number; axis: 'l' | 'h'; ry: number; y?: number; tint?: number }> = {
-  // all infantry share the SWAT model (the only one with a full animation set:
-  // run cycle + gun-pointing idle); type identity comes from the material tint
-  rifle:     { file: 'rocket',    size: 1.15, axis: 'h', ry: 0, tint: 0x7d8f56 },
+  // all infantry share one rigged SWAT model (the only one with a full animation
+  // set: run cycle + gun-pointing idle); type identity comes from the material
+  // tint. Rifle Squad is left UNtinted so it shows the SWAT's native look; the
+  // other infantry keep their identifying tints.
+  rifle:     { file: 'rocket',    size: 1.15, axis: 'h', ry: 0 },
   rocket:    { file: 'rocket',    size: 1.18, axis: 'h', ry: 0, tint: 0x4d5a6b },
   tank:      { file: 'tank',      size: 1.50, axis: 'l', ry: 0 },
   heavy:     { file: 'heavy',     size: 1.85, axis: 'l', ry: 0 },
