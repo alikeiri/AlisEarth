@@ -36,6 +36,7 @@ export class GameMap {
   occ = new Int32Array(W * H);                // building entity id occupying cell (0 = none)
   tBlocked = new Uint8Array(W * H);           // terrain-blocked (water / cliff / forest)
   forest = new Uint8Array(W * H);             // forest cells (blocked, rendered as trees)
+  cityBlock = new Uint8Array(W * H);          // urban map: blocked cells rendered as buildings
   water = new Uint8Array(W * H);              // water cells (navigable by ships)
   gem = new Uint8Array(W * H);                // special ore: 3x credit value
   oil = new Uint8Array(W * H);                // oil wells: mined by oil miners, refined for credits
@@ -285,8 +286,21 @@ export function genMap(seed: number, nPlayers: number): GameMap {
   //    divided by water. Islands mode rides in seed bit 0x40000000 so it flows
   //    through skirmish / multiplayer / replays without any extra plumbing.
   const islands = (seed & 0x40000000) !== 0;
+  // urban warfare: deliberately SIMPLE terrain (flat city plain) for performance —
+  // a single winding river with bridge crossings, a few mountain chokepoints, a
+  // road grid and blocks of buildings. Rides in seed bit 0x20000000.
+  const urban = (seed & 0x20000000) !== 0;
   const cont = CONTINENTS[(seed >>> 3) % CONTINENTS.length];
   const nIslands = Math.min(4, Math.max(2, nPlayers));
+  // urban river: a gentle vertical channel whose centre x wanders with z
+  const riverPhase = ((seed >>> 9) % 100) / 100 * Math.PI * 2;
+  const riverCx = (z: number) => W * 0.5 + Math.sin(z * 0.11 + riverPhase) * W * 0.13;
+  const RIVER_HALF = 3.0; // channel half-width (cells)
+  // a few deterministic mountain massifs as chokepoints (kept clear of the centre)
+  const mtns = [
+    { x: W * 0.30, z: H * 0.30, r: 8 }, { x: W * 0.72, z: H * 0.32, r: 7 },
+    { x: W * 0.28, z: H * 0.72, r: 7 }, { x: W * 0.74, z: H * 0.70, r: 8 },
+  ];
   const isleC: { x: number; z: number }[] = [];
   if (islands) {
     const quad = [[0.27, 0.27], [0.73, 0.73], [0.73, 0.27], [0.27, 0.73]];
@@ -300,7 +314,19 @@ export function genMap(seed: number, nPlayers: number): GameMap {
       const dEdge = Math.min(x, W - x, z, H - z) / (W * 0.5);
       const e = Math.min(1, dEdge / 0.14); // thin sea border at map edges
       let h: number;
-      if (islands) {
+      if (urban) {
+        // flat city plain (cheap to render) with only small texture noise
+        h = SEA + 1.15 + (fbm(seed, x * 0.06, z * 0.06) - 0.5) * 0.25;
+        // carve the river channel down through the water line
+        const rd = Math.abs(x - riverCx(z));
+        if (rd < RIVER_HALF) h = SEA - 0.9 + smoothstep(0, RIVER_HALF, rd) * 1.8;
+        // raise mountain massifs (steep enough that the slope test blocks them)
+        for (const mt of mtns) {
+          const d = hyp(x - mt.x, z - mt.z);
+          if (d < mt.r) h += (1 - d / mt.r) * (1 - d / mt.r) * 11;
+        }
+        h *= (0.3 + 0.7 * e); // sea border at the very edge
+      } else if (islands) {
         // each node takes the height of its nearest island: a warped radial blob
         // that rises from the sea, leaving open water between the landmasses
         let nd = 1e9;
@@ -468,8 +494,61 @@ export function genMap(seed: number, nPlayers: number): GameMap {
     }
   }
 
+  // -- URBAN map features: bridge the river so the banks connect, lay a road grid
+  // across the crossings, and scatter blocks of buildings (cover + chokepoints).
+  if (urban) {
+    const MAP_ROAD = 100; // neutral road marker: renders + is passable, grants no build reach
+    const LAND_H = SEA + 1.15;
+    const setLand = (cx: number, cz: number) => {
+      if (!m.inB(cx, cz)) return;
+      const i = cz * (W + 1) + cx;
+      for (const n of [i, i + 1, i + W + 1, i + W + 2]) if (m.hN[n] < LAND_H) m.hN[n] = LAND_H;
+      m.reblock(cx - 1, cz - 1, cx + 2, cz + 2);
+      m.terraMask[cz * W + cx] = 1; // bridge deck reads as paved
+    };
+    const setRoad = (cx: number, cz: number) => {
+      if (m.inB(cx, cz) && m.tBlocked[cz * W + cx] === 0) m.road[cz * W + cx] = MAP_ROAD;
+    };
+    // bridges: span the channel with a 2-cell-wide deck at evenly spaced rows
+    const bridgeZs = [Math.round(H * 0.27), Math.round(H * 0.5), Math.round(H * 0.73)];
+    for (const bz of bridgeZs) {
+      const cxR = riverCx(bz);
+      for (let dz = 0; dz < 2; dz++)
+        for (let x = Math.round(cxR - RIVER_HALF - 1); x <= Math.round(cxR + RIVER_HALF + 1); x++) setLand(x, bz + dz);
+    }
+    // roads: an east-west avenue along each bridge row, plus a feeder from each
+    // spawn down to the nearest avenue (so bases connect through the crossings)
+    for (const bz of bridgeZs) for (let x = 2; x < W - 2; x++) { setRoad(x, bz); setRoad(x, bz + 1); }
+    for (const s of starts) {
+      let bz = bridgeZs[0]; for (const b of bridgeZs) if (Math.abs(b - s.z) < Math.abs(bz - s.z)) bz = b;
+      const x = Math.round(s.x), z0 = Math.min(s.z, bz), z1 = Math.max(s.z, bz);
+      for (let z = z0; z <= z1; z++) { setRoad(x, z); setRoad(x + 1, z); }
+    }
+    // building blocks: small rectangles of impassable structures on open ground,
+    // clear of spawns, the river and the mountains
+    const farFromStarts = (cx: number, cz: number, d: number) =>
+      starts.every(s => (cx - s.x) * (cx - s.x) + (cz - s.z) * (cz - s.z) >= d * d);
+    let blocks = 0, btries = 0;
+    const wantBlocks = Math.round(W / 7);
+    while (blocks < wantBlocks && btries < 800) {
+      btries++;
+      const cx = 6 + rng.int(W - 12), cz = 6 + rng.int(H - 12);
+      if (m.blockedT(cx, cz) || Math.abs(cx - riverCx(cz)) < RIVER_HALF + 3) continue;
+      if (!farFromStarts(cx, cz, 14) || m.road[cz * W + cx] !== 0) continue;
+      const bw = 2 + rng.int(3), bh = 2 + rng.int(3);
+      for (let z = cz; z < cz + bh; z++) for (let x = cx; x < cx + bw; x++) {
+        if (!m.inB(x, z) || m.blockedT(x, z) || m.road[z * W + x] !== 0) continue;
+        const i = z * W + x;
+        m.cityBlock[i] = 1; m.tBlocked[i] = 1;
+      }
+      blocks++;
+    }
+    m.regionDirty = true;
+  }
+
   // -- forests: impassable tree cover on temperate land, away from spawns
-  for (let cz = 0; cz < H; cz++) {
+  // (skipped on urban maps — they use building blocks instead, and stay flat/fast)
+  if (!urban) for (let cz = 0; cz < H; cz++) {
     for (let cx = 0; cx < W; cx++) {
       const i = cz * W + cx;
       if (m.tBlocked[i]) continue;

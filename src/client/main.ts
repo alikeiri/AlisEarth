@@ -144,9 +144,10 @@ class LocalGame implements GameLike {
     const minForPlayers = nPlayers >= 4 ? 160 : nPlayers === 3 ? 136 : 112;
     const effSize = Math.min(MAXD, Math.max(size, minForPlayers));
     setMapSize(effSize);
-    // islands mode rides in seed bit 0x40000000 (clear it from the random bits first)
-    let seed = ((Date.now() ^ (Math.random() * 0x7fffffff)) >>> 0) & ~0x40000000;
+    // map type rides in seed bits: islands 0x40000000, urban 0x20000000
+    let seed = ((Date.now() ^ (Math.random() * 0x7fffffff)) >>> 0) & ~0x60000000;
     if (islandsEnabled) seed |= 0x40000000;
+    if (urbanEnabled) seed |= 0x20000000;
     const LVL_NAMES = ['Easy', 'Normal', 'Hard', 'Brutal'];
     const pickFacs = (avoid: string[], n: number) => {
       const pool = Object.keys(FACTIONS).filter(f => !avoid.includes(f));
@@ -2376,7 +2377,8 @@ let selDiff = 1;
 let selDiff2 = 2;
 let selSize = 112;
 let fogEnabled = true; // start-screen checkbox; spectator/replay always show all
-let islandsEnabled = false; // start-screen checkbox: generate a 2-4 island map split by water
+let islandsEnabled = false; // map-type selector: 2-4 island map split by water
+let urbanEnabled = false;   // map-type selector: flat urban map (roads, river, bridges, buildings)
 let selEnemies = 1; // 1-3 AI opponents in skirmish
 let selDiff3 = 2;   // third enemy's difficulty
 let selTeams = [1, 2, 3, 4]; // team per player slot (You, AI1, AI2, AI3); FFA by default
@@ -3159,7 +3161,9 @@ function initMenus() {
     const key = (($('claudeKey') as HTMLInputElement).value || '').trim();
     try { safeLS.setItem('ae_claude_key', key); } catch { /* no storage */ }
     fogEnabled = ($('fogChk') as HTMLInputElement)?.checked ?? true;
-    islandsEnabled = ($('islandChk') as HTMLInputElement)?.checked ?? false;
+    const mt = ($('mapType') as HTMLSelectElement)?.value || 'continent';
+    islandsEnabled = mt === 'islands';
+    urbanEnabled = mt === 'urban';
     const levels = [selDiff, selDiff2, selDiff3].slice(0, selEnemies);
     const teams = selTeams.slice(0, 1 + selEnemies);
     startGame(new LocalGame(playerName(), selFaction, selDiff, selSize, null, levels, teams));
@@ -3257,7 +3261,7 @@ function initMenus() {
   // create a game others can see and join from the lobby
   $('btnMpCreate').addEventListener('click', () => {
     $('mpErr').textContent = '';
-    net?.send({ t: 'create', name: playerName(), faction: selFaction, size: selSize, diff: selDiff, islands: ($('islandChk') as HTMLInputElement)?.checked ?? false, lockstep: ($('lockstepChk') as HTMLInputElement)?.checked ?? false });
+    net?.send({ t: 'create', name: playerName(), faction: selFaction, size: selSize, diff: selDiff, islands: ($('mapType') as HTMLSelectElement)?.value === 'islands', urban: ($('mapType') as HTMLSelectElement)?.value === 'urban', lockstep: ($('lockstepChk') as HTMLInputElement)?.checked ?? false });
   });
   $('btnMpJoinCode').addEventListener('click', () => {
     $('mpErr').textContent = '';

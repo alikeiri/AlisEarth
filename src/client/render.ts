@@ -934,6 +934,7 @@ export class Renderer {
     this.scene.add(this.terrain);
     this.loadTerrainTextures(maxAniso); // CC0 photo textures; procedural fallback
     this.buildTrees();
+    this.buildCity();
     this.buildFog();
 
     // water: animated normal-mapped surface
@@ -1607,6 +1608,39 @@ export class Renderer {
     // keep references so the fog can hide trees in unexplored cells (like units)
     this.treeTrunks = trunks; this.treeLeaves = leaves; this.treeN = k;
     this.treeBaseMat = (trunks.instanceMatrix.array as Float32Array).slice(0, k * 16);
+  }
+
+  // urban maps: render the building blocks as simple instanced boxes (one draw
+  // call, varied grey heights). Cheap — keeps the urban map fast.
+  private buildCity() {
+    const cells: { x: number; z: number }[] = [];
+    for (let cz = 0; cz < H; cz++)
+      for (let cx = 0; cx < W; cx++)
+        if (this.map.cityBlock[cz * W + cx]) cells.push({ x: cx, z: cz });
+    if (!cells.length) return;
+    const geo = new THREE.BoxGeometry(0.96, 1, 0.96);
+    geo.translate(0, 0.5, 0); // sit on the ground, grow up
+    const mesh = new THREE.InstancedMesh(geo, new THREE.MeshStandardMaterial({ color: 0x8a8f96, roughness: 0.85, metalness: 0.05 }), cells.length);
+    const col = new THREE.Color();
+    let k = 0;
+    for (const c of cells) {
+      const hh = 1.6 + hash2(53, c.x, c.z) * 3.2; // 1.6..4.8 storeys
+      this.dummy.position.set(c.x + 0.5, this.map.heightAt(c.x + 0.5, c.z + 0.5) - 0.1, c.z + 0.5);
+      this.dummy.rotation.set(0, 0, 0);
+      this.dummy.scale.set(1, hh, 1);
+      this.dummy.updateMatrix();
+      mesh.setMatrixAt(k, this.dummy.matrix);
+      const shade = 0x6e7a86 + ((hash2(91, c.x, c.z) * 0x202020) | 0);
+      col.setHex(shade & 0xffffff);
+      mesh.setColorAt(k, col);
+      k++;
+    }
+    mesh.count = k;
+    mesh.castShadow = true; mesh.receiveShadow = true; // buildings define the urban look — worth the shadows
+    mesh.frustumCulled = false;
+    mesh.instanceMatrix.needsUpdate = true;
+    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+    this.scene.add(mesh);
   }
 
   // hide trees that sit in still-unexplored cells (fog 0); show them once the

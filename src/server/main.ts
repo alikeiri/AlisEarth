@@ -233,7 +233,7 @@ interface Client { ws: WebSocket; name: string; faction: string; slot: number; l
 interface Room {
   code: string; clients: Client[]; started: boolean;
   sim: Sim | null; timer: ReturnType<typeof setInterval> | null; cmdQ: any[];
-  aiSlots: number[]; size: number; diff: number; islands?: boolean; lockstep?: boolean;
+  aiSlots: number[]; size: number; diff: number; islands?: boolean; urban?: boolean; lockstep?: boolean;
   dropVote?: { player: number; votes: Map<number, number> }; // lockstep: drop-tick consensus
   rec?: { seed: number; size: number; players: any[]; cmds: { k: number; c: any[] }[] };
   lastReport?: any; replaySaved?: boolean;
@@ -436,9 +436,10 @@ function startRoom(room: Room) {
     room.aiSlots.push(specs.length);
     specs.push({ name: `AI ${FACTIONS[f].name} (${lvlName})`, faction: f, isAI: true, aiLvl: room.diff });
   }
-  // islands mode rides in seed bit 0x40000000 (cleared from the random bits first)
-  let seed = ((Math.random() * 0x7fffffff) | 0) & ~0x40000000;
+  // map type rides in seed bits: islands 0x40000000, urban 0x20000000
+  let seed = ((Math.random() * 0x7fffffff) | 0) & ~0x60000000;
   if (room.islands) seed |= 0x40000000;
+  if (room.urban) seed |= 0x20000000;
 
   // LOCKSTEP mode: the server runs NO sim and sends NO snapshots — each client
   // runs its own deterministic sim and the server only relays input messages.
@@ -575,6 +576,7 @@ wss.on('connection', ws => {
         size: [72, 96, 128].includes(m.size) ? m.size : 96,
         diff: Number.isInteger(m.diff) && m.diff >= 0 && m.diff <= 3 ? m.diff : 1,
         islands: !!m.islands,
+        urban: !!m.urban,
         lockstep: !!m.lockstep,
       };
       me.room = room;
