@@ -110,7 +110,10 @@ async function main() {
   const nVeh = +(document.getElementById('nVeh') as HTMLInputElement).value || 1500;
   const shadows = (document.getElementById('shadows') as HTMLInputElement).checked;
   const gpuOk = !!(navigator as any).gpu;
-  log(`Scene: ${nInf} soldiers + ${nVeh} vehicles, shadows ${shadows ? 'on' : 'off'}\nWebGPU available: ${gpuOk}\nRunning… (each backend ~5s)`);
+  const secure = (window as any).isSecureContext;
+  log(`Scene: ${nInf} soldiers + ${nVeh} vehicles, shadows ${shadows ? 'on' : 'off'}\n`
+    + `WebGPU available: ${gpuOk}${!gpuOk && !secure ? '  (this page is HTTP — WebGPU needs HTTPS or localhost)' : ''}\n`
+    + `Running… (each backend ~5s)`);
 
   const results: any[] = [];
   // WebGL first
@@ -128,8 +131,10 @@ async function main() {
     } catch (e: any) {
       append(`WebGPU failed: ${e?.message || e}`);
     }
+  } else if (!secure) {
+    append('WebGPU unavailable: this page is served over HTTP. WebGPU requires a\nsecure context — open it on https:// or http://localhost to test it.\n(Note: WebGPU would also need HTTPS in the live game — but it works in an\nElectron/Steam build, which is always a secure context.)');
   } else {
-    append('WebGPU not available in this browser (needs Chrome/Edge with WebGPU).');
+    append('WebGPU not available (needs Chrome/Edge ~113+ with WebGPU enabled).');
   }
   (window as any).__bench = results;
 }
