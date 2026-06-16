@@ -1110,7 +1110,9 @@ class GameClient {
       const p = this.renderer.project(v.x, v.z, 0.5);
       if (p.ok && p.x >= lo.x && p.x <= hi.x && p.y >= lo.y && p.y <= hi.y) boxed.push(v);
     }
-    const combat = boxed.filter(v => v.t !== 'harv');
+    // a mixed box-select drops the economy miners (harvesters + oil miners) so
+    // orders don't drag them off their fields; a miners-only box still selects them
+    const combat = boxed.filter(v => !UNITS[v.t]?.cargo);
     for (const v of (combat.length ? combat : boxed)) this.selection.add(v.i);
   }
 

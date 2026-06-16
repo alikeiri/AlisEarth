@@ -1,6 +1,6 @@
 // DOM HUD: top bar, build sidebar, minimap, overlay (health bars, drag box).
 
-import { UNITS, BUILDINGS, FACTIONS, PLAYER_COLORS, AIRFIELD_CAP, UPG_MAX, upgCost, TECHS, dmgMul } from '../sim/data';
+import { UNITS, BUILDINGS, FACTIONS, PLAYER_COLORS, AIRFIELD_HELI, AIRFIELD_PLANE, airSlotClass, UPG_MAX, upgCost, TECHS, dmgMul } from '../sim/data';
 import { GameMap, W, H, SEA } from '../sim/map';
 
 const B_ICONS: Record<string, string> = {
@@ -489,17 +489,18 @@ export class UI {
     // my completed buildings by type + unit queue info + airfield capacity
     const myDone: Record<string, number> = {};
     const queueByUnit: Record<string, { n: number; prog: number }> = {};
-    let padHave = 0, padCap = 0;
+    const padHave: Record<string, number> = { heli: 0, plane: 0 };
+    let airfields = 0;
     for (const v of views) {
       if (v.o !== me) continue;
-      if (!v.b) { if (UNITS[v.t]?.pad) padHave++; continue; }
+      if (!v.b) { const c = airSlotClass(v.t); if (c === 'heli' || c === 'plane') padHave[c]++; continue; }
       if (v.pr >= 1) {
         myDone[v.t] = (myDone[v.t] || 0) + 1;
-        if (v.t === 'airfield') padCap += AIRFIELD_CAP(v.lv || 1);
+        if (v.t === 'airfield') airfields++;
       }
       if (v.qn > 0 && v.qq) {
         v.qq.forEach((ty: string, qi: number) => {
-          if (UNITS[ty]?.pad) padHave++;
+          const c = airSlotClass(ty); if (c === 'heli' || c === 'plane') padHave[c]++;
           const q = queueByUnit[ty] || { n: 0, prog: 0 };
           q.n++;
           if (qi === 0) q.prog = Math.max(q.prog, v.qt || 0); // only the head item is in production
@@ -508,6 +509,7 @@ export class UI {
       }
     }
     const credits = pl.c;
+    const padCap: Record<string, number> = { heli: airfields * AIRFIELD_HELI, plane: airfields * AIRFIELD_PLANE };
 
     // When a single finished production building of mine is selected, focus the
     // sidebar on just that building's units: hide the Structures section and show
@@ -541,7 +543,8 @@ export class UI {
       const def = UNITS[t];
       const cost = Math.round(def.cost * fac.costMul);
       let ok = (myDone[def.builtAt] || 0) > 0 || (def.altBuiltAt ? (myDone[def.altBuiltAt] || 0) > 0 : false);
-      if (ok && def.pad && padHave >= padCap) ok = false; // airfields full
+      const padCls = airSlotClass(t);
+      if (ok && (padCls === 'heli' || padCls === 'plane') && padHave[padCls] >= padCap[padCls]) ok = false; // that class's airfield slots are full
       let uniqueBlocked = false;
       if (ok && (def.unique || def.commando) && ((aliveByUnit[t] || 0) + (queueByUnit[t]?.n || 0)) >= 1) { ok = false; uniqueBlocked = true; } // one per player
       if (def.tech && !myTech[def.tech]) ok = false;      // not yet researched
@@ -554,7 +557,10 @@ export class UI {
       this.styleBtn(t, ok, credits >= cost, cost, q?.n || 0, q?.prog || 0);
       if (def.pad) {
         const tip = counterTip(t);
-        this.btns[t].title = `Airfield capacity ${padHave}/${padCap}` + (tip ? '\n' + tip : '');
+        const capStr = (padCls === 'heli' || padCls === 'plane')
+          ? `Airfield ${padCls} slots ${padHave[padCls]}/${padCap[padCls]}`
+          : 'Unlimited — no airfield slot';
+        this.btns[t].title = capStr + (tip ? '\n' + tip : '');
       } else if (uniqueBlocked) {
         this.btns[t].title = `${def.name}: only one per player at a time`;
       }

@@ -1,7 +1,7 @@
 // Authoritative game simulation. Fixed timestep (10 Hz), no rendering imports.
 // Runs in the browser for skirmish and on the Node server for multiplayer.
 
-import { TICK, UNITS, BUILDINGS, FACTIONS, Faction, dmgMul, AIRFIELD_CAP, UPG_MAX, upgCost, ORE_VALUE, START_CREDITS, ORE_REGEN, ORE_REGEN_CAP, TECHS, DRONE_TYPES } from './data';
+import { TICK, UNITS, BUILDINGS, FACTIONS, Faction, dmgMul, AIRFIELD_HELI, AIRFIELD_PLANE, airSlotClass, UPG_MAX, upgCost, ORE_VALUE, START_CREDITS, ORE_REGEN, ORE_REGEN_CAP, TECHS, DRONE_TYPES } from './data';
 import { hyp, dsin, dcos } from './dmath';
 import { GameMap, genMap, nearestPassable, nearestSea, W, H, SEA } from './map';
 import { findPath } from './path';
@@ -332,8 +332,8 @@ export class Sim {
       // silo stockpiles up to MISSILE_CAP armed missiles (stock + in-build)
       if (def.missile && ((b.missileStock?.length || 0) + b.queue.length) >= MISSILE_CAP) return;
       if (b.progress < b.total || b.queue.length >= 6) return;
-      // aircraft are limited by total airfield capacity
-      if (def.pad && !this.padCapacityFree(c.p)) return;
+      // aircraft are limited by per-class airfield capacity (helis 30 / planes 10)
+      if (def.pad && !this.padCapacityFree(c.p, c.type)) return;
       const cost = Math.round(def.cost * pl.fac.costMul * pl.bonusCost);
       if (pl.credits < cost) return;
       pl.credits -= cost;
@@ -769,14 +769,19 @@ export class Sim {
     });
   }
 
-  padCapacityFree(p: number): boolean {
+  // per-class airfield capacity: helidrones are unlimited; helicopters get 30 per
+  // airfield, airplanes 10. Counts that class's live units + in-production queue.
+  padCapacityFree(p: number, type: string): boolean {
+    const cls = airSlotClass(type);
+    if (!cls || cls === 'drone') return true;       // not slot-limited / unlimited
+    const per = cls === 'heli' ? AIRFIELD_HELI : AIRFIELD_PLANE;
     let have = 0, cap = 0;
     for (const e of this.ents.values()) {
       if (e.owner !== p) continue;
-      if (!e.b && UNITS[e.type]?.pad) have++;
+      if (!e.b && airSlotClass(e.type) === cls) have++;
       if (e.b) {
-        if (e.type === 'airfield' && e.progress >= e.total) cap += AIRFIELD_CAP(e.lvl);
-        for (const q of e.queue) if (UNITS[q.type]?.pad) have++;
+        if (e.type === 'airfield' && e.progress >= e.total) cap += per;
+        for (const q of e.queue) if (airSlotClass(q.type) === cls) have++;
       }
     }
     return have < cap;
@@ -1252,7 +1257,7 @@ export class Sim {
           // repeat production: finished unit re-queues itself (charged on start)
           if (b.rpt && b.queue.length < 6) {
             const rdef = UNITS[it.type];
-            if (!rdef.pad || this.padCapacityFree(b.owner))
+            if (!rdef.pad || this.padCapacityFree(b.owner, it.type))
               b.queue.push({ type: it.type, t: rdef.buildTime, t0: rdef.buildTime, paid: false });
           }
         } else it.t = 1; // exit blocked, retry shortly

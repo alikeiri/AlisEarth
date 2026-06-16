@@ -153,7 +153,16 @@ export const UNITS: Record<string, UnitDef> = {
   chemissile: { name: 'Chem Warhead',   cost: 2000, hp: 1, speed: 7, range: 0, dmg: 250, rof: 1, builtAt: 'silo', buildTime: 36, kind: 'air', missile: true, blastR: 3.4, tech: 'chem' },
 };
 
-export const AIRFIELD_CAP = (lvl: number) => 2 + 2 * lvl; // capacity per airfield level
+export const AIRFIELD_CAP = (lvl: number) => 2 + 2 * lvl; // (legacy) capacity per airfield level
+// per-class airfield capacity: each finished Airfield holds this many of a class.
+// Helidrones are unlimited (no airfield slot). Airplanes are the scarce slots.
+export const AIRFIELD_HELI = 30, AIRFIELD_PLANE = 10;
+export function airSlotClass(type: string): 'heli' | 'plane' | 'drone' | null {
+  if (!UNITS[type]?.pad) return null;          // not airfield-limited (e.g. Air Transport)
+  if (type === 'helidrone') return 'drone';    // unlimited
+  if (type === 'heli') return 'heli';
+  return 'plane';                              // fighter / bomber / drone bomber
+}
 export const UPG_MAX = 3;
 export const upgCost = (type: string, lvl: number, costMul: number) =>
   Math.round(BUILDINGS[type].cost * 0.6 * lvl * costMul);
