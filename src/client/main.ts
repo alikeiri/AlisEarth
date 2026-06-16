@@ -783,6 +783,11 @@ class GameClient {
     };
     chatInp.addEventListener('keydown', chatKeys);
     this.cleanups.push(() => chatInp.removeEventListener('keydown', chatKeys));
+    // click the collapsed chat to briefly expand it to the last 10 lines
+    const chatLogEl = document.getElementById('chatLog')!;
+    const chatLogClick = () => { this.chatExpanded = true; this.chatExpandT = performance.now(); this.renderChat(); };
+    chatLogEl.addEventListener('click', chatLogClick);
+    this.cleanups.push(() => chatLogEl.removeEventListener('click', chatLogClick));
 
     this.setupTouchBar(on);
     this.sizeOverlay();
@@ -926,6 +931,8 @@ class GameClient {
 
   private chatHistory: { name: string; to: any; msg: string; t: number }[] = [];
   private chatT0 = performance.now();   // game-start reference for chat timestamps
+  private chatExpanded = false;          // click the chat to briefly show the last 10
+  private chatExpandT = 0;
 
   private appendChat(m: any) {
     this.chatHistory.push({ name: String(m.name), to: m.to, msg: String(m.msg), t: performance.now() });
@@ -933,9 +940,8 @@ class GameClient {
     this.renderChat();
   }
 
-  // rebuild the chat log from history. While the input bar is open we show the
-  // last 10 lines as a typing aid; otherwise the most recent 8 (and the loop
-  // prunes those by age so they fade away when not chatting).
+  // rebuild the chat log from history. Typing → last 10 (a typing aid); otherwise
+  // just the last 2 to save screen space — click the log to briefly expand to 10.
   private renderChat() {
     const log = document.getElementById('chatLog')!;
     const typing = !document.getElementById('chatBar')!.classList.contains('hidden');
@@ -946,8 +952,8 @@ class GameClient {
       const min = Math.max(0, Math.floor((t - this.chatT0) / 60000));
       return `${String(Math.floor(min / 60)).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`;
     };
-    // always keep the last 10 lines on screen (they persist after the chat closes)
-    log.innerHTML = this.chatHistory.slice(-10).map(m => {
+    const count = (typing || this.chatExpanded) ? 10 : 2;
+    log.innerHTML = this.chatHistory.slice(-count).map(m => {
       const dm = typeof m.to === 'number';
       const chan = dm ? 'DM' : m.to === 'allies' ? 'ALLY' : 'ALL';
       return `<div class="chatMsg${dm ? ' dm' : ''}" data-t="${m.t}">` +
@@ -2023,6 +2029,8 @@ class GameClient {
     this.updateAudioCues(views);
     // chat messages + expiry
     for (const m of (this.game.drainChat?.() || [])) { this.appendChat(m); audio.play('click'); }
+    // collapse the expanded chat back to 2 lines, 3s after it was opened
+    if (this.chatExpanded && performance.now() - this.chatExpandT > 3000) { this.chatExpanded = false; this.renderChat(); }
     if (this.frame % 30 === 0) {
       // age out old lines so they fade away — but always KEEP the last 10
       // (they stay on screen after the chat closes), and never prune while typing
