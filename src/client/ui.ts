@@ -20,6 +20,7 @@ const U_ICONS: Record<string, string> = {
   fighter: '\u{1F6E9}️', bomber: '\u{1F4A3}', dbomber: '\u{1F916}', heli: '\u{1F681}', helidrone: '\u{1FA81}',
   mcv: '\u{1F3D7}️', dozer: '\u{1F69C}', patriot: '\u{1F6F0}️',
   oiltruck: '\u{1F6E2}️', oilship: '\u{1F6E2}️', tews: '\u{1F4E1}', navengineer: '\u{1F6E0}️',
+  mortar: '\u{1F4A3}', artillery: '\u{1F4A5}', artyship: '\u{1F4A5}',
 };
 export const B_LIST = ['power', 'refinery', 'radar', 'barracks', 'factory', 'turret', 'sam', 'cannon', 'tesla', 'irondome', 'wall', 'barrier', 'dronefac', 'shipyard', 'airforce', 'airfield', 'lab', 'silo'];
 
@@ -36,9 +37,9 @@ const UPG_INFO: Record<string, string> = {
   airforce: '+25% production speed',
   shipyard: '+25% production speed',
 };
-export const U_LIST = ['rifle', 'rocket', 'melody', 'hive', 'tank', 'heavy', 'ifv', 'aatank', 'flak', 'patriot', 'fueltruck', 'harv', 'oiltruck', 'engineer', 'mcv', 'dozer', 'mlrs', 'recon', 'strike', 'msldrone',
+export const U_LIST = ['rifle', 'rocket', 'mortar', 'melody', 'hive', 'tank', 'heavy', 'ifv', 'aatank', 'flak', 'patriot', 'fueltruck', 'harv', 'oiltruck', 'engineer', 'mcv', 'dozer', 'mlrs', 'artillery', 'recon', 'strike', 'msldrone',
   'tews', 'chemtrooper', 'chemtank', 'chemdrone', 'biotrooper', 'biotank', 'biodrone', 'stealthtank',
-  'gunboat', 'destroyer', 'sub', 'subhunter', 'mslcruiser', 'flakship', 'navdrone', 'oilship', 'navengineer', 'transport', 'fighter', 'bomber', 'dbomber', 'heli', 'helidrone',
+  'gunboat', 'destroyer', 'artyship', 'sub', 'subhunter', 'mslcruiser', 'flakship', 'navdrone', 'oilship', 'navengineer', 'transport', 'fighter', 'bomber', 'dbomber', 'heli', 'helidrone',
   'cmissile', 'bbmissile', 'chemissile'];
 
 // strengths/weaknesses tooltip, derived from the live damage matrix so it can
@@ -48,6 +49,9 @@ const TIP_NOTES: Record<string, string> = {
   flak: 'Excellent vs drones, poor vs airplanes',
   aatank: 'Dedicated anti-air missiles',
   mlrs: 'Cannot engage aircraft',
+  mortar: 'Mortar Team: long-range area splash, shreds massed infantry. Fragile, slow, no air defence.',
+  artillery: 'Artillery: long-range siege gun with big area splash — breaks up clumped pushes and flattens bases. Fragile; outrange the enemy or get overrun. No air defence.',
+  artyship: 'Artillery Cruiser: long-range naval bombardment with wide area splash. Shell coastal pushes and bases from offshore. No air defence.',
   turret: 'Cannot engage aircraft',
   fueltruck: 'Suicide truck: huge fireball, sets buildings ablaze (burn damage over time)',
   cmissile: 'Silo weapon — select the silo, right-click anywhere to launch',

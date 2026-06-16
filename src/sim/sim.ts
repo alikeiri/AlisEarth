@@ -1074,13 +1074,14 @@ export class Sim {
     att.aimX = tgt.x; att.aimZ = tgt.z;
     this.dealDamage(att, tgt, dmg, force);
     const ud = UNITS[att.type];
+    if (ud?.splash) this.splashHit(att, tgt.x, tgt.z, dmg, ud.splash, tgt.id, force); // artillery AoE
     // weapon class: 0 mg, 1 rocket, 2 cannon, 3 drone zap, 4 missile salvo
     const tgtInf = !tgt.b && UNITS[tgt.type]?.kind === 'inf';
     const w = att.type === 'rifle' || att.type === 'ifv' ? 0
       : att.type === 'sub' ? (tgt.b ? 8 : 7)                                 // sub: cruise missile vs buildings, torpedo vs ships
       : att.type === 'flak' ? 5                                              // pom-pom flak
       : att.type === 'rocket' || att.type === 'sam' || att.type === 'aatank' ? 1
-      : att.type === 'mlrs' || att.type === 'msldrone' ? 4
+      : att.type === 'mlrs' || att.type === 'msldrone' || att.type === 'mortar' || att.type === 'artillery' || att.type === 'artyship' ? 4
       : att.type === 'heli' || att.type === 'helidrone' ? (tgtInf ? 0 : 1)   // guns vs inf, rockets vs veh/bld
       : att.type === 'heavy' || att.type === 'destroyer' ? 6                 // heavy/naval gun
       : att.type === 'cannon' ? 9                                            // Heavy Cannon emplacement: visible shell
@@ -1089,6 +1090,25 @@ export class Sim {
     const ev: any = { e: 'shot', x: att.x, z: att.z, tx: tgt.x, tz: tgt.z, w };
     if (ud?.fly) ev.f = 1;
     this.events.push(ev);
+  }
+
+  // artillery area-of-effect: splash everything (foes; friends too on force-fire)
+  // around the shell's impact with linear falloff. dealDamage applies the matrix
+  // + friendly-fire rules per target, so we just hand it the reduced amount.
+  private splashHit(att: Entity, x: number, z: number, base: number, R: number, primaryId: number, force: boolean) {
+    const R2 = R * R;
+    for (const o of this.nearbyUnits(x, z, R)) {
+      if (o.b || o.id === primaryId || o.id === att.id || o.hp <= 0) continue;
+      const dx = o.x - x, dz = o.z - z, d2 = dx * dx + dz * dz;
+      if (d2 > R2) continue;
+      this.dealDamage(att, o, base * (1 - 0.55 * (Math.sqrt(d2) / R)) * 0.7, force);
+    }
+    for (const o of this.ents.values()) {
+      if (!o.b || o.id === primaryId || o.hp <= 0) continue;
+      const d = this.distToEnt(x, z, o);
+      if (d > R) continue;
+      this.dealDamage(att, o, base * (1 - 0.55 * (d / R)) * 0.7, force);
+    }
   }
 
   // commando (Melody) special engagement: against a building she plants a heavy

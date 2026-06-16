@@ -35,6 +35,7 @@ export interface UnitDef {
   bombTruck?: boolean;                           // suicide truck: ground contact fireball + sets buildings ablaze
   missile?: boolean;                             // built at the silo, stored there, launched at a map position
   blastR?: number;                               // missile blast radius
+  splash?: number;                               // artillery: area-of-effect splash radius around each shell
   deploys?: string;                              // MCV: F deploys it into this building (forward base)
   terra?: boolean;                               // bulldozer: can reshape terrain along a drawn path
   unique?: boolean;                              // at most one alive (or in production) per player
@@ -79,6 +80,11 @@ export const UNITS: Record<string, UnitDef> = {
   strike: { name: 'Strike Drone', cost: 1100, hp: 150, speed: 2.8, range: 5.0, dmg: 32, rof: 1.8, builtAt: 'dronefac', buildTime: 13, kind: 'air', fly: true },
   msldrone: { name: 'Missile Drone', cost: 1500, hp: 120, speed: 2.4, range: 7.0, dmg: 45, rof: 3.0, builtAt: 'dronefac', buildTime: 15, kind: 'air', fly: true },
   mlrs:   { name: 'MLRS',         cost: 1600, hp: 170, speed: 1.6, range: 13.0, dmg: 66, rof: 3.6, builtAt: 'factory',  buildTime: 16, kind: 'veh' },
+  // artillery line — long range + area-of-effect splash to break up massed pushes.
+  // Slow, fragile, can't hit aircraft; outranges most attackers (kite or get rushed).
+  mortar:   { name: 'Mortar Team', cost: 550,  hp: 95,  speed: 1.6, range: 11.0, dmg: 46, rof: 3.4, builtAt: 'barracks', buildTime: 11, kind: 'inf', splash: 2.2 },
+  artillery:{ name: 'Artillery',   cost: 1500, hp: 200, speed: 1.4, range: 14.5, dmg: 78, rof: 4.2, builtAt: 'factory',  buildTime: 16, kind: 'veh', splash: 2.8 },
+  artyship: { name: 'Artillery Cruiser', cost: 1900, hp: 620, speed: 2.1, range: 15.5, dmg: 92, rof: 4.6, builtAt: 'shipyard', buildTime: 17, kind: 'sea', move: 'sea', splash: 3.0 },
   // the anti-infantry vehicle: autocannon IFV — shreds infantry, loses to tanks
   ifv:    { name: 'IFV',          cost: 700,  hp: 300, speed: 3.4, range: 5.0, dmg: 24, rof: 0.8, builtAt: 'factory',  buildTime: 9,  kind: 'veh' },
   // mobile anti-air pair: missile AA hunts airplanes, flak shreds drone swarms
@@ -280,7 +286,7 @@ export function dmgMul(attType: string, tgtIsBuilding: boolean, tgtKind: string,
     if (attType === 'rifle') return 1.2;
     if (attType === 'ifv') return 0.8;           // autocannon can pepper aircraft
     if (attType === 'turret' || attType === 'cannon' || attType === 'tesla') return 0; // defensive guns can't elevate (AA = SAM / Patriot)
-    if (attType === 'mlrs') return 0;            // artillery cannot engage aircraft
+    if (attType === 'mlrs' || attType === 'mortar' || attType === 'artillery' || attType === 'artyship') return 0; // artillery cannot engage aircraft
     if (attType === 'tank' || attType === 'heavy') return 0.4;
     if (attType === 'bomber') return 0.1;
     if (attType === 'sub') return 0.15;
@@ -315,6 +321,9 @@ export function dmgMul(attType: string, tgtIsBuilding: boolean, tgtKind: string,
   if (attType === 'heli')   return tgtKind === 'veh' ? 1.8 : 1.25; // rockets vs armor, guns vs inf
   if (attType === 'sub')    return tgtIsBuilding ? 0.35 : 0.8; // cruise-missile siege halved
   if (attType === 'mlrs')   return tgtIsBuilding ? 2.0 : (tgtKind === 'inf' ? 1.5 : 0.7);
+  if (attType === 'mortar') return tgtIsBuilding ? 1.1 : (tgtKind === 'inf' ? 1.9 : 0.6); // anti-infantry mortar
+  if (attType === 'artillery') return tgtIsBuilding ? 2.1 : (tgtKind === 'inf' ? 1.7 : 1.0); // siege howitzer
+  if (attType === 'artyship')  return tgtIsBuilding ? 2.3 : (tgtKind === 'inf' ? 1.6 : 1.0); // shore bombardment
   if (attType === 'msldrone') return tgtIsBuilding ? 1.5 : (tgtKind === 'veh' ? 1.8 : 0.5);
   if (attType === 'recon')  return tgtIsBuilding ? 0.4 : (tgtKind === 'inf' ? 1.2 : 0.5);
   if (attType === 'strike') return tgtIsBuilding ? 1.2 : (tgtKind === 'veh' ? 1.8 : 0.55);
