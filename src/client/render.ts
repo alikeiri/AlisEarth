@@ -775,10 +775,22 @@ interface FxTracer { x1: number; y1: number; z1: number; x2: number; y2: number;
 interface FxPart { x: number; y: number; z: number; vx: number; vy: number; vz: number; life: number; max: number; s: number }
 interface FxRocket { x0: number; y0: number; z0: number; x1: number; y1: number; z1: number; t: number; delay: number; dur: number; arc: number }
 
+// graphics quality presets — the two biggest GPU costs are render resolution
+// (pixel ratio) and shadows, both adjustable at runtime. Low ≈ max fps.
+export const GFX_QUALITY: Record<string, { pr: number; shadows: boolean; shadowSize: number }> = {
+  low:    { pr: 1.0,  shadows: false, shadowSize: 1024 },
+  medium: { pr: 1.25, shadows: true,  shadowSize: 1024 },
+  high:   { pr: 1.75, shadows: true,  shadowSize: 2048 },
+};
+export function gfxQuality(): string {
+  try { return localStorage.getItem('fe_quality') || 'medium'; } catch { return 'medium'; }
+}
+
 export class Renderer {
   scene = new THREE.Scene();
   camera: THREE.PerspectiveCamera;
   three: THREE.WebGLRenderer;
+  sun!: THREE.DirectionalLight;
   map: GameMap;
 
   camX = 48; camZ = 48; yaw = 0; dist = 28; // yaw 0: view matches the minimap exactly
@@ -845,7 +857,7 @@ export class Renderer {
     this.map = map;
     // request the discrete GPU: on dual-GPU laptops the browser defaults to
     // the integrated chip unless WebGL explicitly asks for high performance
-    this.three = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
+    this.three = new THREE.WebGLRenderer({ canvas, antialias: gfxQuality() !== 'low', powerPreference: 'high-performance' });
     // report the active GPU (so you can confirm the discrete card is in use)
     try {
       const gl = this.three.getContext();
@@ -853,8 +865,9 @@ export class Renderer {
       this.gpuName = dbg ? String(gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL)) : String(gl.getParameter(gl.RENDERER));
       console.log('[Ali\'s Earth] GPU in use:', this.gpuName);
     } catch { this.gpuName = 'unknown'; }
-    this.three.setPixelRatio(Math.min(1.75, window.devicePixelRatio));
-    this.three.shadowMap.enabled = true;
+    const q = GFX_QUALITY[gfxQuality()] || GFX_QUALITY.medium;
+    this.three.setPixelRatio(Math.min(q.pr, window.devicePixelRatio));
+    this.three.shadowMap.enabled = q.shadows;
     this.three.shadowMap.type = THREE.PCFSoftShadowMap;
     this.three.toneMapping = THREE.ACESFilmicToneMapping;
     this.three.toneMappingExposure = 1.15;
@@ -897,10 +910,11 @@ export class Renderer {
     const hemi = new THREE.HemisphereLight(0xbdd7f2, 0x6a5a42, 0.75);
     this.scene.add(hemi);
     const sun = new THREE.DirectionalLight(0xffe7c4, 2.2);
+    this.sun = sun;
     sun.position.set(W / 2 + 40, 85, H / 2 - 25);
     sun.target.position.set(W / 2, 0, H / 2);
     sun.castShadow = true;
-    sun.shadow.mapSize.set(2048, 2048);
+    sun.shadow.mapSize.set(q.shadowSize, q.shadowSize);
     const sc = sun.shadow.camera as THREE.OrthographicCamera;
     sc.left = -75; sc.right = 75; sc.top = 75; sc.bottom = -75; sc.far = 250;
     sun.shadow.bias = -0.0004;
@@ -1606,6 +1620,20 @@ export class Renderer {
     this.three.setSize(w, h);
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
+  }
+
+  // apply a graphics-quality preset live (pixel ratio + shadows) and persist it
+  setQuality(name: string) {
+    const q = GFX_QUALITY[name] || GFX_QUALITY.medium;
+    try { localStorage.setItem('fe_quality', name); } catch { /* no storage */ }
+    this.three.setPixelRatio(Math.min(q.pr, window.devicePixelRatio));
+    this.three.shadowMap.enabled = q.shadows;
+    if (this.sun) {
+      this.sun.shadow.mapSize.set(q.shadowSize, q.shadowSize);
+      if (this.sun.shadow.map) { this.sun.shadow.map.dispose(); (this.sun.shadow as any).map = null; } // rebuild at the new size
+    }
+    this.three.shadowMap.needsUpdate = true;
+    this.resize();
   }
 
   // ---- camera ----
