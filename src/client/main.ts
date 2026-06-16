@@ -77,6 +77,10 @@ function simViews(sim: Sim, a: number): any[] {
       // a collision shove/micro-nudge is far smaller — only the former animates legs
       const ddx = e.x - e.px, ddz = e.z - e.pz;
       if (ddx * ddx + ddz * ddz > 0.0036) v.mv = 1;
+      // travel heading the renderer faces along — set only by real path steps, so a
+      // collision shove (e.g. harvesters bunched at ore / the refinery) can't spin
+      // the model sideways the way the raw position delta would
+      if (e.hx !== undefined) { v.hx = e.hx; v.hz = e.hz; }
       if (e.stance) v.st = e.stance;
       if (e.fortified) v.fo = 1;
       if (e.fortT > 0) v.ft = e.fortGoal ? 1 : 2;

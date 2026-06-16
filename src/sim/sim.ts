@@ -29,6 +29,8 @@ export interface Entity {
   fortified: boolean; emitCd: number; ephLife: number; // drone hive + ephemeral units
   fortT: number; fortGoal: boolean; // fortify deploy/pack transition (vulnerable while changing)
   aimX?: number; aimZ?: number; // last firing target — renderer turns the unit toward it
+  hx?: number; hz?: number; // last travel heading (unit vector) — facing follows this, NOT raw
+                            // position deltas, so collision shoves don't spin clustered units
   oreCd: number; // harvester cooldown after every reachable field proved empty/blocked
   sd: number; // self-destruct: seconds left (0 = inactive); detonates at 0
   cmdT: number; // tick of the last explicit player/AI order (protects it from auto-reactions)
@@ -2248,6 +2250,7 @@ export class Sim {
       return false;
     }
     u.mvi = this.tickN; // attempted to move this tick (stuck detection)
+    u.hx = dx / d; u.hz = dz / d; // travel heading — what the renderer faces along
     const step = Math.min(d, speed * TICK);
     dx = (dx / d) * step; dz = (dz / d) * step;
     const nx = u.x + dx, nz = u.z + dz;

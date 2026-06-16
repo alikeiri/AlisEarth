@@ -1955,7 +1955,9 @@ export class Renderer {
       // Fall back to the per-frame delta for snapshot views that don't carry mv.
       const isMoving = v.mv !== undefined ? !!v.mv : (dx * dx + dz * dz > 0.0004);
       if (isMoving) {
-        const want = Math.atan2(dx, dz);
+        // face the sim's travel heading when we have it (collision shoves don't
+        // change it, so bunched harvesters stop crabbing); else the frame delta
+        const want = v.hx !== undefined ? Math.atan2(v.hx, v.hz) : Math.atan2(dx, dz);
         let da = want - f.a;
         while (da > Math.PI) da -= Math.PI * 2;
         while (da < -Math.PI) da += Math.PI * 2;
