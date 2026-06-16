@@ -4,6 +4,37 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Ali's Earth — RTS</title>
+<!-- Startup diagnostic: a classic (non-module) script so it runs even if the
+     main module fails to load/parse. Surfaces the real error on-screen (some
+     browsers — e.g. hardened Firefox — broke init silently with no visible
+     cause). Shows a banner on any uncaught error, or if the app never boots. -->
+<script>
+(function () {
+  function banner(msg) {
+    var el = document.getElementById('bootErr');
+    if (!el) {
+      el = document.createElement('div'); el.id = 'bootErr';
+      el.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:99999;background:#5a1414;color:#ffe;'
+        + 'padding:8px 12px;font:12px/1.4 monospace;white-space:pre-wrap;max-height:45%;overflow:auto;'
+        + 'border-top:2px solid #ff6b6b';
+      (document.body || document.documentElement).appendChild(el);
+    }
+    el.textContent = 'Startup error (please screenshot this):\n' + msg + '\n\n' + el.textContent;
+  }
+  window.addEventListener('error', function (e) {
+    banner((e.message || 'script error') + (e.filename ? ' @ ' + String(e.filename).split('/').pop() + ':' + e.lineno + ':' + e.colno : ''));
+  });
+  window.addEventListener('unhandledrejection', function (e) {
+    banner('Unhandled promise: ' + ((e.reason && (e.reason.stack || e.reason.message)) || e.reason));
+  });
+  // if the app module never signals a successful boot, say so (covers a module
+  // that was blocked or silently failed without throwing a catchable error)
+  setTimeout(function () {
+    if (!window.__feBooted) banner('The game code did not start (window.__feBooted is not set). '
+      + 'Browser: ' + navigator.userAgent);
+  }, 6000);
+})();
+</script>
 <style>
   :root {
     --hud-bg: rgba(12, 16, 20, 0.88);

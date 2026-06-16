@@ -4,6 +4,15 @@ import { UNITS, BUILDINGS, FACTIONS, PLAYER_COLORS, AIRFIELD_HELI, AIRFIELD_PLAN
 import { GameMap, W, H, SEA } from '../sim/map';
 import { twemojify } from './twemoji';
 
+// Range-ring geometry: a unit circle sampled once. Drawing a range ring then
+// costs just 3 ground projections (centre + the two ground axes) and an affine
+// sweep through this table, instead of projecting all 28 vertices every frame —
+// so showing hundreds of ranges at once stays cheap (was the dominant overlay cost).
+const RING_SEG = 28;
+const RING_COS: number[] = [];
+const RING_SIN: number[] = [];
+for (let a = 0; a <= RING_SEG; a++) { const t = (a / RING_SEG) * Math.PI * 2; RING_COS.push(Math.cos(t)); RING_SIN.push(Math.sin(t)); }
+
 const B_ICONS: Record<string, string> = {
   power: '⚡', refinery: '⛏️', barracks: '\u{1F396}️', factory: '\u{1F3ED}', turret: '\u{1F5FC}',
   dronefac: '\u{1F4E1}', sam: '\u{1F3AF}', shipyard: '⚓', airforce: '\u{2708}️', airfield: '\u{1F6EB}', lab: '\u{1F9EA}',
@@ -719,19 +728,25 @@ export class UI {
   ) {
     ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
 
-    // range/detection circles: project 28 ground points into a polygon
+    // range/detection circles: a ground circle projects to an ellipse, which we
+    // approximate from the centre and the two ground-axis directions (3 projects
+    // per ring instead of one per vertex) — cheap enough for hundreds at once
     if (circles) {
       for (const c of circles) {
-        ctx.beginPath();
-        let started = false, anyOk = false;
-        for (let a = 0; a <= 28; a++) {
-          const ang = (a / 28) * Math.PI * 2;
-          const p = project(c.x + Math.cos(ang) * c.r, c.z + Math.sin(ang) * c.r, 0.2);
-          if (!p.ok) { started = false; continue; }
-          anyOk = true;
-          if (!started) { ctx.moveTo(p.x, p.y); started = true; } else ctx.lineTo(p.x, p.y);
-        }
+        const ctr = project(c.x, c.z, 0.2);
+        const pu = project(c.x + 1, c.z, 0.2); // +1 along ground X
+        const pv = project(c.x, c.z + 1, 0.2); // +1 along ground Z
+        const anyOk = ctr.ok && pu.ok && pv.ok;
         if (anyOk) {
+          // screen vectors for one ground unit, scaled to the ring radius
+          const axx = (pu.x - ctr.x) * c.r, axy = (pu.y - ctr.y) * c.r;
+          const azx = (pv.x - ctr.x) * c.r, azy = (pv.y - ctr.y) * c.r;
+          ctx.beginPath();
+          for (let a = 0; a <= RING_SEG; a++) {
+            const x = ctr.x + RING_COS[a] * axx + RING_SIN[a] * azx;
+            const y = ctr.y + RING_COS[a] * axy + RING_SIN[a] * azy;
+            if (a === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+          }
           const prev = (c as any).preview;
           const kind = (c as any).kind;
           if ((c as any).fill) { // area-attack / strike circle: filled for visibility
@@ -749,8 +764,7 @@ export class UI {
           ctx.setLineDash([]);
           // crosshair at the centre so the aim point is unmistakable
           if (prev || (c as any).fill) {
-            const ctr = project(c.x, c.z, 0.2);
-            if (ctr.ok) {
+            {
               ctx.strokeStyle = prev ? 'rgba(255,210,90,0.95)' : 'rgba(255,110,90,0.9)';
               ctx.lineWidth = 1.5;
               ctx.beginPath();

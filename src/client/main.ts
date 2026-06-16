@@ -3072,7 +3072,7 @@ function initMenus() {
   muteBtn.addEventListener('click', () => { audio.init(); audio.setMuted(!audio.muted); muteIcon(); });
   // in-game music swap: cycle the track on click and flash the name
   const musBtn = $('musBtn'), musLabel = $('musLabel');
-  const MUS_STYLES = ['playlist', 'battle', 'hellmarch', 'iron', 'march', 'ambient', 'off'];
+  const MUS_STYLES = ['iron', 'off']; // synth tracks + playlist disabled for now (see AudioMan.ENABLED)
   const MUS_NAMES: Record<string, string> = { playlist: 'Playlist', battle: 'Battle', hellmarch: 'Hell March', iron: 'Iron Directive', march: 'Military March', ambient: 'Ambient', off: 'Off' };
   let musLabelTimer: any;
   const flashMus = () => {
@@ -3318,6 +3318,9 @@ if (!glOk) {
     });
   } catch { /* no input */ }
   try { ($('claudeKey') as HTMLInputElement).value = localStorage.getItem('ae_claude_key') || ''; } catch { /* no storage */ }
+  // tell the startup-diagnostic in index.html that the app booted cleanly (so it
+  // won't show the "code did not start" banner)
+  (window as any).__feBooted = true;
 }
 
 // version stamp on the menu: revision auto-increments with every commit; the
