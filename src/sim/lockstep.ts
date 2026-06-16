@@ -42,7 +42,8 @@ export class LockstepEngine {
   // inputs[tick] = per-player command lists (undefined = not yet known)
   private inputs = new Map<number, (Cmd[] | undefined)[]>();
   private localHistory: Frame[] = [];
-  private produced = new Set<number>();            // ticks we've already generated local input for
+  private nextProduce = 0;                          // next tick we'll generate local input for (advanced
+                                                    // by a free-running wall clock, NOT sim ticks)
   private lastInput: number[];                      // highest tick we hold input for, per player
   private droppedFrom = new Map<number, number>();  // player -> first tick they're AI-controlled
   stalls = 0;                                       // diagnostics: how often we waited on a peer
@@ -55,6 +56,7 @@ export class LockstepEngine {
     this.delay = opts.delay ?? 4;
     this.redundancy = opts.redundancy ?? 12;
     this.lastInput = new Array(nPlayers).fill(this.delay - 1);
+    this.nextProduce = this.delay; // first real local input is for tick `delay`
     // the first `delay` ticks have no real input — everyone agrees they're empty,
     // which lets the sims start while the first real inputs propagate
     for (let t = 0; t < this.delay; t++) this.inputs.set(t, new Array(nPlayers).fill([]));
@@ -66,6 +68,10 @@ export class LockstepEngine {
   dropToAI(player: number, fromTick: number) { this.droppedFrom.set(player, fromTick); }
   // the last tick we hold this player's input for (for the server's drop vote)
   lastInputTickFor(player: number): number { return this.lastInput[player]; }
+  // per-player input "lead": how many ticks ahead of our current sim tick we have
+  // this player's input buffered. A healthy peer sits near `delay`+; a peer near 0
+  // is the one starving the lockstep (the bottleneck behind stalls).
+  inputLeads(): number[] { return this.lastInput.map(t => t - this.sim.tickN); }
 
   private slot(tick: number): (Cmd[] | undefined)[] {
     let s = this.inputs.get(tick);
@@ -96,23 +102,33 @@ export class LockstepEngine {
     return true;
   }
 
-  // generate-and-broadcast local input for the current tick, then execute as many
-  // ticks as we have everyone's input for. Call once per wall tick.
+  // Generate + broadcast this client's input for every tick up to `frontier`,
+  // based on the state the player can "see" right now. CRUCIAL: this is driven by
+  // a free-running wall clock, not by sim advancement — so when our sim stalls
+  // waiting on a peer we KEEP feeding the peer our future inputs. Tying production
+  // to sim ticks (the old behaviour) made a single stall cascade into a
+  // one-tick-per-round-trip crawl, because neither side could send ahead while
+  // waiting on the other. Idempotent: only ticks past nextProduce are emitted.
+  produceTo(frontier: number) {
+    let any = false;
+    while (this.nextProduce <= frontier) {
+      const tick = this.nextProduce++;
+      const cmds = this.localInput(this.sim) || [];
+      this.slot(tick)[this.localPlayer] = cmds;
+      if (tick > this.lastInput[this.localPlayer]) this.lastInput[this.localPlayer] = tick;
+      this.localHistory.push({ tick, cmds });
+      while (this.localHistory.length > this.redundancy) this.localHistory.shift();
+      any = true;
+    }
+    if (any) this.send({ player: this.localPlayer, frames: this.localHistory.slice() }); // redundant window
+  }
+
+  // Execute as many ticks as we have everyone's input for, up to maxTick. The live
+  // client also calls produceTo() on a wall clock; the default here keeps production
+  // at least at the sim frontier so the in-process harness still works standalone.
   pump(maxTick = Infinity) {
-    for (;;) {
-      // schedule this client's input for (now + delay), based on the state we can
-      // "see" right now — exactly what a player does when they click
-      if (!this.produced.has(this.sim.tickN)) {
-        this.produced.add(this.sim.tickN);
-        const cmds = this.localInput(this.sim) || [];
-        const tick = this.sim.tickN + this.delay;
-        this.slot(tick)[this.localPlayer] = cmds;
-        if (tick > this.lastInput[this.localPlayer]) this.lastInput[this.localPlayer] = tick;
-        this.localHistory.push({ tick, cmds });
-        while (this.localHistory.length > this.redundancy) this.localHistory.shift();
-        this.send({ player: this.localPlayer, frames: this.localHistory.slice() });
-      }
-      if (this.sim.tickN >= maxTick) return;
+    this.produceTo(this.sim.tickN + this.delay);
+    while (this.sim.tickN < maxTick) {
       if (!this.ready()) { this.stalls++; return; }    // waiting on a peer's input
       const s = this.inputs.get(this.sim.tickN)!;
       const merged: Cmd[] = [];
@@ -211,5 +227,88 @@ export function runNetlessLockstep(
     stallsA: A.stalls, stallsB: B.stalls,
     finalA: A.hashes.get(upto) || '-', finalB: B.hashes.get(upto) || '-',
     delay, latency, jitter, drop,
+  };
+}
+
+// ---- Realtime harness: two clients on INDEPENDENT wall clocks over a latency
+// link. The synchronous harness above pumps both engines in lockstep each round,
+// so it can't expose the failure where a stall freezes input production. This one
+// frames each client on its own ms clock and delivers messages with real latency
+// + jitter. mode 'wall' = produce input on the wall clock (the fix); mode 'sim' =
+// produce only at the sim frontier (the old behaviour) — for an apples-to-apples
+// stall comparison. Returns whether the two sims stayed bit-identical + stalls.
+export interface RealtimeResult {
+  mode: string; targetTicks: number; reachedA: number; reachedB: number;
+  inSync: boolean; firstDiverge: number | null; stallsA: number; stallsB: number;
+  rttMs: number; jitterMs: number; wallMs: number;
+}
+
+export function runRealtimeLockstep(
+  seed: number, targetTicks: number,
+  opts: { mode?: 'wall' | 'sim'; size?: number; delay?: number; redundancy?: number;
+          rttMs?: number; jitterMs?: number; drop?: number;
+          hitchEveryMs?: number; hitchMs?: number } = {},
+): RealtimeResult {
+  const mode = opts.mode ?? 'wall';
+  const size = opts.size ?? 96, delay = opts.delay ?? 6, redundancy = opts.redundancy ?? 16;
+  const rttMs = opts.rttMs ?? 132, jitterMs = opts.jitterMs ?? 20, drop = opts.drop ?? 0;
+  // peer B periodically "hitches" (stops framing) — models a janky/slow/backgrounded peer
+  const hitchEveryMs = opts.hitchEveryMs ?? 0, hitchMs = opts.hitchMs ?? 0;
+  setMapSize(size);
+  const specs = [
+    { name: 'A', faction: 'usa', isAI: true, aiLvl: 2 },
+    { name: 'B', faction: 'china', isAI: true, aiLvl: 2 },
+  ];
+  const simA = new Sim(seed, specs.map(s => ({ ...s })));
+  const simB = new Sim(seed, specs.map(s => ({ ...s })));
+  const A = new LockstepEngine(simA, 0, 2, { delay, redundancy });
+  const B = new LockstepEngine(simB, 1, 2, { delay, redundancy });
+  A.localInput = s => aiTick(s, 0);
+  B.localInput = s => aiTick(s, 1);
+  const rng = new RNG((seed ^ 0x1234abcd) >>> 0);
+
+  let now = 0; // ms
+  const q: { at: number; to: LockstepEngine; msg: InputMsg }[] = [];
+  const oneWay = rttMs / 2;
+  const sendVia = (to: LockstepEngine) => (msg: InputMsg) => {
+    if (drop > 0 && rng.next() < drop) return;          // lost — redundant window recovers it
+    q.push({ at: now + oneWay + Math.floor(rng.next() * (jitterMs + 1)), to, msg });
+  };
+  A.send = sendVia(B); B.send = sendVia(A);
+
+  // per-client independent frame clock (~60fps, deliberately phased apart)
+  const cl = {
+    a: { e: A, sim: simA, next: 0, prodAcc: 0, prodTick: 0, last: 0 },
+    b: { e: B, sim: simB, next: 8, prodAcc: 0, prodTick: 0, last: 0 },
+  };
+  const frame = (c: typeof cl.a) => {
+    const dt = now - c.last; c.last = now;
+    c.prodAcc += dt;
+    while (c.prodAcc >= 100) { c.prodAcc -= 100; c.prodTick++; }
+    if (mode === 'wall') c.e.produceTo(c.prodTick + delay); // the fix: wall-clock production
+    c.e.pump(Math.min(targetTicks, c.prodTick));            // execute toward real time
+  };
+
+  const cap = targetTicks * 100 * 6; // generous wall-time budget
+  let guard = 0;
+  while ((simA.tickN < targetTicks || simB.tickN < targetTicks) && now < cap && guard++ < 50_000_000) {
+    now++;
+    if (q.length) {
+      for (let i = q.length - 1; i >= 0; i--) if (q[i].at <= now) { q[i].to.receive(q[i].msg); q.splice(i, 1); }
+    }
+    if (now >= cl.a.next) { cl.a.next += 16; frame(cl.a); }
+    // peer B is frozen during its hitch window, then catches up in a burst on
+    // resume (its frame dt spans the whole hitch) — like a throttled/janky tab
+    const bHitched = hitchEveryMs > 0 && (now % hitchEveryMs) < hitchMs;
+    if (now >= cl.b.next) { cl.b.next += 16; if (!bHitched) frame(cl.b); }
+  }
+
+  let firstDiverge: number | null = null;
+  const upto = Math.min(simA.tickN, simB.tickN);
+  for (let t = 1; t <= upto; t++) { const ha = A.hashes.get(t), hb = B.hashes.get(t); if (ha && hb && ha !== hb) { firstDiverge = t; break; } }
+  return {
+    mode, targetTicks, reachedA: simA.tickN, reachedB: simB.tickN,
+    inSync: firstDiverge === null, firstDiverge, stallsA: A.stalls, stallsB: B.stalls,
+    rttMs, jitterMs, wallMs: now,
   };
 }

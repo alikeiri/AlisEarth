@@ -399,6 +399,8 @@ class NetLockstepGame implements GameLike {
   private engine: LockstepEngine;
   private pending: any[] = [];      // user commands queued since the last tick
   private acc = 0;                  // wall-time accumulator (ms) toward the next tick
+  private prodAcc = 0;             // free-running wall clock (ms) driving INPUT production
+  private prodTick = 0;           // ticks of real time elapsed — input is sent this far ahead
   private frac = 0;                 // interpolation 0..1 toward the latest executed tick
   private evQ: any[] = [];
   private chatQ: any[] = [];
@@ -434,6 +436,13 @@ class NetLockstepGame implements GameLike {
     // code advanced a wall clock regardless, which made units twitch every 100ms
     // while stalled). When the backlog clears it catches up in one burst.
     this.acc += dtMs;
+    // Drive INPUT PRODUCTION off a free-running wall clock, independent of whether
+    // our sim is stalled. This keeps our future inputs flowing to peers even while
+    // we wait on theirs — without it a single stall snowballs into a
+    // one-tick-per-round-trip crawl (chronic stalls on a high-latency link).
+    this.prodAcc += dtMs;
+    while (this.prodAcc >= 100) { this.prodAcc -= 100; this.prodTick++; }
+    this.engine.produceTo(this.prodTick + this.engine.delay);
     let guard = 0;
     while (this.acc >= 100 && guard++ < 8) {
       const before = this.sim.tickN;
@@ -448,7 +457,7 @@ class NetLockstepGame implements GameLike {
   players(): any[] { return simPlayers(this.sim); }
   drainEvents() { const e = this.evQ; this.evQ = []; return e; }
   // debug overlay telemetry: socket counters + ping + lockstep-specific health
-  netStats() { return { ...this.net.stats, stalls: this.engine.stalls, tick: this.sim.tickN, delay: this.engine.delay }; }
+  netStats() { return { ...this.net.stats, stalls: this.engine.stalls, tick: this.sim.tickN, delay: this.engine.delay, leads: this.engine.inputLeads(), roster: this.roster }; }
   status() { return this.sim.done ? { over: true, winner: this.sim.winner } : { over: false, winner: -2 }; }
   sendChat(to: any, msg: string) { this.net.send({ t: 'chat', to, msg }); }
   drainChat() { const q = this.chatQ; this.chatQ = []; return q; }
@@ -2311,6 +2320,17 @@ class GameClient {
         const stCol = ns.stalls > 50 ? '#ffc940' : '#7be08a';
         s += `\n<span style="color:#7bdcff">lockstep</span>  tick ${ns.tick}  delay ${ns.delay}`
           + `\n<span style="color:${stCol}">stalls ${ns.stalls}</span>`;
+        // per-player input lead: how many ticks ahead each player's input is buffered.
+        // The player whose lead sits near 0 is the one starving the lockstep.
+        if (Array.isArray(ns.leads)) {
+          const parts = ns.leads.map((lead: number, p: number) => {
+            if (p === this.me) return null; // our own input is always far ahead
+            const nm = (ns.roster?.[p]?.name || `P${p}`).slice(0, 8);
+            const col = lead < 1 ? '#ff6b5e' : lead < 3 ? '#ffc940' : '#7be08a';
+            return `<span style="color:${col}">${nm} +${lead}</span>`;
+          }).filter(Boolean);
+          if (parts.length) s += `\n<span style="color:#8aa0b2">lead</span> ${parts.join('  ')}`;
+        }
       }
     }
     this.perfEl.innerHTML = s;
