@@ -1746,7 +1746,7 @@ export class Sim {
       // can only enter if it's empty (neutral) or already held by us — not an enemy's
       if (b.owner !== this.neutralP && b.owner !== u.owner) { u.orders.shift(); u.path = null; return; }
       if (!this.canGarrison(b)) { u.orders.shift(); u.path = null; return; } // full
-      const reach = b.size / 2 + 1.4;
+      const reach = b.size / 2 + 1.6;
       if (Math.abs(b.x - u.x) <= reach && Math.abs(b.z - u.z) <= reach) {
         if (b.owner === this.neutralP) b.owner = u.owner; // capture the empty building
         (b.cargoUnits ??= []).push(u);
@@ -1755,7 +1755,10 @@ export class Sim {
         this.events.push({ e: 'board', x: u.x, z: u.z });
         return;
       }
-      this.moveToward(u, b.x, b.z, def);
+      // the building's own cells are blocked, so path to a passable cell beside it
+      const ap = nearestPassable(this.map, Math.floor(b.x), Math.floor(b.z), b.size + 3)
+        || { x: Math.floor(b.x), z: Math.floor(b.z) };
+      this.moveToward(u, ap.x + 0.5, ap.z + 0.5, def);
     } else if (ord.k === 'unload') {
       // drop all cargo: onto shore if we're close, otherwise sail to the nearest coast
       if (!(u.cargoUnits?.length)) { u.orders.shift(); u.path = null; return; }

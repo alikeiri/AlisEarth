@@ -293,7 +293,13 @@ export function genMap(seed: number, nPlayers: number): GameMap {
   //    buildings (no river, no mountains, no terrain).
   const urban = (seed & 0x20000000) !== 0;
   const flatCity = (seed & 0x10000000) !== 0;
-  const anyUrban = urban || flatCity;
+  // Steel Arena (0x08000000): a bare, completely flat metallic plain built for
+  // big-army matches — no terrain, no roads/buildings, and EVERY ore field is the
+  // high-value (gem) kind so the economy sustains huge unit counts.
+  const steel = (seed & 0x08000000) !== 0;
+  const anyUrban = urban || flatCity;   // map flavours with roads + buildings
+  const flat = flatCity || steel;       // completely flat height (no river/mountains)
+  const anyFlatLike = urban || flatCity || steel; // skip continent/island terrain + forests
   const cont = CONTINENTS[(seed >>> 3) % CONTINENTS.length];
   const nIslands = Math.min(4, Math.max(2, nPlayers));
   // urban river: a gentle vertical channel whose centre x wanders with z
@@ -318,9 +324,9 @@ export function genMap(seed: number, nPlayers: number): GameMap {
       const dEdge = Math.min(x, W - x, z, H - z) / (W * 0.5);
       const e = Math.min(1, dEdge / 0.14); // thin sea border at map edges
       let h: number;
-      if (anyUrban) {
-        if (flatCity) {
-          h = SEA + 1.15; // completely flat, edge to edge — nothing but pavement & blocks
+      if (anyFlatLike) {
+        if (flat) {
+          h = SEA + 1.15; // completely flat, edge to edge
         } else {
           // flat plain with light texture, a carved river, and mountain massifs
           h = SEA + 1.15 + (fbm(seed, x * 0.06, z * 0.06) - 0.5) * 0.25;
@@ -572,8 +578,8 @@ export function genMap(seed: number, nPlayers: number): GameMap {
   }
 
   // -- forests: impassable tree cover on temperate land, away from spawns
-  // (skipped on ALL urban maps — they use building blocks instead, and stay flat/fast)
-  if (!anyUrban) for (let cz = 0; cz < H; cz++) {
+  // (skipped on all flat/urban maps — they stay open & fast)
+  if (!anyFlatLike) for (let cz = 0; cz < H; cz++) {
     for (let cx = 0; cx < W; cx++) {
       const i = cz * W + cx;
       if (m.tBlocked[i]) continue;
@@ -691,6 +697,17 @@ export function genMap(seed: number, nPlayers: number): GameMap {
     const cx = 16 + rng.int(W - 32), cz = 16 + rng.int(H - 32);
     if (m.water[cz * W + cx] !== 1 || !farFromOre(cx, cz, 9)) continue;
     addOilWell(cx, cz, true); oilS++;
+  }
+
+  // Steel Arena: pave the whole plain (renders as bare metallic concrete) and make
+  // EVERY ore field the high-value crystal kind, richer than usual, to bankroll
+  // the big-army matches this map is built for.
+  if (steel) {
+    for (let i = 0; i < W * H; i++) {
+      m.terraMask[i] = m.tBlocked[i] ? 0 : 1; // pave all open ground
+      if (m.ore[i] > 0) { m.gem[i] = 1; m.ore[i] = Math.max(m.ore[i], 900); }
+    }
+    m.terraVersion++;
   }
 
   // record original amounts so fields can slowly regrow (territory control)

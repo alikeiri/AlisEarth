@@ -888,6 +888,36 @@ export class UI {
       ctx.fillStyle = frac >= 1 ? '#57d977' : '#e0ad28';
       ctx.fillRect(p.x - w / 2, p.y - 3, w * frac, 3);
     }
+    // garrison indicator: a marker above any building infantry can move into, so
+    // garrisonable structures are easy to spot. Green = open, grey = full.
+    for (const v of views) {
+      if (!v.gar) continue;
+      const enterable = v.ne === 1 || v.o === me;   // neutral/open or already ours
+      if (!enterable) continue;
+      const p = project(v.x, v.z, (v.sz || 2) >= 3 ? 4.4 : 3.4);
+      if (!p.ok) continue;
+      const cu = v.cu || 0, cap = v.gcap || 0, full = cu >= cap;
+      const label = `${cu}/${cap}`;
+      ctx.font = '700 11px system-ui,sans-serif';
+      const tw = Math.ceil(ctx.measureText(label).width) + 18;
+      const x0 = p.x - tw / 2, y0 = p.y - 16, h = 15;
+      ctx.fillStyle = full ? 'rgba(60,66,72,0.9)' : 'rgba(28,120,52,0.92)';
+      ctx.beginPath();
+      (ctx as any).roundRect ? (ctx as any).roundRect(x0, y0, tw, h, 4) : ctx.rect(x0, y0, tw, h);
+      ctx.fill();
+      // a little doorway glyph on the left
+      ctx.fillStyle = full ? '#aab2ba' : '#cdfdd9';
+      ctx.fillRect(x0 + 4, y0 + 3, 6, 9);
+      ctx.fillStyle = full ? 'rgba(60,66,72,0.92)' : 'rgba(28,120,52,0.95)';
+      ctx.fillRect(x0 + 6, y0 + 6, 3, 6);
+      // count text
+      ctx.fillStyle = '#ffffff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(label, p.x + 5, y0 + h / 2 + 0.5);
+      // pin pointing down at the building
+      ctx.fillStyle = full ? 'rgba(60,66,72,0.9)' : 'rgba(28,120,52,0.92)';
+      ctx.beginPath(); ctx.moveTo(p.x - 4, y0 + h); ctx.lineTo(p.x + 4, y0 + h); ctx.lineTo(p.x, y0 + h + 5); ctx.closePath(); ctx.fill();
+      ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+    }
     // "packing up" indicator: a pulsing amber up-chevron above any unit that is
     // un-fortifying (pulling up stakes), so it reads clearly as leaving its dig-in
     {
