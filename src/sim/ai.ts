@@ -380,8 +380,10 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
     // once the enemy army is broken (but buildings remain), switch to bombers to
     // level the base; vs an air-heavy enemy build interceptors; else a mix
     const enemyCrippled = (mem.enemyCombat ?? 99) <= 3 && (mem.enemyBuildings ?? 0) > 0;
+    const bigMass = (mem.enemyCombat ?? 0) >= 10; // enemy is death-balling → answer with bombers
     const t = (enemyCrippled && pl.credits > 2000) ? (r < 0.6 ? 'bomber' : r < 0.85 ? 'dbomber' : 'heli')
       : antiAir ? (r < 0.6 ? 'fighter' : r < 0.85 ? 'heli' : 'helidrone')
+      : bigMass ? (r < 0.55 ? 'bomber' : r < 0.8 ? 'dbomber' : 'fighter')
       : island && r < 0.35 ? 'bomber'
       : r < 0.4 ? 'fighter' : r < 0.7 ? 'heli' : 'helidrone';
     cmds.push({ k: 'train', p, bid: af.id, type: t });
@@ -439,9 +441,16 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
     const t = pl.tech['chem'] && sim.aiRngP[p].next() < 0.4 ? 'chemissile' : 'cmissile';
     cmds.push({ k: 'train', p, bid: silo.id, type: t });
   }
-  if (silo && silo.storedMissile && (sim.tickN >= mem.peaceUntil || mem.peaceBroken)) {
-    const tgt = bestStrikeTarget(sim, p);
-    if (tgt) cmds.push({ k: 'launch', p, bid: silo.id, x: tgt.x, z: tgt.z });
+  if (silo && (sim.tickN >= mem.peaceUntil || mem.peaceBroken)) {
+    const mass = enemyMass(sim, p);
+    if (mass) {
+      // a massed enemy army: set a standing missile barrage on the cluster to thin
+      // it out BEFORE committing ground units (auto-rebuilds + fires until cleared)
+      cmds.push({ k: 'silostrike', p, bid: silo.id, x: mass.x, z: mass.z, r: 5 });
+    } else if (silo.storedMissile) {
+      const tgt = bestStrikeTarget(sim, p);
+      if (tgt) cmds.push({ k: 'launch', p, bid: silo.id, x: tgt.x, z: tgt.z });
+    }
   }
 
   // research a tech when a lab is idle and we're flush
@@ -499,6 +508,20 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
   // hostilities only after the build-up peace (or once a human breaks it)
   const atWar = sim.tickN >= mem.peaceUntil || mem.peaceBroken;
   if (!atWar) return cmds;
+
+  // bombing run on a massed enemy army: carpet-bomb the death-ball instead of
+  // feeding ground units into it — but only when the air can survive the trip
+  // (little/no enemy AA, or enough bombers to overwhelm it)
+  {
+    const mass = enemyMass(sim, p);
+    if (mass) {
+      const bombers = [...(myU['bomber'] || []), ...(myU['dbomber'] || []), ...(myU['heli'] || [])]
+        .filter(u => u.hp > 0 && (!u.orders.length || u.orders[0].k !== 'attack'));
+      const enemyAA = mem.enemyAA || 0;
+      if (bombers.length >= 2 && (enemyAA <= 1 || bombers.length >= enemyAA * 2))
+        cmds.push({ k: 'attack', p, ids: bombers.map(u => u.id), tgt: mass.unit.id, x: mass.unit.x, z: mass.unit.z });
+    }
+  }
 
   // harassment raids: a few fast units hit enemy harvesters between waves
   if (L.raid && sim.tickN >= mem.nextRaid) {
@@ -771,24 +794,49 @@ function enemyHarvester(sim: Sim, p: number): Entity | null {
 // player's entire base toward the naked rear power plant.)
 function bestStrikeTarget(sim: Sim, p: number): Entity | null {
   const s = sim.players[p].spawn;
-  const enemyB: Entity[] = [], defenders: Entity[] = [];
+  const enemyB: Entity[] = [], defenders: Entity[] = [], mobile: Entity[] = [];
   for (const e of sim.ents.values()) {
-    if (!e.b || !sim.foe(e.owner, p) || !sim.players[e.owner].alive) continue;
-    if (e.type === 'wall' || e.type === 'barrier') continue; // not worth a wave — route around
-    enemyB.push(e);
-    if (e.type === 'turret' || e.type === 'sam') defenders.push(e);
+    if (!sim.foe(e.owner, p) || e.hp <= 0 || !sim.players[e.owner].alive) continue;
+    if (e.b) {
+      if (e.type === 'wall' || e.type === 'barrier') continue; // not worth a wave — route around
+      enemyB.push(e);
+      if (e.type === 'turret' || e.type === 'sam') defenders.push(e);
+    } else if (UNITS[e.type]?.dmg > 0 && !UNITS[e.type]?.fly) {
+      mobile.push(e); // the enemy's standing army — its death-ball
+    }
   }
   if (!enemyB.length) return null;
   let best: Entity | null = null, bestScore = 1e9;
   for (const e of enemyB) {
     let near = 0;
     for (const d of defenders) if ((d.x - e.x) * (d.x - e.x) + (d.z - e.z) * (d.z - e.z) < 12 * 12) near++;
+    // count the enemy's MOBILE army guarding this building too — heavily avoid
+    // charging the death-ball; prefer an undefended building (flank / sneak round)
+    let mob = 0;
+    for (const m of mobile) if ((m.x - e.x) * (m.x - e.x) + (m.z - e.z) * (m.z - e.z) < 15 * 15) mob++;
     const dHome = hyp(e.x - s.x, e.z - s.z);
     const priority = e.type === 'refinery' || e.type === 'power' || e.type === 'conyard' ? -1.2 : 0;
-    const score = near * 1.2 + dHome * 0.1 + priority;
+    const score = near * 1.2 + mob * 0.9 + dHome * 0.1 + priority;
     if (score < bestScore) { bestScore = score; best = e; }
   }
   return best;
+}
+
+// the enemy's densest concentration of mobile combat units (their death-ball) —
+// the AI softens this with stand-off fire (silo/bombers) instead of feeding the
+// blob, and routes ground waves toward buildings away from it. null if no real mass.
+function enemyMass(sim: Sim, p: number): { x: number; z: number; n: number; unit: Entity } | null {
+  const foes: Entity[] = [];
+  for (const e of sim.ents.values())
+    if (!e.b && sim.foe(e.owner, p) && e.hp > 0 && UNITS[e.type]?.dmg > 0 && !UNITS[e.type]?.fly) foes.push(e);
+  if (foes.length < 6) return null;
+  let best: { x: number; z: number; n: number; unit: Entity } | null = null, bestN = 0;
+  for (const a of foes) {
+    let n = 0, sx = 0, sz = 0;
+    for (const b of foes) { const dx = b.x - a.x, dz = b.z - a.z; if (dx * dx + dz * dz <= 12 * 12) { n++; sx += b.x; sz += b.z; } }
+    if (n > bestN) { bestN = n; best = { x: sx / n, z: sz / n, n, unit: a }; }
+  }
+  return bestN >= 6 ? best : null;
 }
 
 // nearest enemy anti-air (battery or mobile AA) — the ground force clears these
