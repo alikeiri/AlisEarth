@@ -2269,6 +2269,13 @@ class GameClient {
     let s = `<span style="color:${fpsCol}">FPS ${this.fps.toFixed(0)}</span>  frame ${this.workMs.toFixed(1)}ms\n`
       + `render ${this.renderMs.toFixed(1)}ms  sim ${this.updateMs.toFixed(1)}ms\n`
       + `entities ${ents}  selected ${this.selection.size}`;
+    // active GPU: green = discrete (good), red = software, amber = integrated/unknown.
+    // If this isn't your RTX, the browser is on the wrong GPU (see graphics settings).
+    const gpu = (this.renderer as any).gpuName || 'unknown';
+    const soft = /swiftshader|llvmpipe|basic render|software|microsoft basic/i.test(gpu);
+    const disc = /nvidia|geforce|rtx|gtx|radeon|\bamd\b/i.test(gpu);
+    const gpuCol = soft ? '#ff6b5e' : disc ? '#7be08a' : '#ffc940';
+    s += `\n<span style="color:${gpuCol}">GPU ${String(gpu).slice(0, 46)}</span>`;
     const ns = (this.game as any).netStats?.();
     if (ns) {
       const now = performance.now();
