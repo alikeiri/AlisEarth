@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>WebGPU vs WebGL — Ali's Earth perf prototype</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #0a0f14; color: #cfe0ee; font: 14px/1.5 system-ui, sans-serif; }
+  #panel { position: fixed; top: 12px; left: 12px; z-index: 10; background: rgba(8,12,16,0.88);
+    border: 1px solid #2c3e50; border-radius: 8px; padding: 14px 16px; max-width: 460px; }
+  h1 { font-size: 15px; margin: 0 0 8px; }
+  #out { white-space: pre-wrap; font: 12px/1.6 ui-monospace, monospace; margin-top: 8px; }
+  button { background: #16323e; color: #cdeef6; border: 1px solid #2e7d8f; border-radius: 5px; padding: 7px 12px; cursor: pointer; font: 600 13px system-ui; }
+  button:disabled { opacity: 0.5; cursor: default; }
+  label { font-size: 12px; color: #9fb3c8; }
+  input { width: 70px; background: #1a2430; color: #cfe0ee; border: 1px solid #2c3e50; border-radius: 4px; padding: 3px 5px; }
+  canvas { position: fixed; inset: 0; width: 100%; height: 100%; z-index: 1; }
+</style>
+</head>
+<body>
+  <div id="panel">
+    <h1>WebGPU vs WebGL — render benchmark</h1>
+    <div>
+      <label>Soldiers <input id="nInf" type="number" value="6000"></label>
+      <label>Vehicles <input id="nVeh" type="number" value="1500"></label>
+      <label>Shadows <input id="shadows" type="checkbox" checked></label>
+    </div>
+    <div style="margin-top:8px"><button id="run">Run benchmark</button></div>
+    <div id="out">Heavy instanced scene (units + shadows) like a big battle. Runs each backend ~5s and reports average FPS.</div>
+  </div>
+  <script type="module" src="/src/bench/webgpu-bench.ts"></script>
+</body>
+</html>

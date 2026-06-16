@@ -22,6 +22,14 @@ export default defineConfig({
   },
   build: {
     chunkSizeWarningLimit: 1500,
-    target: 'es2019'
+    // es2022: still covered by every WebGL2 browser we target (incl. Firefox 115);
+    // needed so the optional WebGPU benchmark entry (top-level await / BigInt) builds
+    target: 'es2022',
+    rollupOptions: {
+      input: {
+        main: 'index.html',
+        bench: 'webgpu-bench.html', // standalone WebGL-vs-WebGPU perf prototype
+      },
+    },
   }
 });
