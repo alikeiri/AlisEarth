@@ -793,6 +793,7 @@ export class Renderer {
   camera: THREE.PerspectiveCamera;
   three: THREE.WebGLRenderer;
   sun!: THREE.DirectionalLight;
+  private shadowTick = 0; // throttles shadow-map refresh (every 3rd frame)
   map: GameMap;
 
   camX = 48; camZ = 48; yaw = 0; dist = 28; // yaw 0: view matches the minimap exactly
@@ -870,7 +871,10 @@ export class Renderer {
     const q = GFX_QUALITY[gfxQuality()] || GFX_QUALITY.medium;
     this.three.setPixelRatio(Math.min(q.pr, window.devicePixelRatio));
     this.three.shadowMap.enabled = q.shadows;
-    this.three.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.three.shadowMap.type = THREE.PCFShadowMap; // cheaper than PCFSoft; the dominant render cost was shadows
+    // the sun is static, so shadows only shift as units move — re-render the
+    // shadow map every 3rd frame instead of every frame (≈3x cheaper, invisible)
+    this.three.shadowMap.autoUpdate = false;
     this.three.toneMapping = THREE.ACESFilmicToneMapping;
     this.three.toneMappingExposure = 1.15;
     const maxAniso = Math.min(8, this.three.capabilities.getMaxAnisotropy());
@@ -2293,6 +2297,8 @@ export class Renderer {
     this.healMesh.instanceMatrix.needsUpdate = true;
 
     this.updateCamera();
+    // refresh the (auto-update-disabled) shadow map only every 3rd frame
+    if (this.three.shadowMap.enabled) { this.shadowTick = (this.shadowTick + 1) % 3; this.three.shadowMap.needsUpdate = this.shadowTick === 0; }
     this.three.render(this.scene, this.camera);
   }
 }
