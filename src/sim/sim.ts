@@ -360,9 +360,9 @@ export class Sim {
         for (const bb of this.ents.values()) if (bb.b && bb.owner === c.p) for (const it of bb.queue) if (it.type === c.type) have++;
         if (have >= 1) return;
       }
-      // silo stockpiles up to MISSILE_CAP armed missiles (stock + in-build)
-      if (def.missile && ((b.missileStock?.length || 0) + b.queue.length) >= MISSILE_CAP) return;
-      if (b.progress < b.total || b.queue.length >= 6) return;
+      // production queues are uncapped (build as many as you like); aircraft are
+      // still bounded by airfield slots below, and the building must be finished
+      if (b.progress < b.total) return;
       // aircraft are limited by per-class airfield capacity (helis 30 / planes 10)
       if (def.pad && !this.padCapacityFree(c.p, c.type)) return;
       // queue freely even when broke — the item is charged only when it reaches the
@@ -1330,8 +1330,8 @@ export class Sim {
         b.lastMissile = it.type;
         b.queue.shift();
         this.events.push({ e: 'ready', p: b.owner });
-        // repeat: keep building toward a full stockpile while toggled on
-        if (b.rpt && (b.missileStock.length + b.queue.length) < MISSILE_CAP)
+        // repeat: keep building missiles while toggled on (uncapped)
+        if (b.rpt)
           b.queue.push({ type: it.type, t: UNITS[it.type].buildTime, t0: UNITS[it.type].buildTime, paid: false });
       } else if (it.t <= 0) {
         const c = UNITS[it.type].move === 'sea'
@@ -1366,7 +1366,7 @@ export class Sim {
           // hero/unique units (Melody, Bulldozer) are one-per-player, so they never
           // re-queue even with Repeat on.
           const rdef = UNITS[it.type];
-          if (b.rpt && b.queue.length < 6 && !rdef.unique && !rdef.commando) {
+          if (b.rpt && !rdef.unique && !rdef.commando) {
             if (!rdef.pad || this.padCapacityFree(b.owner, it.type))
               b.queue.push({ type: it.type, t: rdef.buildTime, t0: rdef.buildTime, paid: false });
           }

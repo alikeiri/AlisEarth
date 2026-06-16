@@ -462,7 +462,7 @@ export class UI {
       } else if (sel.length === 1 && sel[0].b && sel[0].o === me) {
         if (sel[0].t === 'silo') {
           const n = sel[0].msn || (sel[0].ms ? 1 : 0);
-          parts.push(`<span class="kbd">${n}/25</span>missiles ready`);
+          parts.push(`<span class="kbd">${n}</span>missiles ready`);
           parts.push(kbd('RMB', 'launch / bombard area'));
           parts.push(kbd('R', sel[0].rp ? 'auto-build: ON' : 'auto-build missiles'));
         } else if (sel[0].gar) {
