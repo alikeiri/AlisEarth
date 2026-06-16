@@ -68,6 +68,7 @@ export interface PlayerState {
   name: string; faction: string; fac: Faction; isAI: boolean; aiLvl: number;
   team: number;                            // allies share a team; FFA = unique per player
   credits: number; alive: boolean;
+  neutral?: boolean;                       // the garrison "owner" — not a contender (skipped in win/foe/AI)
   left?: boolean;                          // departed via "Just Exit" — not a defeat
   passive?: boolean;                       // tutorial target: AI does nothing
   powerMade: number; powerUsed: number; pf: number;
@@ -87,6 +88,7 @@ const FORT_DEPLOY_VULN = 1.5; // ...but take extra while deploying / packing
 const MISSILE_CAP = 25;     // max armed missiles a single silo can stockpile
 const CARRY_VEH = 10;       // transport ship capacity: vehicles
 const CARRY_INF = 30;       // transport ship capacity: infantry
+const GARR_ATK = 1.3;       // garrisoned infantry hit 30% harder firing from cover
 // how many of each kind a transport already holds
 function carriedCounts(ship: Entity): { veh: number; inf: number } {
   let veh = 0, inf = 0;
@@ -129,6 +131,7 @@ export class Sim {
   aiMem: any[] = [];
   done = false;
   winner = -2;
+  neutralP = -1; // player index of the neutral "owner" of garrisonable buildings (-1 = none)
   aiProfile: any = null; // host-provided study of past human-vs-AI games (adaptive AI)
   aiDirective: any = null; // optional LLM strategist (Claude API) high-level orders
   cheated = false; // godmode was used — don't feed this game into the AI's learning
@@ -172,9 +175,33 @@ export class Sim {
       this.aiRngP.push(new RNG((seed ^ 0xa1c0ffe ^ Math.imul(i + 1, 0x9e3779b1)) >>> 0));
       this.placeStart(i);
     });
+    // neutral "owner" for garrisonable city buildings — a non-contender slot that
+    // foe()/checkEnd()/the AI all skip. Empty garrison buildings sit under it; a
+    // building flips to the garrisoning player while occupied, back here when empty.
+    if (this.map.garrisonSites.length) {
+      this.neutralP = this.players.length;
+      this.players.push({
+        name: 'Neutral', faction: FACTIONS.usa.id, fac: FACTIONS.usa, isAI: false, aiLvl: 0,
+        team: -99, credits: 0, alive: true, neutral: true, powerMade: 0, powerUsed: 0, pf: 1,
+        bonusCost: 1, bonusIncome: 1, tech: {}, spawn: { x: 0, z: 0 },
+      });
+      this.aiMem.push(null);
+      this.aiRngP.push(new RNG((seed ^ 0xbeef) >>> 0));
+    }
     const n = this.players.length;
     const z = () => new Array(n).fill(0);
     Object.assign(this.stats, { builtU: z(), builtB: z(), destU: z(), destB: z(), lostU: z(), lostB: z() });
+    // place the neutral garrison buildings the map laid out. canPlace() can't be
+    // used — it requires friendly build-reach, which neutral has none of — so just
+    // confirm the footprint is clear land (the map already reserved it).
+    if (this.neutralP >= 0)
+      for (const g of this.map.garrisonSites) {
+        const def = BUILDINGS[g.type]; let ok = true;
+        for (let z = g.cz; z < g.cz + def.size && ok; z++)
+          for (let x = g.cx; x < g.cx + def.size && ok; x++)
+            if (!this.map.inB(x, z) || this.map.occ[z * W + x] || this.map.tBlocked[z * W + x] || this.map.ore[z * W + x] > 0) ok = false;
+        if (ok) this.addBuilding(this.neutralP, g.type, g.cx, g.cz, true);
+      }
   }
 
   // ---------- setup ----------
@@ -460,6 +487,13 @@ export class Sim {
       if (b && b.b && b.owner === c.p) { b.rallyX = c.x; b.rallyZ = c.z; b.patPts = null; }
       return;
     }
+    if (c.k === 'evac') {
+      // evacuate a garrison building we hold: spill the occupants onto the street,
+      // and hand the now-empty building back to neutral so anyone can re-take it
+      const b = this.ents.get(c.bid);
+      if (b && b.b && b.owner === c.p && BUILDINGS[b.type]?.garrison) this.evacuate(b);
+      return;
+    }
     if (c.k === 'repeat') {
       const b = this.ents.get(c.bid);
       if (b && b.b && b.owner === c.p) b.rpt = !!c.on;
@@ -653,6 +687,13 @@ export class Sim {
         const k = UNITS[u.type]?.kind;
         if ((k === 'inf' || k === 'veh') && u.id !== ship.id) { u.orders = [{ k: 'board', tgt: c.tgt }]; u.path = null; u.cmdT = this.tickN; }
       }
+      return;
+    }
+    if (c.k === 'garrison') {
+      // infantry enter a neutral (or our own) garrison building and fire out from it
+      const b = this.ents.get(c.tgt);
+      if (!b || !b.b || !BUILDINGS[b.type]?.garrison || (b.owner !== this.neutralP && b.owner !== c.p)) return;
+      for (const u of units) if (UNITS[u.type]?.kind === 'inf') { u.orders = [{ k: 'garrison', tgt: c.tgt }]; u.path = null; u.cmdT = this.tickN; }
       return;
     }
     if (c.k === 'unload') {
@@ -981,8 +1022,16 @@ export class Sim {
   // two owners are foes when they sit on different teams (same team = allies,
   // and a player is always allied with itself)
   foe(a: number, b: number): boolean {
+    // neutral is foe to no one: empty garrison buildings (owned by neutral) are
+    // never auto-targeted, and neutral never attacks. An OCCUPIED garrison building
+    // is owned by the garrisoning player, so it's a normal enemy to their foes.
+    if (this.players[a]?.neutral || this.players[b]?.neutral) return false;
     return a !== b && this.players[a]?.team !== this.players[b]?.team;
   }
+
+  // garrison capacity scales with the building footprint (2x2 -> 4, 3x3 -> 9)
+  garrisonCap(b: Entity): number { return Math.max(2, b.size * b.size); }
+  private canGarrison(b: Entity): boolean { return (b.cargoUnits?.length || 0) < this.garrisonCap(b); }
 
   // hand everything a departing player owns to a teammate (used when a human
   // "Just Exits" and an allied human is still in the match) — the leaver is
@@ -1322,6 +1371,19 @@ export class Sim {
               b.queue.push({ type: it.type, t: rdef.buildTime, t0: rdef.buildTime, paid: false });
           }
         } else it.t = 1; // exit blocked, retry shortly
+      }
+    }
+
+    // garrison: an occupied building fires out with the COMBINED firepower of its
+    // occupants plus a cover bonus. Occupants are protected (only the building's HP
+    // takes hits); they all die only if the building is destroyed (see deaths()).
+    if (def.garrison && b.cargoUnits && b.cargoUnits.length) {
+      b.cd -= TICK; // garrison buildings have no def.attack, so tick the reload here
+      let rng = 0, dmg = 0;
+      for (const o of b.cargoUnits) { const od = UNITS[o.type]; if (od && od.dmg > 0) { if (od.range > rng) rng = od.range; dmg += od.dmg; } }
+      if (dmg > 0) {
+        const tgt = this.findEnemy(b, rng + 1.5);
+        if (tgt) this.fire(b, tgt, dmg * GARR_ATK, 1.3, false);
       }
     }
 
@@ -1677,6 +1739,23 @@ export class Sim {
         return;
       }
       this.moveToward(u, ship.x, ship.z, def); // pathing lands a land unit on the shore beside the ship
+    } else if (ord.k === 'garrison') {
+      // walk into a neutral/own garrison building and fire out from inside
+      const b = this.ents.get(ord.tgt!);
+      if (!b || b.hp <= 0 || !b.b || !BUILDINGS[b.type]?.garrison || UNITS[u.type]?.kind !== 'inf') { u.orders.shift(); u.path = null; return; }
+      // can only enter if it's empty (neutral) or already held by us — not an enemy's
+      if (b.owner !== this.neutralP && b.owner !== u.owner) { u.orders.shift(); u.path = null; return; }
+      if (!this.canGarrison(b)) { u.orders.shift(); u.path = null; return; } // full
+      const reach = b.size / 2 + 1.4;
+      if (Math.abs(b.x - u.x) <= reach && Math.abs(b.z - u.z) <= reach) {
+        if (b.owner === this.neutralP) b.owner = u.owner; // capture the empty building
+        (b.cargoUnits ??= []).push(u);
+        this.ents.delete(u.id);
+        u.orders = []; u.path = null;
+        this.events.push({ e: 'board', x: u.x, z: u.z });
+        return;
+      }
+      this.moveToward(u, b.x, b.z, def);
     } else if (ord.k === 'unload') {
       // drop all cargo: onto shore if we're close, otherwise sail to the nearest coast
       if (!(u.cargoUnits?.length)) { u.orders.shift(); u.path = null; return; }
@@ -2213,6 +2292,24 @@ export class Sim {
     ship.cargoUnits = [];
   }
 
+  // empty a garrison building onto the surrounding streets and return it to neutral
+  private evacuate(b: Entity) {
+    const cu = b.cargoUnits || [];
+    const ring = [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, 1], [1, -1], [-1, -1], [2, 0], [0, 2], [-2, 0], [0, -2]];
+    cu.forEach((u, i) => {
+      const o = ring[i % ring.length];
+      const c = nearestPassable(this.map, Math.floor(b.x) + o[0], Math.floor(b.z) + o[1], 8)
+        || nearestPassable(this.map, Math.floor(b.x), Math.floor(b.z), 12)
+        || { x: Math.floor(b.x), z: Math.floor(b.z) };
+      u.x = c.x + 0.5; u.z = c.z + 0.5; u.px = u.x; u.pz = u.z;
+      u.orders = []; u.path = null; u.cmdT = this.tickN;
+      this.ents.set(u.id, u);
+      this.events.push({ e: 'unload', x: u.x, z: u.z });
+    });
+    b.cargoUnits = [];
+    if (this.neutralP >= 0) b.owner = this.neutralP; // empty → back to neutral, re-takeable
+  }
+
   private moveToward(u: Entity, x: number, z: number, def: any): boolean {
     const d = Math.sqrt((u.x - x) * (u.x - x) + (u.z - z) * (u.z - z));
     if (d < 0.25) return true;
@@ -2305,6 +2402,8 @@ export class Sim {
             if (this.map.inB(x, z) && this.map.occ[z * W + x] === e.id) this.map.occ[z * W + x] = 0;
         this.events.push({ e: 'boom', x: e.x, z: e.z, big: true });
         if (e.type !== 'wall' && e.type !== 'barrier') this.stats.lostB[e.owner]++;
+        // a garrison building destroyed with troops inside: the occupants die with it
+        if (e.cargoUnits?.length) { for (const c of e.cargoUnits) if (!UNITS[c.type]?.internal) this.stats.lostU[c.owner]++; e.cargoUnits = []; }
       } else {
         this.events.push({ e: 'boom', x: e.x, z: e.z, big: false });
         if (!UNITS[e.type]?.internal) this.stats.lostU[e.owner]++;
@@ -2344,7 +2443,7 @@ export class Sim {
     const aliveTeams = new Set<number>();
     const PROD = ['barracks', 'factory', 'dronefac', 'airforce', 'shipyard'];
     this.players.forEach((pl, i) => {
-      if (!pl.alive) return;
+      if (!pl.alive || pl.neutral) return; // neutral slot is never a contender
       // inventory this player's surviving assets
       let anyEnt = false, builder = false, producer = false, harv = false, refinery = false;
       for (const e of this.ents.values()) {

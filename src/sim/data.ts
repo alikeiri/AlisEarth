@@ -177,6 +177,8 @@ export interface BuildingDef {
   noAir?: boolean;                                // defensive gun that cannot elevate to hit aircraft
   sight?: number;                                 // explicit fog-of-war reveal radius (radar dome sees far)
   forceFire?: boolean;                            // player may Ctrl+force-fire this gun at a ground point/entity
+  garrison?: boolean;                             // neutral urban building: infantry garrison it & fire out
+  neutral?: boolean;                              // not buildable; spawned by the map (owned by the neutral slot)
 }
 
 export const BUILDINGS: Record<string, BuildingDef> = {
@@ -201,6 +203,10 @@ export const BUILDINGS: Record<string, BuildingDef> = {
   airfield: { name: 'Airfield',          cost: 800,  hp: 600,  power: -15,  buildTime: 8,  size: 2, prereq: 'airforce' },
   lab:      { name: 'Research Lab',       cost: 2000, hp: 850,  power: -50,  buildTime: 14, size: 2, prereq: 'factory' },
   silo:     { name: 'Missile Silo',       cost: 2500, hp: 900,  power: -60,  buildTime: 16, size: 2, prereq: 'lab' },
+  // neutral garrisonable city buildings (urban map only; spawned, not buildable).
+  // Infantry move in and fire out; capacity scales with footprint.
+  bldgsm:   { name: 'Building',           cost: 0,    hp: 700,  power: 0,    buildTime: 0,  size: 2, garrison: true, neutral: true },
+  bldglg:   { name: 'Tower Block',        cost: 0,    hp: 1100, power: 0,    buildTime: 0,  size: 3, garrison: true, neutral: true },
   radar:    { name: 'Radar Dome',         cost: 900,  hp: 600,  power: -40,  buildTime: 9,  size: 2, prereq: 'refinery', sight: 26 }, // wide sweep pierces the fog of war
   wall:     { name: 'Wall',               cost: 100,  hp: 900,  power: 0,    buildTime: 8,  size: 1, prereq: 'barracks' },
   barrier:  { name: 'Tank Barrier',       cost: 50,   hp: 450,  power: 0,    buildTime: 6,  size: 1, prereq: 'barracks' },

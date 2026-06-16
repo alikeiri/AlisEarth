@@ -72,6 +72,14 @@ function simViews(sim: Sim, a: number): any[] {
       if (e.strikeR && e.strikeR > 0) { v.kx = e.strikeX; v.kz = e.strikeZ; v.kr = e.strikeR; }
       if (e.burnT && e.burnT > 0) v.bn = 1;
       if (e.holdFire) v.hf = 1;
+      // garrison buildings: mark them + report occupancy / capacity so the UI can
+      // show occupants, the enter cursor, and the evacuate hint
+      if (BUILDINGS[e.type]?.garrison) {
+        v.gar = 1;
+        v.cu = e.cargoUnits?.length || 0;
+        v.gcap = Math.max(2, e.size * e.size);
+        if (sim.players[e.owner]?.neutral) v.ne = 1; // empty/neutral (not owned by a player)
+      }
     } else {
       // per-TICK travel (framerate-independent): real path movement is ~0.2+/tick,
       // a collision shove/micro-nudge is far smaller — only the former animates legs
@@ -670,10 +678,14 @@ class GameClient {
         this.renderer.setFormationPath(null);
       }
       if (e.code === 'KeyS') this.issueToUnits({ k: 'stop' });
-      // U: transport ships unload their cargo (onto shore, or sail to the nearest coast)
+      // U: transport ships unload cargo; garrison buildings evacuate their occupants
       if (e.code === 'KeyU') {
         const ships = this.myUnitIds().filter(id => { const v = this.byId.get(id); return v && UNITS[v.t]?.carrier && (v.cu || 0) > 0; });
         if (ships.length) { this.game.issue({ k: 'unload', p: this.game.me, ids: ships }); audio.play('confirm'); }
+        for (const id of this.selection) {
+          const v = this.byId.get(id);
+          if (v && v.b === 1 && v.gar && v.o === this.game.me && (v.cu || 0) > 0) { this.game.issue({ k: 'evac', p: this.game.me, bid: id }); audio.play('confirm'); }
+        }
       }
       // H: weapons-hold toggle (don't fire even when attacked)
       if (e.code === 'KeyH') {
@@ -1730,6 +1742,18 @@ class GameClient {
         this.game.issue({ k: 'load', p: me, ids: ground, tgt: carrier.i });
         audio.play('confirm'); audio.ack(this.dominantType(ground), 'move');
         this.markCmd(ground, carrier.x, carrier.z, false);
+        return;
+      }
+    }
+    // right-click a garrison building (neutral, or one we already hold) with
+    // infantry selected → move in and fire out from inside
+    const garr = this.pickView(sx, sy, v => v.b === 1 && v.gar === 1 && (v.ne === 1 || v.o === me) && (v.cu || 0) < (v.gcap || 0));
+    if (garr) {
+      const inf = ids.filter(id => UNITS[this.byId.get(id)?.t]?.kind === 'inf');
+      if (inf.length) {
+        this.game.issue({ k: 'garrison', p: me, ids: inf, tgt: garr.i });
+        audio.play('confirm'); audio.ack(this.dominantType(inf), 'move');
+        this.markCmd(inf, garr.x, garr.z, false);
         return;
       }
     }

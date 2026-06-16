@@ -37,6 +37,7 @@ export class GameMap {
   tBlocked = new Uint8Array(W * H);           // terrain-blocked (water / cliff / forest)
   forest = new Uint8Array(W * H);             // forest cells (blocked, rendered as trees)
   cityBlock = new Uint8Array(W * H);          // urban map: blocked cells rendered as buildings
+  garrisonSites: { cx: number; cz: number; type: string }[] = []; // urban: neutral garrisonable buildings the sim spawns
   water = new Uint8Array(W * H);              // water cells (navigable by ships)
   gem = new Uint8Array(W * H);                // special ore: 3x credit value
   oil = new Uint8Array(W * H);                // oil wells: mined by oil miners, refined for credits
@@ -528,13 +529,25 @@ export function genMap(seed: number, nPlayers: number): GameMap {
     // clear of spawns, the river and the mountains
     const farFromStarts = (cx: number, cz: number, d: number) =>
       starts.every(s => (cx - s.x) * (cx - s.x) + (cz - s.z) * (cz - s.z) >= d * d);
-    let blocks = 0, btries = 0;
-    const wantBlocks = Math.round(W / 7);
-    while (blocks < wantBlocks && btries < 800) {
+    const footprintClear = (cx: number, cz: number, s: number) => {
+      for (let z = cz; z < cz + s; z++) for (let x = cx; x < cx + s; x++)
+        if (!m.inB(x, z) || m.blockedT(x, z) || m.road[z * W + x] !== 0) return false;
+      return true;
+    };
+    let blocks = 0, btries = 0, garr = 0;
+    const wantBlocks = Math.round(W / 7), wantGarr = Math.min(10, Math.max(6, Math.round(W / 12)));
+    while ((blocks < wantBlocks || garr < wantGarr) && btries < 1200) {
       btries++;
       const cx = 6 + rng.int(W - 12), cz = 6 + rng.int(H - 12);
       if (m.blockedT(cx, cz) || Math.abs(cx - riverCx(cz)) < RIVER_HALF + 3) continue;
       if (!farFromStarts(cx, cz, 14) || m.road[cz * W + cx] !== 0) continue;
+      // first fill the garrison quota: reserve a CLEAR footprint for a neutral
+      // building the sim will spawn (don't block the cells — the entity does that)
+      if (garr < wantGarr) {
+        const s = rng.next() < 0.5 ? 2 : 3;
+        if (footprintClear(cx, cz, s)) { m.garrisonSites.push({ cx, cz, type: s === 3 ? 'bldglg' : 'bldgsm' }); garr++; continue; }
+      }
+      // otherwise solid cover (impassable terrain rendered as a building block)
       const bw = 2 + rng.int(3), bh = 2 + rng.int(3);
       for (let z = cz; z < cz + bh; z++) for (let x = cx; x < cx + bw; x++) {
         if (!m.inB(x, z) || m.blockedT(x, z) || m.road[z * W + x] !== 0) continue;

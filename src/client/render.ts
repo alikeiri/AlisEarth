@@ -523,6 +523,18 @@ function buildingGroupPro(type: string, teamColor: number): THREE.Group {
   };
   const concrete = mat(0x979ca1), darkM = mat(0x474d53), steel = mat(0xb6bcc2, 0.5, 0.45), olive = mat(0x6b7a5b);
 
+  // neutral garrisonable city buildings: a plain multi-storey block. The team
+  // colour shows as a roof band so you can read who currently holds it.
+  if (type === 'bldgsm' || type === 'bldglg') {
+    const big = type === 'bldglg';
+    const w = big ? 2.5 : 1.7, h = big ? 3.4 : 2.3;
+    add(new THREE.BoxGeometry(w, h, w), mat(0x9aa0a6, 0.9, 0.05), 0, h / 2, 0);
+    add(new THREE.BoxGeometry(w * 0.86, h * 0.5, 0.04), mat(0x3a4654), 0, h * 0.45, w / 2); // window strip (front)
+    add(new THREE.BoxGeometry(0.04, h * 0.5, w * 0.86), mat(0x3a4654), w / 2, h * 0.45, 0); // window strip (side)
+    add(new THREE.BoxGeometry(w + 0.12, 0.18, w + 0.12), team, 0, h + 0.06, 0);            // team-colour roof band
+    return g;
+  }
+
   if (type === 'conyard') {
     add(roundedSlabGeo(2.7, 2.7, 0.55), concrete);
     add(roundedSlabGeo(2.0, 2.0, 0.35), darkM, 0, 0.55, 0.1);
@@ -802,7 +814,7 @@ export class Renderer {
   // per unit type: list of instanced parts; mode 0 = neutral, 1 = full team
   // color (procedural accents), 2 = subtle team tint (external models)
   private unitParts: Record<string, { mesh: THREE.InstancedMesh; mode: number }[]> = {};
-  private buildings = new Map<number, { g: THREE.Group; type: string; aim?: number }>();
+  private buildings = new Map<number, { g: THREE.Group; type: string; aim?: number; owner?: number }>();
   private facing = new Map<number, { a: number; lx: number; lz: number }>();
   private selRing: THREE.InstancedMesh;
   private oreMesh: THREE.InstancedMesh;
@@ -1942,10 +1954,16 @@ export class Renderer {
       if (v.b) {
         seen.add(v.i);
         let rec = this.buildings.get(v.i);
+        const wantCol = v.ne ? 0x8893a0 : (PLAYER_COLORS[v.o] ?? 0xffffff); // neutral garrison = grey
         if (!rec) {
-          rec = { g: buildingGroupPro(v.t, PLAYER_COLORS[v.o] ?? 0xffffff), type: v.t };
+          rec = { g: buildingGroupPro(v.t, wantCol), type: v.t, owner: v.o };
           this.scene.add(rec.g);
           this.buildings.set(v.i, rec);
+        } else if (v.gar && rec.owner !== v.o) {
+          // garrison building changed hands — rebuild so the roof band shows the holder
+          this.scene.remove(rec.g);
+          rec.g = buildingGroupPro(v.t, wantCol); rec.owner = v.o;
+          this.scene.add(rec.g);
         }
         // the shipyard straddles the coast — float it at the water surface so it
         // sits on the water (on stilts), not sunk to the ocean floor

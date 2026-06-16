@@ -465,6 +465,9 @@ export class UI {
           parts.push(`<span class="kbd">${n}/25</span>missiles ready`);
           parts.push(kbd('RMB', 'launch / bombard area'));
           parts.push(kbd('R', sel[0].rp ? 'auto-build: ON' : 'auto-build missiles'));
+        } else if (sel[0].gar) {
+          parts.push(`<span class="kbd">${sel[0].cu || 0}/${sel[0].gcap || 0}</span>occupants`);
+          if ((sel[0].cu || 0) > 0) parts.push(kbd('U', 'evacuate'));
         } else {
           if (['barracks', 'factory', 'dronefac', 'airforce', 'shipyard'].includes(sel[0].t)) {
             parts.push(kbd('RMB', 'set rally point'));
