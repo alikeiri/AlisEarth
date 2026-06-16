@@ -775,12 +775,14 @@ interface FxTracer { x1: number; y1: number; z1: number; x2: number; y2: number;
 interface FxPart { x: number; y: number; z: number; vx: number; vy: number; vz: number; life: number; max: number; s: number }
 interface FxRocket { x0: number; y0: number; z0: number; x1: number; y1: number; z1: number; t: number; delay: number; dur: number; arc: number }
 
-// graphics quality presets — the two biggest GPU costs are render resolution
-// (pixel ratio) and shadows, both adjustable at runtime. Low ≈ max fps.
+// graphics quality presets. The dominant GPU cost is fill rate = render
+// resolution, so `pr` (render scale) is the main lever and is deliberately
+// allowed BELOW native (the canvas is CSS-upscaled). `pr` is also capped to the
+// display's devicePixelRatio so High never wastefully supersamples a hi-DPI panel.
 export const GFX_QUALITY: Record<string, { pr: number; shadows: boolean; shadowSize: number }> = {
-  low:    { pr: 1.0,  shadows: false, shadowSize: 1024 },
-  medium: { pr: 1.25, shadows: true,  shadowSize: 1024 },
-  high:   { pr: 1.75, shadows: true,  shadowSize: 2048 },
+  low:    { pr: 0.55, shadows: false, shadowSize: 1024 }, // max FPS (renders at ~55%, upscaled)
+  medium: { pr: 0.72, shadows: true,  shadowSize: 1024 }, // balanced — sub-native + shadows
+  high:   { pr: 1.0,  shadows: true,  shadowSize: 2048 }, // native resolution + soft shadows
 };
 export function gfxQuality(): string {
   try { return localStorage.getItem('fe_quality') || 'medium'; } catch { return 'medium'; }

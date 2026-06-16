@@ -530,7 +530,6 @@ class GameClient {
   private perfOn = false;
   private perfEl: HTMLDivElement | null = null;
   private fps = 60; private renderMs = 0; private updateMs = 0; private workMs = 0;
-  private gfxLowT = 0; // seconds of sustained low fps (for adaptive quality step-down)
   private perfRx = { bytes: 0, t: 0 };
   private cmdFx: { fx: number; fz: number; tx: number; tz: number; t: number; atk: boolean }[] = [];
   private wpTrail: { x: number; z: number; atk: boolean }[] = []; // shift-queued waypoint chain (visual)
@@ -1859,24 +1858,6 @@ class GameClient {
     this.fps += (1 / Math.max(dt, 1e-3) - this.fps) * 0.1; // smoothed frame rate
     // top-bar FPS + (multiplayer) server ping readout, refreshed twice a second
     if (this.frame % 30 === 0) this.updateTopStat();
-    // adaptive graphics: if the frame rate stays low, step quality down one notch
-    // (high → medium → low) so play stays smooth without the player fiddling
-    if (!this.over && this.frame > 90) {
-      if (this.fps < 24) {
-        this.gfxLowT += dt;
-        if (this.gfxLowT > 4) {
-          this.gfxLowT = 0;
-          const order = ['high', 'medium', 'low'];
-          const i = order.indexOf(gfxQuality());
-          if (i >= 0 && i < order.length - 1) {
-            const next = order[i + 1];
-            this.renderer.setQuality(next);
-            const sel = document.getElementById('gfxQual') as HTMLSelectElement | null; if (sel) sel.value = next;
-            this.flashBanner(`⚙ Graphics lowered to ${next} for smoother play`);
-          }
-        }
-      } else if (this.gfxLowT > 0) this.gfxLowT = Math.max(0, this.gfxLowT - dt);
-    }
 
     const _u0 = this.perfOn ? performance.now() : 0;
     this.game.update(dt * 1000);
