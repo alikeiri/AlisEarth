@@ -775,14 +775,15 @@ interface FxTracer { x1: number; y1: number; z1: number; x2: number; y2: number;
 interface FxPart { x: number; y: number; z: number; vx: number; vy: number; vz: number; life: number; max: number; s: number }
 interface FxRocket { x0: number; y0: number; z0: number; x1: number; y1: number; z1: number; t: number; delay: number; dur: number; arc: number }
 
-// graphics quality presets. The dominant GPU cost is fill rate = render
-// resolution, so `pr` (render scale) is the main lever and is deliberately
-// allowed BELOW native (the canvas is CSS-upscaled). `pr` is also capped to the
-// display's devicePixelRatio so High never wastefully supersamples a hi-DPI panel.
+// graphics quality presets. Everything renders at NATIVE resolution (pr 1.0) so
+// the world is always crisp — earlier sub-native scaling looked blurry. The
+// quality lever is now SHADOWS (the dominant GPU cost): Low turns them off for
+// max FPS, Medium uses a 1024 shadow map, High a sharper 2048 one. `pr` is capped
+// to the display's devicePixelRatio so a hi-DPI panel isn't wastefully supersampled.
 export const GFX_QUALITY: Record<string, { pr: number; shadows: boolean; shadowSize: number }> = {
-  low:    { pr: 0.55, shadows: false, shadowSize: 1024 }, // max FPS (renders at ~55%, upscaled)
-  medium: { pr: 0.72, shadows: true,  shadowSize: 1024 }, // balanced — sub-native + shadows
-  high:   { pr: 1.0,  shadows: true,  shadowSize: 2048 }, // native resolution + soft shadows
+  low:    { pr: 1.0, shadows: false, shadowSize: 1024 }, // crisp, no shadows — max FPS
+  medium: { pr: 1.0, shadows: true,  shadowSize: 1024 }, // crisp + shadows
+  high:   { pr: 1.0, shadows: true,  shadowSize: 2048 }, // crisp + sharper shadows
 };
 export function gfxQuality(): string {
   try { return localStorage.getItem('fe_quality') || 'medium'; } catch { return 'medium'; }
@@ -793,7 +794,6 @@ export class Renderer {
   camera: THREE.PerspectiveCamera;
   three: THREE.WebGLRenderer;
   sun!: THREE.DirectionalLight;
-  private shadowTick = 0; // throttles shadow-map refresh (every 3rd frame)
   map: GameMap;
 
   camX = 48; camZ = 48; yaw = 0; dist = 28; // yaw 0: view matches the minimap exactly
@@ -871,10 +871,13 @@ export class Renderer {
     const q = GFX_QUALITY[gfxQuality()] || GFX_QUALITY.medium;
     this.three.setPixelRatio(Math.min(q.pr, window.devicePixelRatio));
     this.three.shadowMap.enabled = q.shadows;
-    this.three.shadowMap.type = THREE.PCFShadowMap; // cheaper than PCFSoft; the dominant render cost was shadows
-    // the sun is static, so shadows only shift as units move — re-render the
-    // shadow map every 3rd frame instead of every frame (≈3x cheaper, invisible)
-    this.three.shadowMap.autoUpdate = false;
+    this.three.shadowMap.type = THREE.PCFShadowMap; // cheaper than PCFSoft
+    // Shadows refresh EVERY frame (the default). The previous every-3rd-frame
+    // throttle left moving units' shadows trailing behind them and made units
+    // flicker dark as they crossed their own stale shadow. Per-frame cost is kept
+    // down instead by NOT casting from the heavy/static clutter (trees, ore) —
+    // only units and buildings cast (see the cast-shadow assignments below).
+    this.three.shadowMap.autoUpdate = true;
     this.three.toneMapping = THREE.ACESFilmicToneMapping;
     this.three.toneMappingExposure = 1.15;
     const maxAniso = Math.min(8, this.three.capabilities.getMaxAnisotropy());
@@ -963,7 +966,7 @@ export class Renderer {
       2048
     );
     this.oreMesh.frustumCulled = false;
-    this.oreMesh.castShadow = true;
+    this.oreMesh.castShadow = false; // ground clutter — kept out of the shadow pass
     this.scene.add(this.oreMesh);
 
     // roads: flat paved tiles laid by engineers (extend build reach)
@@ -988,7 +991,7 @@ export class Renderer {
       512
     );
     this.gemMesh.frustumCulled = false;
-    this.gemMesh.castShadow = true;
+    this.gemMesh.castShadow = false; // ground clutter — kept out of the shadow pass
     this.scene.add(this.gemMesh);
 
     // oil wells: a stubby dark derrick/pool marker (land + offshore)
@@ -999,7 +1002,7 @@ export class Renderer {
       1024
     );
     this.oilMesh.frustumCulled = false;
-    this.oilMesh.castShadow = true;
+    this.oilMesh.castShadow = false; // ground clutter — kept out of the shadow pass
     this.scene.add(this.oilMesh);
 
     // unit instancing: procedural models first, external GLBs swap in async
@@ -1592,7 +1595,11 @@ export class Renderer {
       }
     }
     trunks.count = leaves.count = k;
-    trunks.castShadow = leaves.castShadow = true;
+    // forests are the single biggest instance count on the map; keeping them out
+    // of the (now per-frame) shadow pass is what makes live shadows affordable.
+    // They still RECEIVE shadows, so units passing under them are shaded.
+    trunks.castShadow = leaves.castShadow = false;
+    trunks.receiveShadow = leaves.receiveShadow = true;
     trunks.instanceMatrix.needsUpdate = leaves.instanceMatrix.needsUpdate = true;
     if (leaves.instanceColor) leaves.instanceColor.needsUpdate = true;
     this.scene.add(trunks, leaves);
@@ -1638,7 +1645,6 @@ export class Renderer {
       this.sun.shadow.mapSize.set(q.shadowSize, q.shadowSize);
       if (this.sun.shadow.map) { this.sun.shadow.map.dispose(); (this.sun.shadow as any).map = null; } // rebuild at the new size
     }
-    this.three.shadowMap.needsUpdate = true;
     this.resize();
   }
 
@@ -2297,8 +2303,6 @@ export class Renderer {
     this.healMesh.instanceMatrix.needsUpdate = true;
 
     this.updateCamera();
-    // refresh the (auto-update-disabled) shadow map only every 3rd frame
-    if (this.three.shadowMap.enabled) { this.shadowTick = (this.shadowTick + 1) % 3; this.three.shadowMap.needsUpdate = this.shadowTick === 0; }
     this.three.render(this.scene, this.camera);
   }
 }

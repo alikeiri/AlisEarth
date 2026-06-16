@@ -212,7 +212,17 @@ const http = createServer(async (req, res) => {
     let body: Buffer;
     try { body = await readFile(file); }
     catch { body = await readFile(join(DIST, 'index.html')); p = '/index.html'; }
-    res.writeHead(200, { 'Content-Type': MIME[extname(p)] || 'application/octet-stream' });
+    // Cache policy that kills stale builds: index.html is ALWAYS revalidated, so a
+    // reload always picks up the current build, which references the current
+    // content-hashed JS/CSS in /assets (those are immutable — safe to cache for a
+    // year). Other fixed-name assets (models/textures/audio) get a short cache.
+    const ext = extname(p);
+    const cache = ext === '.html'
+      ? 'no-cache, must-revalidate'
+      : p.startsWith('/assets/')
+        ? 'public, max-age=31536000, immutable'
+        : 'public, max-age=600';
+    res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream', 'Cache-Control': cache });
     res.end(body);
   } catch {
     res.writeHead(500); res.end('server error');
