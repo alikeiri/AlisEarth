@@ -1093,7 +1093,11 @@ class GameClient {
       if (x >= 0 && z >= 0 && x < W && z < H) cells.push({ x, z });
     const dozers = this.myUnitIds().filter(id => UNITS[this.byId.get(id)?.t]?.terra);
     if (dozers.length && cells.length) {
-      this.game.issue({ k: 'terraform', p: me, ids: [dozers[0]], path: cells, h: this.terraTargetH });
+      // a "simple click" — committing without nudging the height up or down — asks
+      // the dozer to auto-bridge: fill the span into a passable land path between
+      // the two shores (ramped if they sit at different heights)
+      const auto = Math.abs(this.terraTargetH - this.terraBaseH) < 0.15;
+      this.game.issue({ k: 'terraform', p: me, ids: [dozers[0]], path: cells, h: this.terraTargetH, auto });
       audio.play('confirm');
     }
   }
@@ -1919,7 +1923,10 @@ class GameClient {
       if (terraHint) {
         const rel = (this.terraTargetH - this.terraBaseH).toFixed(1);
         const tag = this.terraTargetH < SEA ? ' (underwater)' : '';
-        terraHint.textContent = `TERRAFORM height ${rel >= '0' ? '+' : ''}${rel}${tag} — move mouse up/down, click to build · Esc cancels`;
+        const auto = Math.abs(this.terraTargetH - this.terraBaseH) < 0.15;
+        terraHint.textContent = auto
+          ? 'TERRAFORM — click now to auto-bridge a land path across the gap · move up/down to set a fixed height instead · Esc cancels'
+          : `TERRAFORM height ${rel >= '0' ? '+' : ''}${rel}${tag} — move mouse up/down, click to build · Esc cancels`;
         terraHint.classList.remove('hidden');
       }
     } else if (terraHint && !terraHint.classList.contains('hidden')) {

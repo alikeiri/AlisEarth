@@ -46,6 +46,8 @@ export interface Entity {
   lastMissile?: string; // silo: missile type to auto-rebuild for a strike order
   strikeX?: number; strikeZ?: number; strikeR?: number; // silo: persistent strike zone
   terraPath?: { x: number; z: number }[]; terraI?: number; terraH?: number; // bulldozer job
+  terraHs?: number[]; // per-cell target heights (auto-bridge ramp); parallel to terraPath
+  terraBridge?: { ax: number; az: number; bx: number; bz: number }; // auto-bridge: connect these two land cells
   burnT?: number; burnPs?: number; // building on fire: seconds left, damage/s
   upg?: { t: number; t0: number }; // building upgrade in progress: seconds left, total
   icd?: number; // interceptor (Iron Dome / Patriot): reload cooldown between missile kills
@@ -566,9 +568,15 @@ export class Sim {
       const dozer = (c.ids || []).map((i: number) => this.ents.get(i))
         .find((u: Entity | undefined): u is Entity => !!u && !u.b && u.owner === c.p && UNITS[u.type]?.terra);
       if (!dozer || !Array.isArray(c.path) || !c.path.length) return;
-      dozer.terraPath = c.path.slice(0, 2500).map((p: any) => ({ x: Math.floor(p.x), z: Math.floor(p.z) }));
+      const cells = c.path.slice(0, 2500).map((p: any) => ({ x: Math.floor(p.x), z: Math.floor(p.z) }));
+      dozer.terraPath = cells;
       dozer.terraI = 0;
       dozer.terraH = Math.max(-1.0, Math.min(8, c.h ?? (SEA + 1.5)));
+      dozer.terraHs = undefined; dozer.terraBridge = undefined;
+      // auto-bridge: a flat "simple click" (no height adjustment) over a span that
+      // crosses water between two landmasses. Raise the gap into a land path and
+      // ramp it between the two shore heights so vehicles & infantry can cross.
+      if (c.auto) this.planBridge(dozer, cells);
       dozer.orders = []; dozer.path = null;
       return;
     }
@@ -607,7 +615,7 @@ export class Sim {
     if (!units.length) return;
 
     if (c.k === 'stop') {
-      for (const u of units) { u.orders = []; u.path = null; u.terraPath = undefined; u.rzr = 0; u.wpLoop = undefined; u.cmdT = this.tickN; }
+      for (const u of units) { u.orders = []; u.path = null; u.terraPath = undefined; u.terraHs = undefined; u.terraBridge = undefined; u.rzr = 0; u.wpLoop = undefined; u.cmdT = this.tickN; }
       return;
     }
     if (c.k === 'wprepeat') {
@@ -699,7 +707,7 @@ export class Sim {
       u.cmdT = this.tickN; // explicit order — shield it from auto-reactions
       // a manual order cancels an in-progress terraform job (keep what was already
       // reshaped — just stop here) so the bulldozer is free to drive off
-      if (u.terraPath) u.terraPath = undefined;
+      if (u.terraPath) { u.terraPath = undefined; u.terraHs = undefined; u.terraBridge = undefined; }
       if (c.q) u.orders.push(ord);
       else { u.orders = [ord]; u.path = null; u.wpLoop = undefined; } // a fresh order cancels the repeat loop
     });
@@ -785,6 +793,55 @@ export class Sim {
       }
     }
     return have < cap;
+  }
+
+  // Plan an auto-bridge across a drawn rectangle that spans water between two
+  // landmasses. Picks the bridge's long axis, finds a shore height at each end,
+  // and assigns every cell a per-cell target that ramps from one shore to the
+  // other — so the finished span is solid land sloped gently between the two
+  // island heights (no cliffs to block vehicles/infantry). Stores two anchor
+  // cells so the job can stop the moment the two land regions actually connect.
+  private planBridge(dozer: Entity, cells: { x: number; z: number }[]) {
+    if (!cells.length) return;
+    let xMin = 1e9, xMax = -1e9, zMin = 1e9, zMax = -1e9;
+    for (const c of cells) { if (c.x < xMin) xMin = c.x; if (c.x > xMax) xMax = c.x; if (c.z < zMin) zMin = c.z; if (c.z > zMax) zMax = c.z; }
+    const horiz = (xMax - xMin) >= (zMax - zMin); // long axis = bridge direction
+    const sOf = (c: { x: number; z: number }) => horiz ? c.x : c.z;
+    const sMin = horiz ? xMin : zMin, sMax = horiz ? xMax : zMax;
+    const span = Math.max(1, sMax - sMin);
+    const LAND = SEA + 0.6; // a comfortably-dry land height to fall back on
+    // sample shore heights: average the height of land cells in the first/last
+    // fifth of the span (the two island ends). Fall back to a flat land height.
+    let h0Sum = 0, h0N = 0, h1Sum = 0, h1N = 0;
+    let aCell: { x: number; z: number } | null = null, bCell: { x: number; z: number } | null = null;
+    for (const c of cells) {
+      if (this.map.regionAt(c.x, c.z) < 0) continue;        // water/cliff — not shore
+      const t = (sOf(c) - sMin) / span;
+      const h = this.map.cellH(c.x, c.z);
+      if (t <= 0.2) { h0Sum += h; h0N++; if (!aCell) aCell = c; }
+      else if (t >= 0.8) { h1Sum += h; h1N++; bCell = c; }
+    }
+    const h0 = h0N ? h0Sum / h0N : LAND;
+    const h1 = h1N ? h1Sum / h1N : LAND;
+    // per-cell ramp: lerp shore-to-shore along the long axis, floored to dry land
+    dozer.terraHs = cells.map(c => {
+      const t = (sOf(c) - sMin) / span;
+      return Math.max(LAND, Math.min(8, h0 + (h1 - h0) * t));
+    });
+    // anchors for the connectivity check: a solid-land cell just outside each end
+    const endLand = (lo: boolean) => {
+      let best: { x: number; z: number } | null = null, bd = 1e9;
+      for (const c of cells) {
+        const r = this.map.regionAt(c.x, c.z);
+        if (r < 0) continue;
+        const t = (sOf(c) - sMin) / span;
+        const key = lo ? t : 1 - t;
+        if (key < bd) { bd = key; best = c; }
+      }
+      return best;
+    };
+    const a = aCell || endLand(true), b = bCell || endLand(false);
+    if (a && b) dozer.terraBridge = { ax: a.x, az: a.z, bx: b.x, bz: b.z };
   }
 
   hasBuilding(p: number, type: string, complete = true): boolean {
@@ -1390,22 +1447,36 @@ export class Sim {
     // credits per cell and finishes when every cell reaches the target.
     if (def.terra && u.terraPath && u.terraPath.length) {
       const pl = this.players[u.owner];
-      const target = u.terraH!;
-      const settled = (c: { x: number; z: number }) => Math.abs(this.map.cellH(c.x, c.z) - target) < 0.2;
+      const hs = u.terraHs;                                   // per-cell ramp (auto-bridge) or undefined
+      const tgtAt = (k: number) => hs ? hs[k] : u.terraH!;
+      const settled = (k: number) => Math.abs(this.map.cellH(u.terraPath![k].x, u.terraPath![k].z) - tgtAt(k)) < 0.2;
+      // auto-bridge finishes the instant the two landmasses actually connect for
+      // ground units — even if a few cells haven't reached their exact target yet
+      const br = u.terraBridge;
+      if (br) {
+        const ra = this.map.regionAt(br.ax, br.az), rb = this.map.regionAt(br.bx, br.bz);
+        if (ra >= 0 && ra === rb) {
+          u.terraPath = undefined; u.terraHs = undefined; u.terraBridge = undefined;
+          this.events.push({ e: 'done', x: u.x, z: u.z });
+          return;
+        }
+      }
       let near: { x: number; z: number } | null = null, nd = 1e9;
-      for (const c of u.terraPath) {
-        if (settled(c)) continue;
+      for (let k = 0; k < u.terraPath.length; k++) {
+        if (settled(k)) continue;
+        const c = u.terraPath[k];
         const dd = (u.x - (c.x + 0.5)) * (u.x - (c.x + 0.5)) + (u.z - (c.z + 0.5)) * (u.z - (c.z + 0.5));
         if (dd < nd) { nd = dd; near = c; }
       }
-      if (!near) { u.terraPath = undefined; this.events.push({ e: 'done', x: u.x, z: u.z }); return; }
+      if (!near) { u.terraPath = undefined; u.terraHs = undefined; u.terraBridge = undefined; this.events.push({ e: 'done', x: u.x, z: u.z }); return; }
       if (nd > 4) this.moveToward(u, near.x + 0.5, near.z + 0.5, def); // crawl to the work
       if (this.tickN % 2 === 0 && pl.credits >= 1) {
-        for (const c of u.terraPath) {                       // reshape a 5x5-ish brush
-          if ((u.x - (c.x + 0.5)) * (u.x - (c.x + 0.5)) + (u.z - (c.z + 0.5)) * (u.z - (c.z + 0.5)) > 7 || settled(c)) continue;
+        for (let k = 0; k < u.terraPath.length; k++) {       // reshape a 5x5-ish brush
+          const c = u.terraPath[k];
+          if ((u.x - (c.x + 0.5)) * (u.x - (c.x + 0.5)) + (u.z - (c.z + 0.5)) * (u.z - (c.z + 0.5)) > 7 || settled(k)) continue;
           if (pl.credits < 1) break;
           pl.credits -= 1;                                   // cost per cell pulse
-          this.map.terraform(c.x, c.z, target, 0.25);
+          this.map.terraform(c.x, c.z, tgtAt(k), 0.25);
           this.events.push({ e: 'terra', x: c.x + 0.5, z: c.z + 0.5 });
         }
       }
