@@ -75,6 +75,9 @@
     color: var(--text); transition: background .1s, border-color .1s; }
   .bbtn:hover { background: #20303c; border-color: #4a6a7e; }
   .bbtn .ico { font-size: 16px; display: block; margin-bottom: 1px; }
+  /* bundled Twemoji icons render as inline images sized to the surrounding text */
+  img.twemoji { height: 1em; width: 1em; vertical-align: -0.12em; margin: 0; display: inline-block; }
+  .bbtn .ico img.twemoji, .tbtn img.twemoji { height: 1.05em; width: 1.05em; }
   .optrow { display: flex; gap: 8px; align-items: center; }
   .optrow .optlabel { color: #78909c; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; flex: 0 0 80px; }
   .optbtn { flex: 1; background: #131c23; border: 1px solid #2c3a44; color: #b0bec5; font-size: 12px;

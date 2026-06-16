@@ -7,6 +7,7 @@ import { FACTIONS, BUILDINGS, UNITS, PLAYER_COLORS, SIM_VERSION, UPG_MAX } from 
 import { GameMap, genMap, setMapSize, W, H, MAXD, SEA } from '../sim/map';
 import { Renderer, gfxQuality } from './render';
 import { UI } from './ui';
+import { twemojify, twemojiParse } from './twemoji';
 import { Net } from './net';
 import { audio } from './audio';
 import { runDeterminismProbe, mathCanary, detMathCanary } from '../sim/determinism';
@@ -2555,7 +2556,7 @@ function buildFactionCards() {
   for (const f of Object.values(FACTIONS)) {
     const c = document.createElement('div');
     c.className = 'fcard' + (f.id === selFaction ? ' sel' : '');
-    c.innerHTML = `<div class="flag">${f.flag}</div><div class="fname">${f.name}</div><div class="fperk">${f.perk}</div>`;
+    c.innerHTML = `<div class="flag">${twemojify(f.flag)}</div><div class="fname">${f.name}</div><div class="fperk">${f.perk}</div>`;
     c.addEventListener('click', () => { selFaction = f.id; buildFactionCards(); });
     wrap.appendChild(c);
   }
@@ -2678,7 +2679,7 @@ function renderEndStats(game: GameLike) {
   const players: any[] = sim.players;
   const s = sim.stats;
   const colorOf = (i: number) => '#' + PLAYER_COLORS[i % PLAYER_COLORS.length].toString(16).padStart(6, '0');
-  const nameOf = (i: number) => (players[i]?.name || ('Player ' + (i + 1))) + (players[i]?.fac?.flag ? ' ' + players[i].fac.flag : '');
+  const nameOf = (i: number) => (players[i]?.name || ('Player ' + (i + 1))) + (players[i]?.fac?.flag ? ' ' + twemojify(players[i].fac.flag) : '');
 
   // ---- table: built / killed / lost per faction ----
   const cols = ['Faction', 'Units Built', 'Bldgs Built', 'Units Killed', 'Bldgs Killed', 'Units Lost', 'Bldgs Lost'];
@@ -2959,7 +2960,7 @@ function renderMpLobby(m: any) {
   $('mpUserCount').textContent = String(users.length);
   $('mpUsers').innerHTML = users.length
     ? users.map((u: any) => `<div style="display:flex;align-items:center;gap:6px">` +
-      `<span style="flex:1;min-width:0">${FACTIONS[u.faction]?.flag || '🏳'} ${escapeHtml(u.name)}` +
+      `<span style="flex:1;min-width:0">${twemojify(FACTIONS[u.faction]?.flag || '🏳')} ${escapeHtml(u.name)}` +
       `${u.inGame ? ' <span style="color:#5f7384">· in game</span>' : ''}</span>${pingBadge(u.ping)}</div>`).join('')
     : '<div style="color:#5f7384">No one else online yet</div>';
   const sizes: Record<number, string> = { 112: 'Medium', 136: 'Large', 160: 'Huge', 72: 'Small', 96: 'Medium', 128: 'Large' };
@@ -3037,7 +3038,7 @@ async function connectNet(): Promise<Net> {
       const row = document.createElement('div');
       row.className = 'lpRow';
       row.innerHTML = `<div class="lpDot" style="background:${colors[i]}"></div>
-        <span style="flex:1">${FACTIONS[p.faction]?.flag || ''} ${escapeHtml(p.name)}</span>
+        <span style="flex:1">${twemojify(FACTIONS[p.faction]?.flag || '')} ${escapeHtml(p.name)}</span>
         ${pingBadge(p.ping)}
         <span style="color:#78909c;font-size:12px;margin-left:6px">${i === 0 ? 'HOST' : ''}</span>`;
       list.appendChild(row);
@@ -3304,6 +3305,10 @@ if (!glOk) {
   renderAiIntel();
   syncIntelFromServer();
   showBuildInfo();
+  // swap every static emoji in the page (menu buttons, command bar, audio toggles,
+  // faction flags) for bundled Twemoji SVGs so icons render on browsers/OSes whose
+  // system emoji fonts are missing or monochrome (dynamic UI is converted at source)
+  twemojiParse(document.body);
   // remember a name the player types (skip the random funny placeholders)
   try {
     const nm = $('nameInput') as HTMLInputElement;

@@ -2,6 +2,7 @@
 
 import { UNITS, BUILDINGS, FACTIONS, PLAYER_COLORS, AIRFIELD_HELI, AIRFIELD_PLANE, airSlotClass, UPG_MAX, upgCost, TECHS, dmgMul } from '../sim/data';
 import { GameMap, W, H, SEA } from '../sim/map';
+import { twemojify } from './twemoji';
 
 const B_ICONS: Record<string, string> = {
   power: '⚡', refinery: '⛏️', barracks: '\u{1F396}️', factory: '\u{1F3ED}', turret: '\u{1F5FC}',
@@ -305,7 +306,7 @@ export class UI {
     const b = document.createElement('div');
     b.className = 'bbtn';
     b.id = 'btn_' + key;
-    b.innerHTML = `<span class="ico">${icon}</span>${name}<span class="cost"></span><span class="badge hidden"></span><div class="prog"></div>`;
+    b.innerHTML = `<span class="ico">${twemojify(icon)}</span>${name}<span class="cost"></span><span class="badge hidden"></span><div class="prog"></div>`;
     b.addEventListener('click', fn);
     if (ctxFn) b.addEventListener('contextmenu', e => { e.preventDefault(); ctxFn(); });
     this.btns[key] = b;
@@ -407,7 +408,7 @@ export class UI {
           const name = UNITS[t]?.name || BUILDINGS[t]?.name || t;
           const icon = U_ICONS[t] || B_ICONS[t] || '';
           const tip = counterTip(t);
-          return `<div class="selChip" data-type="${t}" title="${(tip ? tip + '\n' : '')}Click to select only ${name}">${icon} <span class="n">${n}×</span> ${name}` +
+          return `<div class="selChip" data-type="${t}" title="${(tip ? tip + '\n' : '')}Click to select only ${name}">${twemojify(icon)} <span class="n">${n}×</span> ${name}` +
             `<div class="chipHp"><div class="chipHpFill"></div></div></div>`;
         }).join('');
       }
@@ -475,7 +476,7 @@ export class UI {
       } else ch.classList.add('hidden');
     }
     document.getElementById('credits')!.textContent = String(pl.c);
-    document.getElementById('facFlag')!.textContent = fac.flag;
+    document.getElementById('facFlag')!.innerHTML = twemojify(fac.flag);
     document.getElementById('facName')!.textContent = fac.name;
     const secs = Math.floor(tickN / 10);
     document.getElementById('gameClock')!.textContent =
