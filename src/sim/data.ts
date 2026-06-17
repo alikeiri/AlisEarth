@@ -207,6 +207,7 @@ export const BUILDINGS: Record<string, BuildingDef> = {
   // Infantry move in and fire out; capacity scales with footprint.
   bldgsm:   { name: 'Building',           cost: 0,    hp: 700,  power: 0,    buildTime: 0,  size: 2, garrison: true, neutral: true },
   bldglg:   { name: 'Tower Block',        cost: 0,    hp: 1100, power: 0,    buildTime: 0,  size: 3, garrison: true, neutral: true },
+  bldgxl:   { name: 'High-Rise',          cost: 0,    hp: 1500, power: 0,    buildTime: 0,  size: 4, garrison: true, neutral: true },
   radar:    { name: 'Radar Dome',         cost: 900,  hp: 600,  power: -40,  buildTime: 9,  size: 2, prereq: 'refinery', sight: 26 }, // wide sweep pierces the fog of war
   wall:     { name: 'Wall',               cost: 100,  hp: 900,  power: 0,    buildTime: 8,  size: 1, prereq: 'barracks' },
   barrier:  { name: 'Tank Barrier',       cost: 50,   hp: 450,  power: 0,    buildTime: 6,  size: 1, prereq: 'barracks' },

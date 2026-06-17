@@ -558,27 +558,24 @@ export function genMap(seed: number, nPlayers: number): GameMap {
         if (!m.inB(x, z) || m.blockedT(x, z) || m.road[z * W + x] !== 0) return false;
       return true;
     };
-    let blocks = 0, btries = 0, garr = 0;
-    const wantBlocks = Math.round(W / 7), wantGarr = Math.min(10, Math.max(6, Math.round(W / 12)));
-    while ((blocks < wantBlocks || garr < wantGarr) && btries < 1200) {
-      btries++;
+    // Every city building is a garrisonable structure: infantry enter and fire out,
+    // and capacity scales with the footprint (2x2->4, 3x3->9, 4x4->16). The sim
+    // spawns them as neutral entities whose footprint blocks movement (so they
+    // still serve as cover/obstacles). A captured building flips to the holder.
+    let garr = 0, gtries = 0;
+    const wantGarr = Math.round(W / 6);
+    while (garr < wantGarr && gtries < 1600) {
+      gtries++;
       const cx = 6 + rng.int(W - 12), cz = 6 + rng.int(H - 12);
       if (m.blockedT(cx, cz) || (!flatCity && Math.abs(cx - riverCx(cz)) < RIVER_HALF + 3)) continue;
       if (!farFromStarts(cx, cz, 14) || m.road[cz * W + cx] !== 0) continue;
-      // first fill the garrison quota: reserve a CLEAR footprint for a neutral
-      // building the sim will spawn (don't block the cells — the entity does that)
-      if (garr < wantGarr) {
-        const s = rng.next() < 0.5 ? 2 : 3;
-        if (footprintClear(cx, cz, s)) { m.garrisonSites.push({ cx, cz, type: s === 3 ? 'bldglg' : 'bldgsm' }); garr++; continue; }
+      // mixed footprints for varied capacity, favouring the mid size
+      const roll = rng.next();
+      const s = roll < 0.4 ? 2 : roll < 0.82 ? 3 : 4;
+      if (footprintClear(cx, cz, s)) {
+        m.garrisonSites.push({ cx, cz, type: s === 4 ? 'bldgxl' : s === 3 ? 'bldglg' : 'bldgsm' });
+        garr++;
       }
-      // otherwise solid cover (impassable terrain rendered as a building block)
-      const bw = 2 + rng.int(3), bh = 2 + rng.int(3);
-      for (let z = cz; z < cz + bh; z++) for (let x = cx; x < cx + bw; x++) {
-        if (!m.inB(x, z) || m.blockedT(x, z) || m.road[z * W + x] !== 0) continue;
-        const i = z * W + x;
-        m.cityBlock[i] = 1; m.tBlocked[i] = 1;
-      }
-      blocks++;
     }
     m.regionDirty = true;
   }

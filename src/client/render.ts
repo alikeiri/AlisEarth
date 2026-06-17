@@ -528,27 +528,38 @@ function buildingGroupPro(type: string, teamColor: number): THREE.Group {
   // neutral garrisonable city building: reads clearly as an enterable building —
   // banded window floors + a prominent doorway + a roof with a team-colour band
   // (shows who holds it) and a rooftop block. Distinct from the flat cover blocks.
-  if (type === 'bldgsm' || type === 'bldglg') {
-    const big = type === 'bldglg';
-    const w = big ? 2.5 : 1.7, d = big ? 2.5 : 1.7, h = big ? 3.6 : 2.4;
-    const floors = big ? 4 : 3;
+  if (type === 'bldgsm' || type === 'bldglg' || type === 'bldgxl') {
+    const sz = type === 'bldgxl' ? 4 : type === 'bldglg' ? 3 : 2;
+    const w = sz * 0.82, d = sz * 0.82, h = sz === 4 ? 5.2 : sz === 3 ? 3.6 : 2.4;
+    const floors = sz === 4 ? 6 : sz === 3 ? 4 : 3;
     const wall = mat(0xb7bdc2, 0.92, 0.04);   // pale concrete
     const glass = mat(0x39536b, 0.3, 0.55);   // dark blue-grey windows
-    add(new THREE.BoxGeometry(w, h, d), wall, 0, h / 2, 0);
+    // Merge each material's pieces into ONE mesh: a city map holds ~18 of these,
+    // so per-building mesh counts matter — ~4 draw calls each instead of ~20.
+    const box = (gw: number, gh: number, gd: number, x: number, y: number, z: number) => {
+      const bg = new THREE.BoxGeometry(gw, gh, gd); bg.translate(x, y, z); return bg;
+    };
+    const wallGeos: THREE.BufferGeometry[] = [box(w, h, d, 0, h / 2, 0)];
+    const glassGeos: THREE.BufferGeometry[] = [];
     // window bands wrapping each floor (front, back, both sides)
     for (let f = 0; f < floors; f++) {
-      const y = (h / floors) * (f + 0.55);
-      add(new THREE.BoxGeometry(w * 0.82, h / floors * 0.42, 0.05), glass, 0, y, d / 2 + 0.01);
-      add(new THREE.BoxGeometry(w * 0.82, h / floors * 0.42, 0.05), glass, 0, y, -d / 2 - 0.01);
-      add(new THREE.BoxGeometry(0.05, h / floors * 0.42, d * 0.82), glass, w / 2 + 0.01, y, 0);
-      add(new THREE.BoxGeometry(0.05, h / floors * 0.42, d * 0.82), glass, -w / 2 - 0.01, y, 0);
+      const y = (h / floors) * (f + 0.55), bh = h / floors * 0.42;
+      glassGeos.push(box(w * 0.82, bh, 0.05, 0, y, d / 2 + 0.01));
+      glassGeos.push(box(w * 0.82, bh, 0.05, 0, y, -d / 2 - 0.01));
+      glassGeos.push(box(0.05, bh, d * 0.82, w / 2 + 0.01, y, 0));
+      glassGeos.push(box(0.05, bh, d * 0.82, -w / 2 - 0.01, y, 0));
     }
-    // a clear ground-floor doorway at the front (reads as "you can enter here")
-    add(new THREE.BoxGeometry(w * 0.3, h * 0.32, 0.08), mat(0x20262d), 0, h * 0.16, d / 2 + 0.02);
-    // roof: parapet + team-colour band + a small rooftop housing
-    add(new THREE.BoxGeometry(w + 0.1, 0.1, d + 0.1), mat(0x8b9197), 0, h + 0.05, 0);
+    // roof parapet + a small rooftop housing (concrete, merged with the walls)
+    wallGeos.push(box(w + 0.1, 0.1, d + 0.1, 0, h + 0.05, 0));
+    wallGeos.push(box(w * 0.4, 0.3, d * 0.4, -w * 0.18, h + 0.3, -d * 0.16));
+    const wallMesh = new THREE.Mesh(mergeGeometries(wallGeos), wall);
+    wallMesh.castShadow = true; wallMesh.receiveShadow = true; g.add(wallMesh);
+    const glassMesh = new THREE.Mesh(mergeGeometries(glassGeos), glass);
+    glassMesh.receiveShadow = true; g.add(glassMesh);
+    // a clear ground-floor doorway (reads as "you can enter here")
+    add(new THREE.BoxGeometry(w * 0.3, h * 0.3, 0.08), mat(0x20262d), 0, h * 0.15, d / 2 + 0.02);
+    // roof team-colour band shows who currently holds the building (grey = empty)
     add(new THREE.BoxGeometry(w + 0.16, 0.12, d + 0.16), team, 0, h + 0.14, 0);
-    add(new THREE.BoxGeometry(w * 0.4, 0.3, d * 0.4), mat(0x6f767c), -w * 0.18, h + 0.3, -d * 0.16);
     return g;
   }
 
