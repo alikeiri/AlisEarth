@@ -1590,7 +1590,7 @@ export class Renderer {
     // every GPU (only see-through on bright monitors). Bake a slate grey instead,
     // so the shroud reads as fog — visible even on dim laptop panels. setFog()
     // writes only the alpha channel, so this RGB persists.
-    for (let i = 0; i < W * H; i++) { data[i * 4] = 0x0c; data[i * 4 + 1] = 0x10; data[i * 4 + 2] = 0x16; data[i * 4 + 3] = 205; }
+    for (let i = 0; i < W * H; i++) { data[i * 4] = 0x0c; data[i * 4 + 1] = 0x10; data[i * 4 + 2] = 0x16; data[i * 4 + 3] = 255; }
     const tex = new THREE.DataTexture(data, W, H, THREE.RGBAFormat);
     tex.needsUpdate = true;
     tex.flipY = false; // DataTexture row 0 = cz 0, matches mask index cz*W+cx
@@ -1639,10 +1639,10 @@ export class Renderer {
     const d = this.fogTex.image.data as Uint8Array;
     for (let i = 0; i < W * H; i++) {
       const v = mask[i];
-      // visible = clear; explored = light haze; unseen = dark shroud (kept >=200
-      // so fogValue() still reads it as unexplored). Lighter than before so the
-      // map reads as "shrouded" not "black", esp. on dim laptop panels.
-      d[i * 4 + 3] = v === 2 ? 0 : v === 1 ? 90 : 205;
+      // visible = clear; explored = dim haze (you remember the terrain); unseen =
+      // FULLY OPAQUE (alpha 255) so unexplored ground is genuinely hidden, not a
+      // see-through veil. Unexplored stays >=200 so fogValue() reads it correctly.
+      d[i * 4 + 3] = v === 2 ? 0 : v === 1 ? 120 : 255;
     }
     this.fogTex.needsUpdate = true;
   }

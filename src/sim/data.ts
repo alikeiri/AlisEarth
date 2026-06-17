@@ -89,7 +89,7 @@ export const UNITS: Record<string, UnitDef> = {
   mlrs:   { name: 'MLRS',         cost: 1600, hp: 170, speed: 1.6, range: 13.0, dmg: 66, rof: 3.6, builtAt: 'factory',  buildTime: 16, kind: 'veh', faction: 'china' }, // signature: mass rocket artillery
   // artillery line — long range + area-of-effect splash to break up massed pushes.
   // Slow, fragile, can't hit aircraft; outranges most attackers (kite or get rushed).
-  mortar:   { name: 'Mortar Team', cost: 550,  hp: 95,  speed: 1.6, range: 11.0, dmg: 46, rof: 3.4, builtAt: 'barracks', buildTime: 11, kind: 'inf', splash: 2.2, fortify: true, faction: 'pakistan' }, // signature: cheap infantry artillery
+  mortar:   { name: 'Mortar Team', cost: 550,  hp: 95,  speed: 1.6, range: 11.0, dmg: 46, rof: 3.4, builtAt: 'barracks', buildTime: 11, kind: 'inf', splash: 2.2, fortify: true }, // universal infantry artillery (every nation)
   artillery:{ name: 'Artillery',   cost: 1500, hp: 200, speed: 1.4, range: 14.5, dmg: 78, rof: 4.2, builtAt: 'factory',  buildTime: 16, kind: 'veh', splash: 2.8 },
   artyship: { name: 'Artillery Cruiser', cost: 1900, hp: 620, speed: 2.1, range: 15.5, dmg: 92, rof: 4.6, builtAt: 'shipyard', buildTime: 17, kind: 'sea', move: 'sea', splash: 3.0, faction: 'australia' }, // signature: naval siege
   // the anti-infantry vehicle: autocannon IFV — shreds infantry, loses to tanks
