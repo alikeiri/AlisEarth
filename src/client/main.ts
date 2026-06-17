@@ -529,7 +529,8 @@ class GameClient {
     mode: '' as '' | 'pan' | 'box' | 'pinch', sx: 0, sy: 0, downT: 0, moved: false,
     pinchD: 0, pinchA: 0, boxToggle: false, longTimer: 0 as any,
   };
-  private rMode: 'pan' | 'form' | 'aatk' | 'silo' | 'reparea' | 'harvarea' = 'pan';
+  private rMode: 'pan' | 'form' | 'aatk' | 'silo' | 'reparea' | 'harvarea' | 'rotate' = 'pan';
+  private rotLast = { x: 0, y: 0 }; // last cursor pos while Ctrl+right-dragging to rotate the camera
   private formPath: { x: number; z: number }[] | null = null;
   private areaDrag: { cx: number; cz: number; r: number } | null = null;
   private patrolMode = false;
@@ -1391,7 +1392,12 @@ class GameClient {
       const enemyUnder = this.myUnitIds().length
         ? this.pickView(e.clientX, e.clientY, v => !this.allies.has(v.o)) : null;
       const siloSel = (this.selection.size === 1 && !this.myUnitIds().length) ? this.byId.get([...this.selection][0]) : null;
-      if (enemyUnder) {
+      if (e.ctrlKey) {
+        // Ctrl + right-drag rotates (and tilts) the camera. A Ctrl+right-CLICK
+        // (no drag) still falls through to force-fire via contextCommand on release.
+        this.rMode = 'rotate';
+        this.rotLast = { x: e.clientX, y: e.clientY };
+      } else if (enemyUnder) {
         const g = this.renderer.groundPoint(e.clientX / window.innerWidth, e.clientY / window.innerHeight);
         this.rMode = 'aatk';
         this.areaDrag = g ? { cx: g.x, cz: g.z, r: 0 } : null;
@@ -2009,7 +2015,13 @@ class GameClient {
 
     // right-drag: grab-the-world pan, or formation line drawing
     if (this.mouse.rDragging) {
-      if (this.rMode === 'pan' && this.grab) {
+      if (this.rMode === 'rotate') {
+        // Ctrl+right-drag: horizontal = spin (yaw), vertical = tilt (pitch)
+        const dx = this.mouse.x - this.rotLast.x, dy = this.mouse.y - this.rotLast.y;
+        this.renderer.rotate(dx * 0.005);
+        this.renderer.tiltBy(dy * 0.004);
+        this.rotLast = { x: this.mouse.x, y: this.mouse.y };
+      } else if (this.rMode === 'pan' && this.grab) {
         const g = this.renderer.groundPoint(this.mouse.x / window.innerWidth, this.mouse.y / window.innerHeight);
         if (g) this.renderer.jumpCam(
           this.renderer.camX + (this.grab.x - g.x),
@@ -3204,8 +3216,8 @@ function initMenus() {
   muteBtn.addEventListener('click', () => { audio.init(); audio.setMuted(!audio.muted); muteIcon(); });
   // in-game music swap: cycle the track on click and flash the name
   const musBtn = $('musBtn'), musLabel = $('musLabel');
-  const MUS_STYLES = ['iron', 'golden', 'frozen', 'off']; // synth tracks + playlist disabled for now (see AudioMan.ENABLED)
-  const MUS_NAMES: Record<string, string> = { playlist: 'Playlist', battle: 'Battle', hellmarch: 'Hell March', iron: 'Iron Directive', golden: 'Golden Dreams', frozen: 'Frozen Flower', march: 'Military March', ambient: 'Ambient', off: 'Off' };
+  const MUS_STYLES = ['iron', 'golden', 'frozen', 'enemies', 'off']; // synth tracks + playlist disabled for now (see AudioMan.ENABLED)
+  const MUS_NAMES: Record<string, string> = { playlist: 'Playlist', battle: 'Battle', hellmarch: 'Hell March', iron: 'Iron Directive', golden: 'Golden Dreams', frozen: 'Frozen Flower', enemies: 'Love for Enemies', march: 'Military March', ambient: 'Ambient', off: 'Off' };
   let musLabelTimer: any;
   const flashMus = () => {
     musBtn.title = 'Music: ' + (MUS_NAMES[audio.musicStyle] || audio.musicStyle) + ' — click to change';
