@@ -29,7 +29,7 @@ const U_ICONS: Record<string, string> = {
   subhunter: '\u{1F42C}', mslcruiser: '\u{1F6A2}', flakship: '\u{1F387}', transport: '\u{26F4}️',
   fighter: '\u{1F6E9}️', bomber: '\u{1F4A3}', dbomber: '\u{1F916}', heli: '\u{1F681}', helidrone: '\u{1FA81}',
   mcv: '\u{1F3D7}️', dozer: '\u{1F69C}', patriot: '\u{1F6F0}️',
-  tews: '\u{1F4E1}', navengineer: '\u{1F6E0}️',
+  tews: '\u{1F4E1}', navengineer: '\u{1F6E0}️', shahed: '\u{1F6F8}',
   mortar: '\u{1F4A3}', artillery: '\u{1F4A5}', artyship: '\u{1F4A5}', airtransport: '\u{1F681}',
 };
 export const B_LIST = ['power', 'refinery', 'radar', 'barracks', 'factory', 'turret', 'sam', 'cannon', 'tesla', 'irondome', 'wall', 'barrier', 'dronefac', 'shipyard', 'airforce', 'airfield', 'lab', 'silo'];
@@ -47,7 +47,7 @@ const UPG_INFO: Record<string, string> = {
   airforce: '+25% production speed',
   shipyard: '+25% production speed',
 };
-export const U_LIST = ['rifle', 'rocket', 'mortar', 'melody', 'hive', 'tank', 'heavy', 'ifv', 'aatank', 'flak', 'patriot', 'fueltruck', 'harv', 'engineer', 'mcv', 'dozer', 'mlrs', 'artillery', 'recon', 'strike', 'msldrone',
+export const U_LIST = ['rifle', 'rocket', 'mortar', 'melody', 'hive', 'tank', 'heavy', 'ifv', 'aatank', 'flak', 'patriot', 'fueltruck', 'harv', 'engineer', 'mcv', 'dozer', 'mlrs', 'artillery', 'recon', 'strike', 'msldrone', 'shahed',
   'tews', 'chemtrooper', 'chemtank', 'chemdrone', 'biotrooper', 'biotank', 'biodrone', 'stealthtank',
   'gunboat', 'destroyer', 'artyship', 'sub', 'subhunter', 'mslcruiser', 'flakship', 'navdrone', 'navengineer', 'transport', 'airtransport', 'fighter', 'bomber', 'dbomber', 'heli', 'helidrone',
   'cmissile', 'bbmissile', 'chemissile'];
@@ -106,6 +106,7 @@ const DESCRIPTIONS: Record<string, string> = {
   heavy: 'Heavy Tank: slow, heavily armored bruiser with big guns.',
   ifv: 'IFV: fast autocannon carrier — shreds infantry, can pepper aircraft.',
   harv: 'Harvester: gathers ore and returns it to a refinery. Unarmed.',
+  shahed: 'Shahed (Iran): cheap one-way suicide drones, built in volleys of 5. They dive into the target and detonate — fragile, so send the swarm.',
   navengineer: 'Naval Engineer: repairs friendly ships (and coastal structures) out on the water. Unarmed. Right-click a damaged ship to repair; right-drag to set an auto-repair zone.',
   airtransport: 'Air Transport: carries up to 10 infantry (Melody included) over any terrain. Right-click it with infantry selected to load; press U to drop them. Unarmed — cloaks once Stealth Systems is researched.',
   tews: 'TEWS: jams enemy Radar Dome + Spy Satellite vision in a bubble (their units’ own eyes and Patriots still see). Pulses an area EMP that only damages drones.',
@@ -560,11 +561,13 @@ export class UI {
       let uniqueBlocked = false;
       if (ok && (def.unique || def.commando) && ((aliveByUnit[t] || 0) + (queueByUnit[t]?.n || 0)) >= 1) { ok = false; uniqueBlocked = true; } // one per player
       if (def.tech && !myTech[def.tech] && !god) ok = false;      // not yet researched (godmode unlocks all)
-      // hide tech-gated buttons until the tech exists, and (when a production
-      // building is selected) any unit that building can't make
+      if (def.faction && def.faction !== pl.f && !god) ok = false; // another faction's signature unit
+      // hide tech-gated / wrong-faction buttons, and (when a production building
+      // is selected) any unit that building can't make
       const techHidden = !!def.tech && !myTech[def.tech] && !god;
+      const facHidden = !!def.faction && def.faction !== pl.f && !god;
       const filtHidden = !!prodFilter && def.builtAt !== prodFilter && def.altBuiltAt !== prodFilter;
-      this.btns[t].classList.toggle('hidden', techHidden || filtHidden);
+      this.btns[t].classList.toggle('hidden', techHidden || facHidden || filtHidden);
       const q = queueByUnit[t];
       this.styleBtn(t, ok, credits >= cost, cost, q?.n || 0, q?.prog || 0);
       if (def.pad) {

@@ -59,6 +59,8 @@ export interface UnitDef {
                                                  // anti-vehicle drone, and plants demolition charges on buildings
   droneVs?: string;                              // commando: unit type launched at enemy vehicles
   demoCharge?: number;                           // commando: flat damage dealt when planting explosives on a building
+  faction?: string;                              // faction-exclusive signature unit (only that faction can build it)
+  volley?: number;                               // one build order produces this many units at once (Shahed swarm)
 }
 
 export const UNITS: Record<string, UnitDef> = {
@@ -77,16 +79,19 @@ export const UNITS: Record<string, UnitDef> = {
   navengineer: { name: 'Naval Engineer', cost: 700, hp: 240, speed: 2.6, range: 0, dmg: 0, rof: 1, builtAt: 'shipyard', buildTime: 11, kind: 'sea', move: 'sea', repair: true },
   // TEWS: electronic-warfare vehicle — jams enemy radar/satellite in a bubble and
   // pulses an area EMP that only fries drones (harmless to everything else)
-  tews:   { name: 'TEWS',         cost: 1600, hp: 360, speed: 2.2, range: 0, dmg: 0, rof: 1, builtAt: 'factory', buildTime: 14, kind: 'veh', jam: 12, droneEmp: { range: 10, dmg: 22, cd: 1.5 } },
+  tews:   { name: 'TEWS',         cost: 1600, hp: 360, speed: 2.2, range: 0, dmg: 0, rof: 1, builtAt: 'factory', buildTime: 14, kind: 'veh', jam: 12, droneEmp: { range: 10, dmg: 22, cd: 1.5 }, faction: 'eu' }, // signature: electronic warfare
   recon:  { name: 'Recon Drone',  cost: 400,  hp: 70,  speed: 3.4, range: 4.0, dmg: 6,  rof: 0.6, builtAt: 'dronefac', buildTime: 7,  kind: 'air', fly: true },
   strike: { name: 'Strike Drone', cost: 1100, hp: 150, speed: 2.8, range: 5.0, dmg: 32, rof: 1.8, builtAt: 'dronefac', buildTime: 13, kind: 'air', fly: true },
   msldrone: { name: 'Missile Drone', cost: 1500, hp: 120, speed: 2.4, range: 7.0, dmg: 45, rof: 3.0, builtAt: 'dronefac', buildTime: 15, kind: 'air', fly: true },
-  mlrs:   { name: 'MLRS',         cost: 1600, hp: 170, speed: 1.6, range: 13.0, dmg: 66, rof: 3.6, builtAt: 'factory',  buildTime: 16, kind: 'veh' },
+  // Iran signature: Shahed loitering munitions — cheap one-way suicide drones built
+  // (and launched) in volleys of 5. Fragile; dive into the target and detonate.
+  shahed: { name: 'Shahed', cost: 650, hp: 45, speed: 4.6, range: 4.0, dmg: 130, rof: 1, builtAt: 'dronefac', buildTime: 10, kind: 'air', fly: true, alt: 2.5, kamikaze: true, faction: 'iran', volley: 5 },
+  mlrs:   { name: 'MLRS',         cost: 1600, hp: 170, speed: 1.6, range: 13.0, dmg: 66, rof: 3.6, builtAt: 'factory',  buildTime: 16, kind: 'veh', faction: 'china' }, // signature: mass rocket artillery
   // artillery line — long range + area-of-effect splash to break up massed pushes.
   // Slow, fragile, can't hit aircraft; outranges most attackers (kite or get rushed).
-  mortar:   { name: 'Mortar Team', cost: 550,  hp: 95,  speed: 1.6, range: 11.0, dmg: 46, rof: 3.4, builtAt: 'barracks', buildTime: 11, kind: 'inf', splash: 2.2, fortify: true },
+  mortar:   { name: 'Mortar Team', cost: 550,  hp: 95,  speed: 1.6, range: 11.0, dmg: 46, rof: 3.4, builtAt: 'barracks', buildTime: 11, kind: 'inf', splash: 2.2, fortify: true, faction: 'pakistan' }, // signature: cheap infantry artillery
   artillery:{ name: 'Artillery',   cost: 1500, hp: 200, speed: 1.4, range: 14.5, dmg: 78, rof: 4.2, builtAt: 'factory',  buildTime: 16, kind: 'veh', splash: 2.8 },
-  artyship: { name: 'Artillery Cruiser', cost: 1900, hp: 620, speed: 2.1, range: 15.5, dmg: 92, rof: 4.6, builtAt: 'shipyard', buildTime: 17, kind: 'sea', move: 'sea', splash: 3.0 },
+  artyship: { name: 'Artillery Cruiser', cost: 1900, hp: 620, speed: 2.1, range: 15.5, dmg: 92, rof: 4.6, builtAt: 'shipyard', buildTime: 17, kind: 'sea', move: 'sea', splash: 3.0, faction: 'australia' }, // signature: naval siege
   // the anti-infantry vehicle: autocannon IFV — shreds infantry, loses to tanks
   ifv:    { name: 'IFV',          cost: 700,  hp: 300, speed: 3.4, range: 5.0, dmg: 24, rof: 0.8, builtAt: 'factory',  buildTime: 9,  kind: 'veh' },
   // mobile anti-air pair: missile AA hunts airplanes, flak shreds drone swarms
@@ -135,10 +140,10 @@ export const UNITS: Record<string, UnitDef> = {
   biotrooper:  { name: 'Bio Trooper',  cost: 550,  hp: 120, speed: 1.9, range: 4.2, dmg: 14, rof: 0.7, builtAt: 'barracks', buildTime: 7,  kind: 'inf', tech: 'bio', fortify: true },
   biotank:     { name: 'Bio Tank',     cost: 1100, hp: 400, speed: 2.2, range: 5.2, dmg: 34, rof: 1.6, builtAt: 'factory',  buildTime: 14, kind: 'veh', tech: 'bio' },
   biodrone:    { name: 'Bio Drone',    cost: 950,  hp: 150, speed: 3.0, range: 4.5, dmg: 26, rof: 1.7, builtAt: 'dronefac', buildTime: 12, kind: 'air', fly: true, alt: 2.7, tech: 'bio' },
-  stealthtank: { name: 'Stealth Tank', cost: 1300, hp: 300, speed: 3.0, range: 5.5, dmg: 46, rof: 1.8, builtAt: 'factory',  buildTime: 15, kind: 'veh', tech: 'stealth', cloak: true },
+  stealthtank: { name: 'Stealth Tank', cost: 1300, hp: 300, speed: 3.0, range: 5.5, dmg: 46, rof: 1.8, builtAt: 'factory',  buildTime: 15, kind: 'veh', cloak: true, faction: 'usa' }, // signature: cloaked armor (no research needed for its faction)
   fighter:   { name: 'Fighter',      cost: 1200, hp: 210, speed: 4.6, range: 6.5, dmg: 40,  rof: 0.9, builtAt: 'airforce', buildTime: 12, kind: 'air', fly: true, alt: 3.4, pad: true },
   bomber:    { name: 'Bomber',       cost: 2000, hp: 320, speed: 2.6, range: 3.0, dmg: 120, rof: 5.0, builtAt: 'airforce', buildTime: 18, kind: 'air', fly: true, alt: 3.4, pad: true, payload: 2 },
-  dbomber:   { name: 'Drone Bomber', cost: 2600, hp: 280, speed: 3.0, range: 4.0, dmg: 90,  rof: 4.0, builtAt: 'airforce', buildTime: 20, kind: 'air', fly: true, alt: 3.4, pad: true, payload: 3 },
+  dbomber:   { name: 'Drone Bomber', cost: 2600, hp: 280, speed: 3.0, range: 4.0, dmg: 90,  rof: 4.0, builtAt: 'airforce', buildTime: 20, kind: 'air', fly: true, alt: 3.4, pad: true, payload: 3, faction: 'turkey' }, // signature: Bayraktar drone bomber
   heli:      { name: 'Helicopter',   cost: 1600, hp: 260, speed: 3.2, range: 5.5, dmg: 40,  rof: 1.4, builtAt: 'airforce', buildTime: 14, kind: 'air', fly: true, alt: 2.7, pad: true, sonar: 9 }, // MAD: detects & rockets subs
   helidrone: { name: 'Helidrone',    cost: 800,  hp: 120, speed: 3.6, range: 4.5, dmg: 20,  rof: 0.9, builtAt: 'airforce', buildTime: 9,  kind: 'air', fly: true, alt: 2.7, pad: true },
   // air transport: ferries up to 10 infantry (Melody included) over any terrain;
@@ -336,6 +341,7 @@ export function dmgMul(attType: string, tgtIsBuilding: boolean, tgtKind: string,
   if (attType === 'stealthtank') return tgtIsBuilding ? 1.3 : 1.2;
   // kamikaze blast: 1-2 drones kill a tank, 3-4 crack a fortification
   if (attType === 'minidrone') return tgtIsBuilding ? 0.9 : (tgtKind === 'veh' ? 1.7 : 1.2);
+  if (attType === 'shahed')    return tgtIsBuilding ? 1.1 : (tgtKind === 'veh' ? 1.6 : 1.2); // Shahed loitering munition
   // pronounced rock-paper-scissors: rifles shred infantry but bounce off armor,
   // rockets crack armor but whiff on infantry, tanks duel tanks, artillery
   // flattens structures but loses to anything that closes the distance.

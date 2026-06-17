@@ -353,6 +353,7 @@ export class Sim {
       const b = this.ents.get(c.bid); const def = UNITS[c.type];
       if (!b || !b.b || b.owner !== c.p || !def || (def.builtAt !== b.type && def.altBuiltAt !== b.type)) return;
       if (def.tech && !pl.tech[def.tech] && !pl.godmode) return; // not yet researched (godmode unlocks all)
+      if (def.faction && def.faction !== pl.faction && !pl.godmode) return; // faction-exclusive signature (godmode unlocks all)
       if (def.internal) return;
       // hero/unique units (Melody, Bulldozer): only one alive (or in production) at a time
       if (def.commando || def.unique) {
@@ -1376,6 +1377,13 @@ export class Sim {
             const sx = c.x + 0.5, sz = c.z + 0.5;
             const dx = sx - b.x, dz = sz - b.z, dl = hyp(dx, dz) || 1;
             u.orders = [{ k: 'move', x: sx + (dx / dl) * 2.5, z: sz + (dz / dl) * 2.5 }];
+          }
+          // volley units (Shahed): a single build order launches a whole swarm
+          const vol = UNITS[it.type].volley || 1;
+          for (let vk = 1; vk < vol; vk++) {
+            const v = this.spawnUnit(b.owner, it.type, c.x + 0.5 + (this.rng.next() - 0.5) * 2.2, c.z + 0.5 + (this.rng.next() - 0.5) * 2.2);
+            this.stats.builtU[b.owner]++;
+            v.orders = u.orders.map(o => ({ ...o }));
           }
           b.queue.shift();
           this.events.push({ e: 'ready', p: b.owner });
