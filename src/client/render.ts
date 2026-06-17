@@ -1590,7 +1590,7 @@ export class Renderer {
     // every GPU (only see-through on bright monitors). Bake a slate grey instead,
     // so the shroud reads as fog — visible even on dim laptop panels. setFog()
     // writes only the alpha channel, so this RGB persists.
-    for (let i = 0; i < W * H; i++) { data[i * 4] = 0x4a; data[i * 4 + 1] = 0x56; data[i * 4 + 2] = 0x64; data[i * 4 + 3] = 205; }
+    for (let i = 0; i < W * H; i++) { data[i * 4] = 0x0c; data[i * 4 + 1] = 0x10; data[i * 4 + 2] = 0x16; data[i * 4 + 3] = 205; }
     const tex = new THREE.DataTexture(data, W, H, THREE.RGBAFormat);
     tex.needsUpdate = true;
     tex.flipY = false; // DataTexture row 0 = cz 0, matches mask index cz*W+cx
