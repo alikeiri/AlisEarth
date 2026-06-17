@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Unit Overview — Ali's Earth</title>
+<style>
+  :root {
+    --accent: #ffb02e;
+    --text: #cfd8dc;
+    --muted: #78909c;
+    --panel: #131c23;
+    --border: #2c3a44;
+    --x: #2a1414;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #0a0d10; color: var(--text); min-height: 100%;
+    font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    padding: 22px 26px 60px; line-height: 1.5; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .top { display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap; margin-bottom: 4px; }
+  h1 { font-size: 30px; font-weight: 800; letter-spacing: 3px; color: #eceff1; }
+  h1 span { color: var(--accent); }
+  .sub { color: var(--muted); font-size: 13px; letter-spacing: 1px; text-transform: uppercase; margin-bottom: 22px; }
+  h2 { font-size: 16px; letter-spacing: 2px; text-transform: uppercase; color: var(--accent);
+    margin: 30px 0 10px; border-bottom: 1px solid var(--border); padding-bottom: 6px; }
+  h2 .note { font-size: 11px; letter-spacing: 0.5px; text-transform: none; color: var(--muted); font-weight: 400; margin-left: 8px; }
+  .ctl { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+  .ctl label { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; }
+  select { background: #1a2430; color: #cfe0ee; border: 1px solid var(--border);
+    border-radius: 5px; padding: 7px 10px; font-size: 13px; cursor: pointer; }
+
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  .data th, .data td { padding: 7px 10px; text-align: left; border-bottom: 1px solid #1e2a32; }
+  .data th { color: #8aa0ad; font-weight: 600; letter-spacing: 0.5px; position: sticky; top: 0;
+    background: #0e1419; text-transform: uppercase; font-size: 11px; }
+  .data tr:hover td { background: rgba(255,176,46,0.05); }
+  .data td.nm { font-weight: 700; color: #eceff1; }
+  .data td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .data td.desc { color: #9fb3c8; font-size: 12px; }
+  .data td.fac { color: var(--muted); font-size: 12px; }
+  .data td.fac.sig { color: #b9a5e3; font-weight: 600; }
+
+  /* matrix */
+  #matrix { overflow: auto; border: 1px solid var(--border); border-radius: 6px; max-height: 80vh; }
+  table.mtx { border-collapse: separate; border-spacing: 0; font-size: 11px; }
+  table.mtx th, table.mtx td { padding: 4px 6px; text-align: center; white-space: nowrap; }
+  table.mtx thead th { position: sticky; top: 0; z-index: 2; background: #0e1419; color: #a9bcc8;
+    font-weight: 600; border-bottom: 1px solid var(--border); }
+  table.mtx th.rh { position: sticky; left: 0; z-index: 1; background: #0e1419; color: #eceff1;
+    text-align: right; font-weight: 700; border-right: 1px solid var(--border); }
+  table.mtx th.corner { position: sticky; left: 0; top: 0; z-index: 3; background: #0e1419;
+    color: var(--muted); text-align: right; font-weight: 400; font-size: 10px; }
+  table.mtx td { color: #f3f6f8; font-weight: 600; font-variant-numeric: tabular-nums;
+    border-bottom: 1px solid rgba(0,0,0,0.25); }
+  table.mtx td.self { background: #11181d; color: #44535f; }
+  table.mtx td.x { color: #c98; font-weight: 400; }
+  table.mtx td .cost { display: block; font-size: 9px; font-weight: 400; opacity: 0.8; margin-top: 1px; }
+  .legend { display: flex; gap: 14px; flex-wrap: wrap; margin: 8px 0 4px; font-size: 11px; color: var(--muted); }
+  .legend span { display: inline-flex; align-items: center; gap: 5px; }
+  .legend i { width: 14px; height: 14px; border-radius: 3px; display: inline-block; }
+</style>
+</head>
+<body>
+  <div class="top">
+    <h1>UNIT <span>OVERVIEW</span></h1>
+    <a href="./index.html">&larr; Back to game</a>
+  </div>
+  <div class="sub">Buildings, units &amp; combat counters — straight from the live balance data</div>
+
+  <div class="ctl">
+    <label for="facFilter">Faction</label>
+    <select id="facFilter"></select>
+    <span style="font-size:12px;color:var(--muted)">Filters the Buildings &amp; Units tables. Universal items always show.</span>
+  </div>
+
+  <h2>Buildings</h2>
+  <table class="data"><thead><tr>
+    <th>Name</th><th>Faction</th><th style="text-align:right">Cost</th>
+    <th style="text-align:right">HP</th><th style="text-align:right">Power</th><th>Notes</th>
+  </tr></thead><tbody id="bldgBody"></tbody></table>
+
+  <h2>Units</h2>
+  <table class="data"><thead><tr>
+    <th>Name</th><th>Faction</th><th style="text-align:right">Cost</th>
+    <th style="text-align:right">HP</th><th style="text-align:right">Dmg</th>
+    <th style="text-align:right">Range</th><th style="text-align:right">Speed</th><th>Notes</th>
+  </tr></thead><tbody id="unitBody"></tbody></table>
+
+  <h2>Counter Matrix <span class="note">how many of the <b>row</b> unit it takes to kill one <b>column</b> unit (with total credit cost) — lower &amp; greener is a stronger counter</span></h2>
+  <div class="legend">
+    <span><i style="background:#1f7a3a"></i>1 (hard counter)</span>
+    <span><i style="background:#3f8f2e"></i>2</span>
+    <span><i style="background:#8a8b2c"></i>3-4</span>
+    <span><i style="background:#9a6b22"></i>5-7</span>
+    <span><i style="background:#a23f2a"></i>8-12</span>
+    <span><i style="background:#7a2222"></i>13+</span>
+    <span><i style="background:#2a1414"></i>× can't engage</span>
+  </div>
+  <div id="matrix"></div>
+
+  <script type="module" src="/src/overview/overview.ts"></script>
+</body>
+</html>
