@@ -1609,11 +1609,15 @@ export class Renderer {
     tex.magFilter = THREE.LinearFilter; tex.minFilter = THREE.LinearFilter;
     this.fogTex = tex;
 
-    // Match the terrain mesh density (was 2× the sim grid, which made the fog the
-    // single heaviest mesh on the map). Normal maps drape at sim-grid resolution;
-    // flat maps need no draping at all, so a coarse grid covers them just as well.
-    const fSegX = this.map.noTerrainDetail ? Math.max(8, W >> 2) : W;
-    const fSegZ = this.map.noTerrainDetail ? Math.max(8, H >> 2) : H;
+    // Fog mesh density. The veil is a soft haze, so it does NOT need to match the
+    // terrain 1:1 — at full W×H it was a 25k–51k-triangle transparent mesh redrawn
+    // every frame (the single heaviest draw on the map, and a fixed cost the moment
+    // fog is on, before any units exist — testers saw ~15fps lost to it). Draping at
+    // HALF resolution (every 2 cells) still hugs cliffs/terraform closely under the
+    // haze while cutting the fog's triangle count ~4×. Flat maps need no draping at
+    // all, so a coarse grid covers them just as well.
+    const fSegX = this.map.noTerrainDetail ? Math.max(8, W >> 2) : Math.max(16, W >> 1);
+    const fSegZ = this.map.noTerrainDetail ? Math.max(8, H >> 2) : Math.max(16, H >> 1);
     const geo = new THREE.PlaneGeometry(W, H, fSegX, fSegZ);
     geo.rotateX(-Math.PI / 2);
     geo.translate(W / 2, 0, H / 2);
