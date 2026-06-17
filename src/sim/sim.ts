@@ -85,6 +85,7 @@ const FORT_TIME = 2.0;      // seconds to dig in or pack up (vulnerable meanwhil
 const FORT_ATK_MUL = 1.5;   // fortified infantry hit harder
 const FORT_DEF_MUL = 0.5;   // ...and take half damage (settled)
 const FORT_DEPLOY_VULN = 1.5; // ...but take extra while deploying / packing
+const FORT_RANGE_MUL = 1.2; // ...and see/shoot 20% farther while dug in
 const MISSILE_CAP = 25;     // max armed missiles a single silo can stockpile
 const CARRY_VEH = 10;       // transport ship capacity: vehicles
 const CARRY_INF = 30;       // transport ship capacity: infantry
@@ -1563,7 +1564,7 @@ export class Sim {
     if (def.fortify && u.fortified && !def.emits) {
       u.orders = u.orders.filter(o => o.k === 'fortify');
       if (def.dmg > 0 && u.cd <= 0) {
-        const tgt = this.findEnemy(u, def.range + 1.5);
+        const tgt = this.findEnemy(u, def.range * FORT_RANGE_MUL);
         if (tgt) this.fire(u, tgt, def.dmg * FORT_ATK_MUL, def.rof);
       }
       return;
@@ -1574,7 +1575,7 @@ export class Sim {
     // at it — fast under threat, a slow standing screen when quiet.
     if (def.fortify && u.fortified) {
       u.orders = u.orders.filter(o => o.k === 'fortify');
-      const threat = def.range > 0 ? this.findEnemy(u, def.range) : null;
+      const threat = def.range > 0 ? this.findEnemy(u, def.range * FORT_RANGE_MUL) : null;
       u.emitCd -= TICK;
       if (u.emitCd <= 0 && def.emits) {
         const c = nearestPassable(this.map, Math.floor(u.x), Math.floor(u.z));

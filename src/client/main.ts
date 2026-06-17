@@ -2163,7 +2163,7 @@ class GameClient {
         if (!v) continue;
         let r = 0;
         if (v.b) { const a = BUILDINGS[v.t]?.attack; if (a) r = a.range + 0.8 * ((v.lv || 1) - 1); }
-        else { const d = UNITS[v.t]; if (d && d.dmg > 0) r = d.range; }
+        else { const d = UNITS[v.t]; if (d && d.dmg > 0) r = d.range * (v.fo ? 1.2 : 1); } // dug-in units reach 20% farther
         if (r > 0) circles.push({ x: v.x, z: v.z, r, atk: true });
         // sonar-capable ships (Destroyer / Sub Hunter) show their detection
         // bubble as a separate blue circle
