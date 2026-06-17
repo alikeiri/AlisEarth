@@ -30,7 +30,7 @@ const U_ICONS: Record<string, string> = {
   fighter: '\u{1F6E9}️', bomber: '\u{1F4A3}', dbomber: '\u{1F916}', heli: '\u{1F681}', helidrone: '\u{1FA81}',
   mcv: '\u{1F3D7}️', dozer: '\u{1F69C}', patriot: '\u{1F6F0}️',
   tews: '\u{1F4E1}', navengineer: '\u{1F6E0}️', shahed: '\u{1F6F8}',
-  mortar: '\u{1F4A3}', artillery: '\u{1F4A5}', artyship: '\u{1F4A5}', airtransport: '\u{1F681}',
+  mortar: '\u{1F4A3}', mortartrack: '\u{1F4A3}', fieldgun: '\u{1F4A5}', artillery: '\u{1F4A5}', artyship: '\u{1F4A5}', airtransport: '\u{1F681}',
 };
 export const B_LIST = ['power', 'refinery', 'radar', 'barracks', 'factory', 'turret', 'sam', 'cannon', 'tesla', 'irondome', 'wall', 'barrier', 'dronefac', 'shipyard', 'airforce', 'airfield', 'lab', 'silo'];
 
@@ -47,7 +47,7 @@ const UPG_INFO: Record<string, string> = {
   airforce: '+25% production speed',
   shipyard: '+25% production speed',
 };
-export const U_LIST = ['rifle', 'rocket', 'mortar', 'melody', 'hive', 'tank', 'heavy', 'ifv', 'aatank', 'flak', 'patriot', 'fueltruck', 'harv', 'engineer', 'mcv', 'dozer', 'mlrs', 'artillery', 'recon', 'strike', 'msldrone', 'shahed',
+export const U_LIST = ['rifle', 'rocket', 'mortar', 'fieldgun', 'melody', 'hive', 'tank', 'heavy', 'ifv', 'aatank', 'flak', 'patriot', 'fueltruck', 'harv', 'engineer', 'mcv', 'dozer', 'mortartrack', 'mlrs', 'artillery', 'recon', 'strike', 'msldrone', 'shahed',
   'tews', 'chemtrooper', 'chemtank', 'chemdrone', 'biotrooper', 'biotank', 'biodrone', 'stealthtank',
   'gunboat', 'destroyer', 'artyship', 'sub', 'subhunter', 'mslcruiser', 'flakship', 'navdrone', 'navengineer', 'transport', 'airtransport', 'fighter', 'bomber', 'dbomber', 'heli', 'helidrone',
   'cmissile', 'bbmissile', 'chemissile'];
@@ -59,8 +59,10 @@ const TIP_NOTES: Record<string, string> = {
   flak: 'Excellent vs drones, poor vs airplanes',
   aatank: 'Dedicated anti-air missiles',
   mlrs: 'Cannot engage aircraft',
-  mortar: 'Mortar Team: long-range area splash, shreds massed infantry. Fragile, slow, no air defence.',
-  artillery: 'Artillery: long-range siege gun with big area splash — breaks up clumped pushes and flattens bases. Fragile; outrange the enemy or get overrun. No air defence.',
+  mortar: 'Mortar Team (infantry): area splash that shreds massed infantry. Cheap, from the Barracks. Fragile, slow, no air defence.',
+  mortartrack: 'Mortar Carrier (vehicle): a mobile, armoured self-propelled mortar — same anti-infantry splash as the Mortar Team but tougher and faster. From the War Factory. No air defence.',
+  fieldgun: 'Field Gun (infantry): a towed howitzer crew — long-range siege splash from the Barracks, cheaper than the Artillery vehicle. Very fragile and slow. No air defence.',
+  artillery: 'Artillery (vehicle): long-range siege gun with big area splash — breaks up clumped pushes and flattens bases. Fragile; outrange the enemy or get overrun. No air defence.',
   artyship: 'Artillery Cruiser: long-range naval bombardment with wide area splash. Shell coastal pushes and bases from offshore. No air defence.',
   turret: 'Cannot engage aircraft',
   fueltruck: 'Suicide truck: huge fireball, sets buildings ablaze (burn damage over time)',

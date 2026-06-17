@@ -87,10 +87,14 @@ export const UNITS: Record<string, UnitDef> = {
   // (and launched) in volleys of 5. Fragile; dive into the target and detonate.
   shahed: { name: 'Shahed', cost: 650, hp: 45, speed: 4.6, range: 4.0, dmg: 130, rof: 1, builtAt: 'dronefac', buildTime: 10, kind: 'air', fly: true, alt: 2.5, kamikaze: true, faction: 'iran', volley: 5 },
   mlrs:   { name: 'MLRS',         cost: 1600, hp: 170, speed: 1.6, range: 13.0, dmg: 66, rof: 3.6, builtAt: 'factory',  buildTime: 16, kind: 'veh', faction: 'china' }, // signature: mass rocket artillery
-  // artillery line — long range + area-of-effect splash to break up massed pushes.
-  // Slow, fragile, can't hit aircraft; outranges most attackers (kite or get rushed).
-  mortar:   { name: 'Mortar Team', cost: 550,  hp: 95,  speed: 1.6, range: 11.0, dmg: 46, rof: 3.4, builtAt: 'barracks', buildTime: 11, kind: 'inf', splash: 2.2, fortify: true, faction: 'pakistan' }, // signature: cheap infantry artillery
-  artillery:{ name: 'Artillery',   cost: 1500, hp: 200, speed: 1.4, range: 14.5, dmg: 78, rof: 4.2, builtAt: 'factory',  buildTime: 16, kind: 'veh', splash: 2.8 },
+  // ARTILLERY LINE — long range + area splash to break up massed pushes. Every
+  // nation fields BOTH an infantry and a vehicle version of the mortar (anti-
+  // infantry, shorter range, cheaper) and the artillery (siege, longer range).
+  // All slow/fragile and cannot hit aircraft — kite with them or get overrun.
+  mortar:      { name: 'Mortar Team',    cost: 550,  hp: 95,  speed: 1.6, range: 11.0, dmg: 46, rof: 3.4, builtAt: 'barracks', buildTime: 11, kind: 'inf', splash: 2.2, fortify: true }, // infantry mortar
+  mortartrack: { name: 'Mortar Carrier', cost: 850,  hp: 240, speed: 2.5, range: 12.0, dmg: 54, rof: 3.2, builtAt: 'factory',  buildTime: 12, kind: 'veh', splash: 2.4 }, // self-propelled mortar
+  fieldgun:    { name: 'Field Gun',      cost: 900,  hp: 120, speed: 1.2, range: 13.5, dmg: 70, rof: 4.2, builtAt: 'barracks', buildTime: 14, kind: 'inf', splash: 2.6, fortify: true }, // towed infantry howitzer
+  artillery:   { name: 'Artillery',      cost: 1500, hp: 200, speed: 1.4, range: 14.5, dmg: 78, rof: 4.2, builtAt: 'factory',  buildTime: 16, kind: 'veh', splash: 2.8 }, // self-propelled siege gun
   artyship: { name: 'Artillery Cruiser', cost: 1900, hp: 620, speed: 2.1, range: 15.5, dmg: 92, rof: 4.6, builtAt: 'shipyard', buildTime: 17, kind: 'sea', move: 'sea', splash: 3.0, faction: 'australia' }, // signature: naval siege
   // the anti-infantry vehicle: autocannon IFV — shreds infantry, loses to tanks
   ifv:    { name: 'IFV',          cost: 700,  hp: 300, speed: 3.4, range: 5.0, dmg: 24, rof: 0.8, builtAt: 'factory',  buildTime: 9,  kind: 'veh' },
@@ -316,7 +320,7 @@ export function dmgMul(attType: string, tgtIsBuilding: boolean, tgtKind: string,
     if (attType === 'rifle') return 1.2;
     if (attType === 'ifv') return 0.8;           // autocannon can pepper aircraft
     if (attType === 'turret' || attType === 'cannon' || attType === 'tesla') return 0; // defensive guns can't elevate (AA = SAM / Patriot)
-    if (attType === 'mlrs' || attType === 'mortar' || attType === 'artillery' || attType === 'artyship') return 0; // artillery cannot engage aircraft
+    if (attType === 'mlrs' || attType === 'mortar' || attType === 'mortartrack' || attType === 'artillery' || attType === 'fieldgun' || attType === 'artyship') return 0; // artillery cannot engage aircraft
     if (attType === 'tank' || attType === 'heavy') return 0.4;
     if (attType === 'bomber') return 0.1;
     if (attType === 'sub') return 0.15;
@@ -353,7 +357,9 @@ export function dmgMul(attType: string, tgtIsBuilding: boolean, tgtKind: string,
   if (attType === 'sub')    return tgtIsBuilding ? 0.35 : 0.8; // cruise-missile siege halved
   if (attType === 'mlrs')   return tgtIsBuilding ? 2.0 : (tgtKind === 'inf' ? 1.5 : 0.7);
   if (attType === 'mortar') return tgtIsBuilding ? 1.1 : (tgtKind === 'inf' ? 1.9 : 0.6); // anti-infantry mortar
+  if (attType === 'mortartrack') return tgtIsBuilding ? 1.2 : (tgtKind === 'inf' ? 1.9 : 0.7); // mobile mortar carrier
   if (attType === 'artillery') return tgtIsBuilding ? 2.1 : (tgtKind === 'inf' ? 1.7 : 1.0); // siege howitzer
+  if (attType === 'fieldgun') return tgtIsBuilding ? 1.9 : (tgtKind === 'inf' ? 1.6 : 1.0); // towed infantry artillery
   if (attType === 'artyship')  return tgtIsBuilding ? 2.3 : (tgtKind === 'inf' ? 1.6 : 1.0); // shore bombardment
   if (attType === 'msldrone') return tgtIsBuilding ? 1.5 : (tgtKind === 'veh' ? 1.8 : 0.5);
   if (attType === 'recon')  return tgtIsBuilding ? 0.4 : (tgtKind === 'inf' ? 1.2 : 0.5);
