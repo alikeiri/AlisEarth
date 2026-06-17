@@ -157,11 +157,13 @@ function groundTexture(kind: string, maxAniso: number): THREE.CanvasTexture {
   const tex = new THREE.CanvasTexture(cv);
   tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
   tex.anisotropy = maxAniso;
-  // No mipmaps: the terrain shader samples at LARGE tiled UVs (worldXZ*0.42), and
-  // computing the mip LOD from those big-derivative coords silently returns black
-  // on some mobile/Adreno D3D11 drivers. Plain bilinear samples fine at any UV.
-  tex.generateMipmaps = false;
-  tex.minFilter = THREE.LinearFilter;
+  // Mipmaps ON (256² POT → full chain). The terrain shader samples with an
+  // EXPLICIT distance-based LOD (textureLod), so the driver never computes the
+  // implicit derivative-based LOD that silently returned black on Adreno/ANGLE
+  // — while distant terrain still drops to a coarse mip (no full-res cache
+  // thrashing, which had cost ~10fps when mipmaps were disabled).
+  tex.generateMipmaps = true;
+  tex.minFilter = THREE.LinearMipmapLinearFilter;
   return tex;
 }
 
@@ -1284,12 +1286,20 @@ export class Renderer {
       shader.vertexShader = shader.vertexShader
         .replace('#include <common>', '#include <common>\nattribute vec4 splat;\nattribute float terra;\nvarying vec4 vSplat;\nvarying float vTerra;\nvarying vec3 vPosW;')
         .replace('#include <begin_vertex>', '#include <begin_vertex>\nvSplat = splat;\nvTerra = terra;\nvPosW = position;');
+      // EXPLICIT mip LOD from camera distance (not screen-space derivatives): the
+      // Adreno/ANGLE D3D11 driver silently returned black when computing the
+      // implicit LOD from the large tiled UVs, so we pick the mip ourselves with
+      // textureLod(). Near terrain stays at mip 0 (crisp); far terrain steps up to
+      // coarse mips so minified sampling is cache-friendly (the perf we lost when
+      // mipmaps were disabled). 256² textures → 8 mip levels; cap at 6 to stay sharp.
+      const lod = `float lodT = clamp(log2(length(cameraPosition - vPosW) * 0.05), 0.0, 6.0);`;
       const cheap = `
           // FLAT-MAP fast path: no rock/sand layers exist on flat ground (slope 0,
           // uniform height), so blend just grass + dirt — 2 fetches instead of 4.
           vec2 uvT = vPosW.xz * 0.42;
-          vec3 g = texture2D(tGrass, uvT).rgb;
-          vec3 d = texture2D(tDirt, uvT * 0.8).rgb;
+          ${lod}
+          vec3 g = textureLod(tGrass, uvT, lodT).rgb;
+          vec3 d = textureLod(tDirt, uvT * 0.8, lodT).rgb;
           vec3 tex = mix(g, d, clamp(vSplat.w, 0.0, 1.0));
           vec3 concrete = vec3(0.56, 0.56, 0.54) * (0.82 + 0.32 * d.g);
           tex = mix(tex, concrete, clamp(vTerra, 0.0, 1.0));
@@ -1299,10 +1309,11 @@ export class Renderer {
           // ONE texture fetch per ground layer (was ~10 fetches/pixel with two
           // anti-tile scales + patchiness) — terrain fill-rate was the bottleneck.
           vec2 uvT = vPosW.xz * 0.42;
-          vec3 g = texture2D(tGrass, uvT).rgb;
-          vec3 r = texture2D(tRock, uvT * 0.55).rgb;
-          vec3 s = texture2D(tSand, uvT).rgb;
-          vec3 d = texture2D(tDirt, uvT * 0.8).rgb;
+          ${lod}
+          vec3 g = textureLod(tGrass, uvT, lodT).rgb;
+          vec3 r = textureLod(tRock, uvT * 0.55, lodT).rgb;
+          vec3 s = textureLod(tSand, uvT, lodT).rgb;
+          vec3 d = textureLod(tDirt, uvT * 0.8, lodT).rgb;
           vec3 tex = g * vSplat.x + r * vSplat.y + s * vSplat.z + d * vSplat.w;
           // terraformed/paved ground reads as concrete; grain reuses the dirt fetch
           vec3 concrete = vec3(0.56, 0.56, 0.54) * (0.82 + 0.32 * d.g);
@@ -1381,8 +1392,8 @@ export class Renderer {
       loader.load('./textures/' + name + '.jpg', t => {
         t.wrapS = t.wrapT = THREE.RepeatWrapping;
         t.anisotropy = maxAniso;
-        t.generateMipmaps = false;        // see groundTexture(): large tiled UVs + mip LOD = black on Adreno
-        t.minFilter = THREE.LinearFilter;
+        t.generateMipmaps = true;                       // explicit-LOD sampling in-shader keeps Adreno safe (see groundTexture())
+        t.minFilter = THREE.LinearMipmapLinearFilter;
         this.extTex[name] = t;
         if (this.terrainShader) {
           const key = 't' + name[0].toUpperCase() + name.slice(1);
