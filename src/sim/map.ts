@@ -52,6 +52,8 @@ export class GameMap {
   terraVersion = 0;                           // bumped on every terraform edit (minimap cache invalidation)
   spawns: { x: number; z: number }[] = [];
   oreDirty = true;
+  flat = false;        // completely flat height (Flat City / Steel Arena) → cheap coarse terrain mesh
+  noTerrainDetail = false; // flat AND no river/mountains → renderer can skip the splat shader entirely
 
   node(x: number, z: number): number { return this.hN[z * (W + 1) + x]; }
   cellH(cx: number, cz: number): number {
@@ -300,6 +302,10 @@ export function genMap(seed: number, nPlayers: number): GameMap {
   const anyUrban = urban || flatCity;   // map flavours with roads + buildings
   const flat = flatCity || steel;       // completely flat height (no river/mountains)
   const anyFlatLike = urban || flatCity || steel; // skip continent/island terrain + forests
+  m.flat = flat;
+  // Flat City / Steel Arena have edge-to-edge flat ground with no river/mountains,
+  // so the renderer can drop to a coarse mesh and a single-colour ground shader.
+  m.noTerrainDetail = flat;
   const cont = CONTINENTS[(seed >>> 3) % CONTINENTS.length];
   const nIslands = Math.min(4, Math.max(2, nPlayers));
   // urban river: a gentle vertical channel whose centre x wanders with z

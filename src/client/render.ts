@@ -1202,8 +1202,14 @@ export class Renderer {
   }
 
   private buildTerrain(maxAniso: number): THREE.Mesh {
-    const SUB = 2; // render mesh at 2x sim grid resolution
-    const geo = new THREE.PlaneGeometry(W, H, W * SUB, H * SUB);
+    // Mesh density: normal maps at sim-grid resolution (was 2x — the extra detail
+    // wasn't visible but quadrupled the triangle count). Flat maps (Flat City /
+    // Steel Arena) have edge-to-edge constant height with no river or mountains,
+    // so a quarter-resolution mesh is indistinguishable and far cheaper.
+    const flatPath = this.map.noTerrainDetail;
+    const segX = flatPath ? Math.max(8, W >> 2) : W;
+    const segZ = flatPath ? Math.max(8, H >> 2) : H;
+    const geo = new THREE.PlaneGeometry(W, H, segX, segZ);
     geo.rotateX(-Math.PI / 2);
     geo.translate(W / 2, 0, H / 2);
     const pos = geo.getAttribute('position') as THREE.BufferAttribute;
@@ -1242,22 +1248,34 @@ export class Renderer {
       shader.vertexShader = shader.vertexShader
         .replace('#include <common>', '#include <common>\nattribute vec4 splat;\nattribute float terra;\nvarying vec4 vSplat;\nvarying float vTerra;\nvarying vec3 vPosW;')
         .replace('#include <begin_vertex>', '#include <begin_vertex>\nvSplat = splat;\nvTerra = terra;\nvPosW = position;');
-      shader.fragmentShader = shader.fragmentShader
-        .replace('#include <common>', '#include <common>\nuniform sampler2D tGrass, tRock, tSand, tDirt;\nvarying vec4 vSplat;\nvarying float vTerra;\nvarying vec3 vPosW;')
-        .replace('#include <map_fragment>', `
+      const cheap = `
+          // FLAT-MAP fast path: no rock/sand layers exist on flat ground (slope 0,
+          // uniform height), so blend just grass + dirt — 2 fetches instead of 4.
           vec2 uvT = vPosW.xz * 0.42;
-          // two sample scales per layer break up visible tiling
-          vec3 g = mix(texture2D(tGrass, uvT).rgb, texture2D(tGrass, uvT * 0.23 + 0.37).rgb, 0.48);
-          g *= 0.88 + 0.24 * texture2D(tGrass, vPosW.xz * 0.013).g;  // large-scale patchiness
-          vec3 r = mix(texture2D(tRock, uvT * 0.55).rgb, texture2D(tRock, uvT * 0.19 + 0.5).rgb, 0.4);
-          vec3 s = mix(texture2D(tSand, uvT).rgb, texture2D(tSand, uvT * 0.31 + 0.21).rgb, 0.45);
-          vec3 d = mix(texture2D(tDirt, uvT * 0.8).rgb, texture2D(tDirt, uvT * 0.27 + 0.11).rgb, 0.45);
-          vec3 tex = g * vSplat.x + r * vSplat.y + s * vSplat.z + d * vSplat.w;
-          // terraformed ground reads as poured concrete: flat grey with fine grain
-          vec3 concrete = vec3(0.56, 0.56, 0.54) * (0.82 + 0.32 * texture2D(tRock, uvT * 0.7).g);
+          vec3 g = texture2D(tGrass, uvT).rgb;
+          vec3 d = texture2D(tDirt, uvT * 0.8).rgb;
+          vec3 tex = mix(g, d, clamp(vSplat.w, 0.0, 1.0));
+          vec3 concrete = vec3(0.56, 0.56, 0.54) * (0.82 + 0.32 * d.g);
           tex = mix(tex, concrete, clamp(vTerra, 0.0, 1.0));
           diffuseColor.rgb *= pow(tex, vec3(2.2));
-        `);
+        `;
+      const full = `
+          // ONE texture fetch per ground layer (was ~10 fetches/pixel with two
+          // anti-tile scales + patchiness) — terrain fill-rate was the bottleneck.
+          vec2 uvT = vPosW.xz * 0.42;
+          vec3 g = texture2D(tGrass, uvT).rgb;
+          vec3 r = texture2D(tRock, uvT * 0.55).rgb;
+          vec3 s = texture2D(tSand, uvT).rgb;
+          vec3 d = texture2D(tDirt, uvT * 0.8).rgb;
+          vec3 tex = g * vSplat.x + r * vSplat.y + s * vSplat.z + d * vSplat.w;
+          // terraformed/paved ground reads as concrete; grain reuses the dirt fetch
+          vec3 concrete = vec3(0.56, 0.56, 0.54) * (0.82 + 0.32 * d.g);
+          tex = mix(tex, concrete, clamp(vTerra, 0.0, 1.0));
+          diffuseColor.rgb *= pow(tex, vec3(2.2));
+        `;
+      shader.fragmentShader = shader.fragmentShader
+        .replace('#include <common>', '#include <common>\nuniform sampler2D tGrass, tRock, tSand, tDirt;\nvarying vec4 vSplat;\nvarying float vTerra;\nvarying vec3 vPosW;')
+        .replace('#include <map_fragment>', flatPath ? cheap : full);
     };
     const mesh = new THREE.Mesh(geo, mat);
     mesh.receiveShadow = true;
@@ -1541,9 +1559,12 @@ export class Renderer {
     tex.magFilter = THREE.LinearFilter; tex.minFilter = THREE.LinearFilter;
     this.fogTex = tex;
 
-    // 2× the sim grid (matches the terrain mesh) so the fog follows steep coast
-    // cliffs and terraformed slopes closely instead of poking through them
-    const geo = new THREE.PlaneGeometry(W, H, W * 2, H * 2);
+    // Match the terrain mesh density (was 2× the sim grid, which made the fog the
+    // single heaviest mesh on the map). Normal maps drape at sim-grid resolution;
+    // flat maps need no draping at all, so a coarse grid covers them just as well.
+    const fSegX = this.map.noTerrainDetail ? Math.max(8, W >> 2) : W;
+    const fSegZ = this.map.noTerrainDetail ? Math.max(8, H >> 2) : H;
+    const geo = new THREE.PlaneGeometry(W, H, fSegX, fSegZ);
     geo.rotateX(-Math.PI / 2);
     geo.translate(W / 2, 0, H / 2);
     const uv = geo.getAttribute('uv') as THREE.BufferAttribute;
