@@ -547,6 +547,7 @@ export class UI {
       const ok = (myDone['conyard'] || 0) > 0 && (!def.prereq || (myDone[def.prereq] || 0) > 0);
       this.styleBtn(t, ok, credits >= cost, cost, 0, 0);
     }
+    const god = !!(pl as any).god; // godmode cheat: unlock every unit regardless of tech
     const myTech: Record<string, boolean> = {};
     for (const tch of (pl.tech || [])) myTech[tch] = true;
     // tally my live units so one-per-player heroes/uniques can grey out
@@ -560,10 +561,10 @@ export class UI {
       if (ok && (padCls === 'heli' || padCls === 'plane') && padHave[padCls] >= padCap[padCls]) ok = false; // that class's airfield slots are full
       let uniqueBlocked = false;
       if (ok && (def.unique || def.commando) && ((aliveByUnit[t] || 0) + (queueByUnit[t]?.n || 0)) >= 1) { ok = false; uniqueBlocked = true; } // one per player
-      if (def.tech && !myTech[def.tech]) ok = false;      // not yet researched
+      if (def.tech && !myTech[def.tech] && !god) ok = false;      // not yet researched (godmode unlocks all)
       // hide tech-gated buttons until the tech exists, and (when a production
       // building is selected) any unit that building can't make
-      const techHidden = !!def.tech && !myTech[def.tech];
+      const techHidden = !!def.tech && !myTech[def.tech] && !god;
       const filtHidden = !!prodFilter && def.builtAt !== prodFilter && def.altBuiltAt !== prodFilter;
       this.btns[t].classList.toggle('hidden', techHidden || filtHidden);
       const q = queueByUnit[t];

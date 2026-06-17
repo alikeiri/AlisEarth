@@ -352,7 +352,7 @@ export class Sim {
     if (c.k === 'train') {
       const b = this.ents.get(c.bid); const def = UNITS[c.type];
       if (!b || !b.b || b.owner !== c.p || !def || (def.builtAt !== b.type && def.altBuiltAt !== b.type)) return;
-      if (def.tech && !pl.tech[def.tech]) return; // not yet researched
+      if (def.tech && !pl.tech[def.tech] && !pl.godmode) return; // not yet researched (godmode unlocks all)
       if (def.internal) return;
       // hero/unique units (Melody, Bulldozer): only one alive (or in production) at a time
       if (def.commando || def.unique) {
@@ -2606,6 +2606,7 @@ export class Sim {
       p: this.players.map(pl => ({
         c: Math.round(pl.credits), a: pl.alive, pm: Math.round(pl.powerMade), pu: Math.round(pl.powerUsed),
         n: pl.name, f: pl.faction, tm: pl.team, ai: pl.isAI, tech: Object.keys(pl.tech).filter(k => pl.tech[k]),
+        god: pl.godmode ? 1 : 0, // cheat: client unlocks every unit in the build menu
       })),
       ev: this.events,
     };
