@@ -1660,8 +1660,10 @@ export class Renderer {
     this.treeBaseMat = (trunks.instanceMatrix.array as Float32Array).slice(0, k * 16);
   }
 
-  // urban maps: render the building blocks as simple instanced boxes (one draw
-  // call, varied grey heights). Cheap — keeps the urban map fast.
+  // urban maps: render the building blocks as instanced towers — one draw call,
+  // varied heights, a muted concrete/brick palette, and a procedural window
+  // facade (with a few lit windows) baked in the shader so they read as real
+  // buildings while staying cheap. Keeps the urban map fast.
   private buildCity() {
     const cells: { x: number; z: number }[] = [];
     for (let cz = 0; cz < H; cz++)
@@ -1670,7 +1672,38 @@ export class Renderer {
     if (!cells.length) return;
     const geo = new THREE.BoxGeometry(0.96, 1, 0.96);
     geo.translate(0, 0.5, 0); // sit on the ground, grow up
-    const mesh = new THREE.InstancedMesh(geo, new THREE.MeshStandardMaterial({ color: 0x8a8f96, roughness: 0.85, metalness: 0.05 }), cells.length);
+    const mat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.85, metalness: 0.04 });
+    // procedural facade: a window grid on the vertical faces (world-space so the
+    // floors line up regardless of tower height), darker mullions, some windows
+    // lit. Runs in the existing single instanced draw — no extra geometry.
+    mat.onBeforeCompile = sh => {
+      sh.vertexShader = sh.vertexShader
+        .replace('#include <common>', '#include <common>\nvarying vec3 vWPos;\nvarying vec3 vWNorm;')
+        .replace('#include <begin_vertex>', '#include <begin_vertex>\nvec4 wp = modelMatrix * instanceMatrix * vec4(transformed, 1.0);\nvWPos = wp.xyz;\nvWNorm = normalize(mat3(modelMatrix * instanceMatrix) * objectNormal);');
+      sh.fragmentShader = sh.fragmentShader
+        .replace('#include <common>', '#include <common>\nvarying vec3 vWPos;\nvarying vec3 vWNorm;\nfloat hsh(vec2 p){ return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }')
+        .replace('#include <color_fragment>', `
+          #include <color_fragment>
+          vec3 an = abs(vWNorm);
+          float roof = step(0.5, an.y);              // 1 on the flat top, 0 on walls
+          float hc = an.x > an.z ? vWPos.z : vWPos.x; // run along whichever wall we are on
+          // window cells: columns ~0.5 world units, floors ~1.1 world units
+          vec2 cellId = vec2(floor(hc * 2.0) + (an.x > an.z ? 100.0 : 0.0), floor(vWPos.y * 0.9));
+          float fcx = fract(hc * 2.0), fcy = fract(vWPos.y * 0.9);
+          float wx = smoothstep(0.14, 0.22, fcx) * (1.0 - smoothstep(0.78, 0.86, fcx));
+          float wy = smoothstep(0.16, 0.26, fcy) * (1.0 - smoothstep(0.74, 0.86, fcy));
+          float win = wx * wy * (1.0 - roof) * step(0.6, vWPos.y); // no windows on the roof or the ground sill
+          float lit = step(0.62, hsh(cellId));        // ~38% of windows lit
+          vec3 glass = mix(vec3(0.06, 0.08, 0.11), vec3(0.95, 0.82, 0.5), lit); // dark glass / warm lit
+          diffuseColor.rgb = mix(diffuseColor.rgb, glass, win);
+          vWin = win * lit; // carry the lit-window mask to the emissive stage
+        `)
+        .replace('vec3 totalEmissiveRadiance = emissive;', 'float vWin;\nvec3 totalEmissiveRadiance = emissive;')
+        .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\ntotalEmissiveRadiance += vWin * vec3(1.0, 0.84, 0.5) * 0.9;');
+    };
+    const mesh = new THREE.InstancedMesh(geo, mat, cells.length);
+    // muted, realistic facade tones: concrete greys, stone, and a little brick/tan
+    const PALETTE = [0x8f9499, 0x9aa0a4, 0x7d8288, 0xa7a29a, 0x9c8d79, 0x8a7d6e, 0xb0aaa0, 0x73787d];
     const col = new THREE.Color();
     let k = 0;
     for (const c of cells) {
@@ -1680,8 +1713,7 @@ export class Renderer {
       this.dummy.scale.set(1, hh, 1);
       this.dummy.updateMatrix();
       mesh.setMatrixAt(k, this.dummy.matrix);
-      const shade = 0x6e7a86 + ((hash2(91, c.x, c.z) * 0x202020) | 0);
-      col.setHex(shade & 0xffffff);
+      col.setHex(PALETTE[(hash2(91, c.x, c.z) * PALETTE.length) | 0]);
       mesh.setColorAt(k, col);
       k++;
     }
