@@ -1470,13 +1470,9 @@ export class Renderer {
   // a building's render group: the GLB factory once loaded, else the procedural one.
   private makeBuildingGroup(type: string, col: number): THREE.Group {
     if (type === 'factory' && this.factoryProto) {
-      const g = this.factoryProto.clone(true);
-      // small team-colour band on the roof so ownership still reads on the model
-      const band = new THREE.Mesh(new THREE.BoxGeometry(1.3, 0.16, 1.3),
-        new THREE.MeshStandardMaterial({ color: col, roughness: 0.5, metalness: 0.3 }));
-      band.position.y = this.factoryTop + 0.1; band.castShadow = true;
-      g.add(band);
-      return g;
+      // the GLB factory speaks for itself; ownership reads via the selection ring,
+      // minimap and HUD. (The old roof team-band floated above the smoke plumes.)
+      return this.factoryProto.clone(true);
     }
     return buildingGroupPro(type, col);
   }
