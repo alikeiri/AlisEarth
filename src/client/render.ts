@@ -316,7 +316,7 @@ function unitGeoSmooth(type: string): [THREE.BufferGeometry, THREE.BufferGeometr
     hive: 'harv', minidrone: 'recon', melodydrone: 'recon', chemtrooper: 'rifle', biotrooper: 'rifle',
     chemtank: 'tank', biotank: 'tank', stealthtank: 'tank', chemdrone: 'recon', biodrone: 'recon',
     mcv: 'harv', dozer: 'harv', tews: 'mlrs', transport: 'destroyer', navengineer: 'gunboat',
-    mortar: 'rocket', artillery: 'mlrs', artyship: 'destroyer', airtransport: 'heli',
+    mortar: 'rocket', artillery: 'mlrs', artyship: 'destroyer', airtransport: 'heli', shahed: 'recon',
   };
   if (ALIAS[type]) type = ALIAS[type];
   const B: THREE.BufferGeometry[] = [], A: THREE.BufferGeometry[] = [];
@@ -1571,7 +1571,7 @@ export class Renderer {
   // floating plane read as all-black. Hidden in spectator/replay modes.
   private buildFog() {
     const data = new Uint8Array(W * H * 4);
-    for (let i = 0; i < W * H; i++) data[i * 4 + 3] = 235; // start fully fogged
+    for (let i = 0; i < W * H; i++) data[i * 4 + 3] = 205; // start fully fogged
     const tex = new THREE.DataTexture(data, W, H, THREE.RGBAFormat);
     tex.needsUpdate = true;
     tex.flipY = false; // DataTexture row 0 = cz 0, matches mask index cz*W+cx
@@ -1594,7 +1594,7 @@ export class Renderer {
     this.drapeFog(geo); // set vertex heights to hug the terrain
 
     const mat = new THREE.MeshBasicMaterial({
-      map: tex, transparent: true, depthWrite: false, color: 0x05080c, fog: false,
+      map: tex, transparent: true, depthWrite: false, color: 0x2a323c, fog: false, // dark slate shroud (not a black void)
     });
     const mesh = new THREE.Mesh(geo, mat);
     mesh.renderOrder = 4;
@@ -1620,7 +1620,10 @@ export class Renderer {
     const d = this.fogTex.image.data as Uint8Array;
     for (let i = 0; i < W * H; i++) {
       const v = mask[i];
-      d[i * 4 + 3] = v === 2 ? 0 : v === 1 ? 120 : 235;
+      // visible = clear; explored = light haze; unseen = dark shroud (kept >=200
+      // so fogValue() still reads it as unexplored). Lighter than before so the
+      // map reads as "shrouded" not "black", esp. on dim laptop panels.
+      d[i * 4 + 3] = v === 2 ? 0 : v === 1 ? 90 : 205;
     }
     this.fogTex.needsUpdate = true;
   }
