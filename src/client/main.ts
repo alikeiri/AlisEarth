@@ -72,6 +72,8 @@ function simViews(sim: Sim, a: number): any[] {
       if (e.strikeR && e.strikeR > 0) { v.kx = e.strikeX; v.kz = e.strikeZ; v.kr = e.strikeR; }
       if (e.burnT && e.burnT > 0) v.bn = 1;
       if (e.holdFire) v.hf = 1;
+      if (e.off) v.off = 1;        // power: user-deactivated
+      if (e.autoOff) v.ao = 1;     // power: auto load-shed (low power)
       // garrison buildings: mark them + report occupancy / capacity so the UI can
       // show occupants, the enter cursor, and the evacuate hint
       if (BUILDINGS[e.type]?.garrison) {
@@ -695,6 +697,14 @@ class GameClient {
         const ids = this.myUnitIds();
         if (ids.length) { const anyFiring = ids.some(id => !this.byId.get(id)?.hf); this.game.issue({ k: 'holdfire', p: this.game.me, ids, on: anyFiring }); audio.play('confirm'); }
         else { const bids = this.selectedDefBuildings(); if (bids.length) { const anyFiring = bids.some(id => !this.byId.get(id)?.hf); this.game.issue({ k: 'bholdfire', p: this.game.me, ids: bids, on: anyFiring }); audio.play('confirm'); } }
+      }
+      // O: power on/off for selected buildings (producers/conyard can't be toggled)
+      if (e.code === 'KeyO') {
+        const bids = [...this.selection].filter(id => {
+          const v = this.byId.get(id);
+          return v && v.b === 1 && v.o === this.game.me && v.t !== 'conyard' && (BUILDINGS[v.t]?.power ?? 0) <= 0;
+        });
+        if (bids.length) { this.game.issue({ k: 'togglepower', p: this.game.me, ids: bids }); audio.play('confirm'); }
       }
       // +/- game speed (skirmish only — multiplayer is server-paced)
       if (e.code === 'Equal' || e.code === 'NumpadAdd') this.changeSpeed(1);
@@ -1539,7 +1549,7 @@ class GameClient {
       let sight = v.b ? 7 : Math.max(5, (def?.range || 4) + 3);
       // the Radar Dome's wide sweep is long-range INTEL (jammable by a TEWS); a
       // unit's own eyes and a deployed Patriot are NATURAL sight (never jammed).
-      const radar = !!(v.b && def?.sight) && !(powered(v.o) === false || (v.pr ?? 1) < 1);
+      const radar = !!(v.b && def?.sight) && !v.off && !v.ao && !(powered(v.o) === false || (v.pr ?? 1) < 1);
       if (radar) sight = def.sight * (1 + 0.25 * ((v.lv || 1) - 1)); // +25% coverage per upgrade level
       if (!v.b && v.t === 'patriot' && v.fo) sight = 20; // fortified Patriot: bigger deployed radar
       const cx = Math.floor(v.x), cz = Math.floor(v.z), r = Math.ceil(sight);

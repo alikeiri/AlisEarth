@@ -62,6 +62,8 @@ export interface Entity {
   holdFire?: boolean; // weapons-hold: never fires, even when attacked, until toggled off
   forceTgt?: number; forceT?: number; // defensive building: force-fire target id + ticks left
   forceX?: number; forceZ?: number;   // defensive building: force-fire ground point (no entity)
+  off?: boolean;     // power: user manually deactivated this building (stays off until toggled)
+  autoOff?: boolean; // power: automatically load-shed this tick (low power; recomputed each tick)
 }
 
 export interface PlayerState {
@@ -86,6 +88,15 @@ const FORT_ATK_MUL = 1.5;   // fortified infantry hit harder
 const FORT_DEF_MUL = 0.5;   // ...and take half damage (settled)
 const FORT_DEPLOY_VULN = 1.5; // ...but take extra while deploying / packing
 const FORT_RANGE_MUL = 1.2; // ...and see/shoot 20% farther while dug in
+// power load-shedding order: when a base is in power deficit, consumers are auto
+// switched off LOWEST-number first to rebalance — DEFENCES are shed last (9).
+// Producers (power plant) and the conyard are never shed.
+const SHED_PRIO: Record<string, number> = {
+  airfield: 1, airforce: 1, silo: 1, dronefac: 2, shipyard: 2, lab: 2,
+  factory: 3, barracks: 3, radar: 4, refinery: 5,
+  turret: 9, sam: 9, cannon: 9, tesla: 9, irondome: 9,
+};
+const shedPrio = (t: string): number => SHED_PRIO[t] ?? 5;
 const MISSILE_CAP = 25;     // max armed missiles a single silo can stockpile
 const CARRY_VEH = 10;       // transport ship capacity: vehicles
 const CARRY_INF = 30;       // transport ship capacity: infantry
@@ -647,6 +658,16 @@ export class Sim {
       return;
     }
 
+    if (c.k === 'togglepower') {
+      // manually switch a building on/off; conyard/power plants can't be toggled
+      for (const id of (c.ids || [])) {
+        const b = this.ents.get(id);
+        if (b && b.b && b.owner === c.p && b.type !== 'conyard' && BUILDINGS[b.type]?.power <= 0)
+          b.off = !b.off;
+      }
+      return;
+    }
+
     const units = (c.ids || [])
       .map((i: number) => this.ents.get(i))
       .filter((u: Entity | undefined): u is Entity => !!u && !u.b && u.owner === c.p);
@@ -921,23 +942,38 @@ export class Sim {
       for (const bl of due) this.missileBlast(bl);
     }
 
-    // power factors
+    // ---- power: producers vs consumers, with automatic load-shedding ----
+    // A building that is user-deactivated (off) or auto load-shed (autoOff) makes/uses
+    // no power and stops functioning (gated in tickBuilding). autoOff is recomputed
+    // every tick: a player in deficit switches off their lowest-priority consumers
+    // (defences last) until balanced, and they auto-recover when power returns. The
+    // user's manual on/off (off) is never auto-touched.
     const labs = new Array(this.players.length).fill(0);
     for (const pl of this.players) { pl.powerMade = 10; pl.powerUsed = 0; }
+    const consumers: Record<number, Entity[]> = {};
     for (const e of this.ents.values()) {
-      if (!e.b || e.progress < e.total) continue;
+      if (!e.b || e.progress < e.total) { e.autoOff = false; continue; }
+      e.autoOff = false; // recomputed fresh below
+      if (e.off) continue; // user-deactivated: contributes no power, runs nothing
       const pw = BUILDINGS[e.type].power;
       const pl = this.players[e.owner];
-      if (pw > 0) pl.powerMade += pw * pl.fac.powerMul * (1 + 0.5 * (e.lvl - 1));
-      else pl.powerUsed -= pw;
       if (e.type === 'lab') labs[e.owner]++;
+      if (pw > 0) pl.powerMade += pw * pl.fac.powerMul * (1 + 0.5 * (e.lvl - 1));
+      else if (pw < 0) { pl.powerUsed += -pw; (consumers[e.owner] ??= []).push(e); }
     }
     for (let i = 0; i < this.players.length; i++) {
       const pl = this.players[i];
-      pl.pf = pl.powerMade >= pl.powerUsed ? 1 : Math.max(0.4, pl.powerMade / Math.max(1, pl.powerUsed));
-      // Spy Satellite only stays online while powered AND a research lab survives;
-      // lose either and the map goes dark again (but it stays researched)
-      pl.satOk = !!pl.tech.satellite && pl.powerMade >= pl.powerUsed && labs[i] > 0;
+      if (pl.powerUsed > pl.powerMade) {
+        // shed lowest-priority consumers first; deterministic id tie-break (lockstep)
+        const cs = (consumers[i] || []).sort((a, b) => shedPrio(a.type) - shedPrio(b.type) || a.id - b.id);
+        for (const e of cs) {
+          if (pl.powerUsed <= pl.powerMade) break;
+          e.autoOff = true; pl.powerUsed += BUILDINGS[e.type].power; // power<0 → reduces usage
+        }
+      }
+      pl.pf = pl.powerUsed <= pl.powerMade ? 1 : Math.max(0.4, pl.powerMade / Math.max(1, pl.powerUsed));
+      // Spy Satellite only stays online while powered AND a research lab survives
+      pl.satOk = !!pl.tech.satellite && pl.powerUsed <= pl.powerMade && labs[i] > 0;
     }
 
     this.rebuildGrid();
@@ -1298,6 +1334,10 @@ export class Sim {
       }
       return;
     }
+
+    // power: a deactivated (user off) or load-shed (autoOff) building does NOTHING —
+    // no production, research, income, defence or upgrade — and draws no power.
+    if (b.off || b.autoOff) return;
 
     // Oil Rig: steady passive income while it stands (faction/difficulty scaled,
     // like harvester deliveries). It does nothing else, so we're done here.

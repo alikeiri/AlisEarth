@@ -478,6 +478,9 @@ export class UI {
             parts.push(kbd('H', sel[0].hf ? 'hold fire: ON' : 'hold fire'));
             parts.push(kbd('Ctrl+RMB', 'force fire'));
           }
+          // power on/off (any consumer except the conyard)
+          if ((BUILDINGS[sel[0].t]?.power ?? 0) <= 0)
+            parts.push(kbd('O', sel[0].off ? 'power: OFF' : (sel[0].ao ? 'auto-off (low power)' : 'power on/off')));
         }
         if (this.upgTarget >= 0) parts.push(kbd('⬆', 'upgrade (sidebar button)'));
       }
@@ -919,6 +922,20 @@ export class UI {
       ctx.fillStyle = full ? 'rgba(60,66,72,0.9)' : 'rgba(28,120,52,0.92)';
       ctx.beginPath(); ctx.moveTo(p.x - 4, y0 + h); ctx.lineTo(p.x + 4, y0 + h); ctx.lineTo(p.x, y0 + h + 5); ctx.closePath(); ctx.fill();
       ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+    }
+    // power OFF indicator: a small ⏻ badge above any of my switched-off buildings —
+    // red = manual toggle, amber = auto load-shed (low power)
+    for (const v of views) {
+      if (v.o !== me || !v.b || (!v.off && !v.ao)) continue;
+      const p = project(v.x, v.z, (v.sz || 2) >= 3 ? 4.0 : 3.0);
+      if (!p.ok) continue;
+      const cx = p.x, cy = p.y - 15;
+      ctx.fillStyle = v.off ? 'rgba(160,42,42,0.92)' : 'rgba(196,142,30,0.92)';
+      ctx.beginPath(); ctx.arc(cx, cy, 8, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.6;
+      ctx.beginPath(); ctx.arc(cx, cy + 0.6, 3.2, Math.PI * 0.7, Math.PI * 2.3); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(cx, cy - 3.6); ctx.lineTo(cx, cy + 0.8); ctx.stroke();
+      ctx.lineWidth = 1;
     }
     // "packing up" indicator: a pulsing amber up-chevron above any unit that is
     // un-fortifying (pulling up stakes), so it reads clearly as leaving its dig-in
