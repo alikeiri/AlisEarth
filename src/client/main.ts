@@ -562,6 +562,10 @@ class GameClient {
   private perfEl: HTMLDivElement | null = null;
   private fps = 60; private renderMs = 0; private updateMs = 0; private workMs = 0;
   private perfRx = { bytes: 0, t: 0 };
+  // "clean screen" toggle (V): hides the whole GUI AND skips its per-frame draw
+  // (HUD, minimap, 2D overlay) so the GUI's render cost can be measured. While
+  // hidden, the average FPS is logged to the console every 10s.
+  private guiHidden = false; private fpsLogT = 0; private fpsLogFrames = 0;
   private cmdFx: { fx: number; fz: number; tx: number; tz: number; t: number; atk: boolean }[] = [];
   private wpTrail: { x: number; z: number; atk: boolean }[] = []; // shift-queued waypoint chain (visual)
   private lastClick = { t: 0, x: 0, y: 0 };
@@ -666,6 +670,8 @@ class GameClient {
       if (e.code === 'Enter' && this.game.isNet) { this.openChat(); e.preventDefault(); return; }
       // perf overlay toggle — backquote/tilde (F-keys collide with browser shortcuts)
       if (e.code === 'Backquote') { this.togglePerf(); e.preventDefault(); return; }
+      // clean-screen toggle (V): hide the whole GUI to gauge its render cost
+      if (e.code === 'KeyV') { this.toggleGui(); e.preventDefault(); return; }
       this.keys.add(e.code);
       // cheat code buffer
       if (/^[a-zA-Z]$/.test(e.key)) {
@@ -1922,8 +1928,16 @@ class GameClient {
     this.lastT = t;
     const _w0 = this.perfOn ? performance.now() : 0;
     this.fps += (1 / Math.max(dt, 1e-3) - this.fps) * 0.1; // smoothed frame rate
+    // while the GUI is hidden, log the true average FPS to the console every 10s
+    if (this.guiHidden) {
+      this.fpsLogT += dt; this.fpsLogFrames++;
+      if (this.fpsLogT >= 10) {
+        console.log(`[perf] avg FPS (GUI hidden, last ${this.fpsLogT.toFixed(1)}s): ${(this.fpsLogFrames / this.fpsLogT).toFixed(1)}`);
+        this.fpsLogT = 0; this.fpsLogFrames = 0;
+      }
+    }
     // top-bar FPS + (multiplayer) server ping readout, refreshed twice a second
-    if (this.frame % 30 === 0) this.updateTopStat();
+    if (this.frame % 30 === 0 && !this.guiHidden) this.updateTopStat();
 
     const _u0 = this.perfOn ? performance.now() : 0;
     this.game.update(dt * 1000);
@@ -2116,8 +2130,8 @@ class GameClient {
     if (this.perfOn) this.renderMs += (performance.now() - _r0 - this.renderMs) * 0.2;
 
     const players = this.game.players();
-    this.ui.update(this.game.me, players, views, this.game.tickN, this.selection);
-    if (this.frame++ % 3 === 0) {
+    if (!this.guiHidden) this.ui.update(this.game.me, players, views, this.game.tickN, this.selection);
+    if (this.frame++ % 3 === 0 && !this.guiHidden) {
       const fogFn = (!(this.game as any).isSim && fogEnabled && this.fog) ? (cx: number, cz: number) => this.renderer.fogValue(cx, cz) : undefined;
       // radar-detected threats show on the minimap even through fog
       const mmViews = this.radarBlips.length ? views.concat(this.radarBlips) : views;
@@ -2236,7 +2250,8 @@ class GameClient {
     for (const f of this.cmdFx) f.t -= dt;
     this.cmdFx = this.cmdFx.filter(f => f.t > 0);
 
-    this.ui.overlay(this.overlayCtx, this.renderer.project.bind(this.renderer), views, this.game.me, this.selection, dragRect, hover, circles, this.cmdFx);
+    if (!this.guiHidden)
+      this.ui.overlay(this.overlayCtx, this.renderer.project.bind(this.renderer), views, this.game.me, this.selection, dragRect, hover, circles, this.cmdFx);
 
     // wall/barrier drag-line preview (drawn over the overlay)
     if (this.lineStart && this.lineCells.length) {
@@ -2407,6 +2422,19 @@ class GameClient {
   }
 
   togglePerf() { this.perfOn = !this.perfOn; if (!this.perfOn && this.perfEl) this.perfEl.style.display = 'none'; }
+  // V: hide/show the whole GUI. Hiding also makes the loop skip the HUD, minimap
+  // and 2D-overlay draws, so the FPS difference reveals the GUI's render cost.
+  toggleGui() {
+    this.guiHidden = !this.guiHidden;
+    const hud = document.getElementById('hud');
+    const ov = document.getElementById('overlay');
+    if (hud) hud.style.visibility = this.guiHidden ? 'hidden' : '';
+    if (ov) ov.style.visibility = this.guiHidden ? 'hidden' : '';
+    this.fpsLogT = 0; this.fpsLogFrames = 0;
+    console.log(this.guiHidden
+      ? '[perf] GUI hidden (clean screen) — average FPS logged every 10s. Press V to restore.'
+      : '[perf] GUI restored.');
+  }
 
   // compact top-bar readout: frame rate always, plus server ping in multiplayer
   private updateTopStat() {
