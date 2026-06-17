@@ -81,6 +81,9 @@ import { PLAYER_COLORS, BUILDINGS, UNITS } from '../sim/data';
 
 const MAX_INST = 360;
 const MAX_TRACER = 256;
+// War Factory model orientation: rotate so the exit ramp faces +Z (where new
+// vehicles spawn). Flip by Math.PI if the ramp ends up facing the wrong way.
+const FACTORY_RY = 0;
 const MAX_PART = 700;
 const WHITE = new THREE.Color(0xffffff);
 
@@ -897,6 +900,10 @@ export class Renderer {
   private time = 0;
   private terrainShader: any = null;
   private extTex: Record<string, THREE.Texture> = {};
+  private factoryProto: THREE.Group | null = null; // War Factory GLB (poly.pizza), cloned per building
+  private factoryTop = 2.6;                         // scaled model height (team band sits here)
+  private rampAnim = new Map<number, number>();     // unit id → seconds left of the "drive down the ramp" descent
+  private prevVeh = new Set<number>();              // ground-vehicle ids seen last frame (to detect freshly-built ones)
   private fogTex: THREE.DataTexture | null = null;
   private fogMesh: THREE.Mesh | null = null;
   private fogGeo: THREE.PlaneGeometry | null = null;
@@ -1059,6 +1066,7 @@ export class Renderer {
     this.oilMesh.castShadow = false; // ground clutter — kept out of the shadow pass
     this.scene.add(this.oilMesh);
     this.loadOilModel();
+    this.loadFactoryModel();
 
     // unit instancing: procedural models first, external GLBs swap in async
     for (const t of ['rifle', 'rocket', 'melody', 'tank', 'heavy', 'harv', 'engineer', 'recon', 'strike', 'msldrone', 'mlrs',
@@ -1428,6 +1436,51 @@ export class Renderer {
   // geometry, normalise it (centre horizontally, base at y=0, fixed height) and
   // swap it into the instanced oil-well mesh. Few wells per map, so one shared
   // colour is fine; the shape is what matters. Falls back to the derrick marker.
+  // War Factory model (poly.pizza "Factory", CC-BY). Loaded once, normalised
+  // (centred, base at y=0, scaled to the 3-cell footprint), the ramp oriented to
+  // +Z — the side new vehicles exit from. Cloned per factory in makeBuildingGroup.
+  private loadFactoryModel() {
+    new GLTFLoader().load('./models/factory.glb', gltf => {
+      const src = gltf.scene; src.updateMatrixWorld(true);
+      const box = new THREE.Box3().setFromObject(src);
+      const size = new THREE.Vector3(); box.getSize(size);
+      const ctr = new THREE.Vector3(); box.getCenter(ctr);
+      // auto-orient: the exit ramp slopes to the ground, so it adds the most LOW
+      // geometry on one side — rotate (snapped to 90°) so that side faces +Z, the
+      // direction new vehicles drive out. FACTORY_RY nudges it if the guess is off.
+      let cxs = 0, czs = 0, n = 0; const yLow = box.min.y + size.y * 0.3, vtmp = new THREE.Vector3();
+      src.traverse(o => {
+        const m = o as any; if (!m.isMesh) return;
+        const p = m.geometry.getAttribute('position');
+        for (let i = 0; i < p.count; i++) { vtmp.fromBufferAttribute(p, i).applyMatrix4(m.matrixWorld); if (vtmp.y < yLow) { cxs += vtmp.x; czs += vtmp.z; n++; } }
+      });
+      let ry = FACTORY_RY;
+      if (n > 0) { const ox = cxs / n - ctr.x, oz = czs / n - ctr.z; if (Math.hypot(ox, oz) > size.x * 0.04) ry += -Math.round(Math.atan2(ox, oz) / (Math.PI / 2)) * (Math.PI / 2); }
+      const s = 3.1 / Math.max(0.001, Math.max(size.x, size.z)); // fill the size-3 footprint
+      src.position.set(-ctr.x, -box.min.y, -ctr.z);              // centre x/z, base at y=0
+      src.traverse(o => { const m = o as any; if (m.isMesh) { m.castShadow = true; m.receiveShadow = true; } });
+      const inner = new THREE.Group(); inner.add(src); inner.scale.setScalar(s);
+      const proto = new THREE.Group(); proto.add(inner);
+      proto.rotation.y = ry;                                      // ramp → +Z
+      this.factoryProto = proto;
+      this.factoryTop = size.y * s;
+    }, undefined, () => { /* missing model — keep the procedural factory */ });
+  }
+
+  // a building's render group: the GLB factory once loaded, else the procedural one.
+  private makeBuildingGroup(type: string, col: number): THREE.Group {
+    if (type === 'factory' && this.factoryProto) {
+      const g = this.factoryProto.clone(true);
+      // small team-colour band on the roof so ownership still reads on the model
+      const band = new THREE.Mesh(new THREE.BoxGeometry(1.3, 0.16, 1.3),
+        new THREE.MeshStandardMaterial({ color: col, roughness: 0.5, metalness: 0.3 }));
+      band.position.y = this.factoryTop + 0.1; band.castShadow = true;
+      g.add(band);
+      return g;
+    }
+    return buildingGroupPro(type, col);
+  }
+
   private loadOilModel() {
     new GLTFLoader().load('./models/oilfield.glb', gltf => {
       const geos: THREE.BufferGeometry[] = [];
@@ -2090,6 +2143,11 @@ export class Renderer {
     const seen = new Set<number>();
     let selN = 0, rotN = 0, bagN = 0, dishN = 0;
     let rallyV: any = null;
+    // factory exit points: a freshly-built vehicle that appears next to one plays a
+    // short "drive down the ramp" descent (render-only, see the unit y below)
+    const facFront: { x: number; z: number }[] = [];
+    for (const v of views) if (v.b && v.t === 'factory') facFront.push({ x: v.x, z: v.z });
+    const curVeh = new Set<number>();
 
     for (const v of views) {
       if (v.b) {
@@ -2097,13 +2155,13 @@ export class Renderer {
         let rec = this.buildings.get(v.i);
         const wantCol = v.ne ? 0x8893a0 : (PLAYER_COLORS[v.o] ?? 0xffffff); // neutral garrison = grey
         if (!rec) {
-          rec = { g: buildingGroupPro(v.t, wantCol), type: v.t, owner: v.o };
+          rec = { g: this.makeBuildingGroup(v.t, wantCol), type: v.t, owner: v.o };
           this.scene.add(rec.g);
           this.buildings.set(v.i, rec);
         } else if (v.gar && rec.owner !== v.o) {
           // garrison building changed hands — rebuild so the roof band shows the holder
           this.scene.remove(rec.g);
-          rec.g = buildingGroupPro(v.t, wantCol); rec.owner = v.o;
+          rec.g = this.makeBuildingGroup(v.t, wantCol); rec.owner = v.o;
           this.scene.add(rec.g);
         }
         // the shipyard straddles the coast — float it at the water surface so it
@@ -2187,6 +2245,13 @@ export class Renderer {
       }
 
       const md = UNITS[v.t];
+      // freshly-built ground vehicle next to a factory → start the ramp descent
+      if (md && md.kind === 'veh' && !md.fly && md.move !== 'sea') {
+        curVeh.add(v.i);
+        if (!this.prevVeh.has(v.i)) {
+          for (const f of facFront) { const dx = v.x - f.x, dz = v.z - f.z; if (dx * dx + dz * dz < 12) { this.rampAnim.set(v.i, 0.7); break; } }
+        }
+      }
       let gy = this.map.heightAt(v.x, v.z);
       let y: number;
       if (md?.fly) y = gy + (md.alt || 2.3) + Math.sin(this.time * 2.5 + v.i * 1.7) * 0.12;
@@ -2198,6 +2263,13 @@ export class Renderer {
         y = SEA + 0.05 + Math.sin(this.time * 1.6 + v.i) * 0.03;
         gy = SEA;
       } else y = gy;
+      // "drive down the ramp": ease the new vehicle down from the ramp top to ground
+      const ramp = this.rampAnim.get(v.i);
+      if (ramp !== undefined) {
+        y += 0.85 * (ramp / 0.7);
+        const nt = ramp - dt;
+        if (nt <= 0) this.rampAnim.delete(v.i); else this.rampAnim.set(v.i, nt);
+      }
       // infantry walk bob: hop + slight sway while moving (subtle when real
       // run-cycle frames carry the motion)
       let rollZ = 0;
@@ -2329,6 +2401,7 @@ export class Renderer {
     if (this.facing.size > 1200) {
       for (const id of this.facing.keys()) if (!seen.has(id)) this.facing.delete(id);
     }
+    this.prevVeh = curVeh; // for next frame's "freshly-built vehicle" detection
 
     // ore refresh
     if (this.map.oreDirty) {

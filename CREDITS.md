@@ -25,6 +25,7 @@ CC-BY 3.0 / 4.0 (attribution required — used under these terms):
 - Destroyer ("low poly battleship") — angelo raffaele Catalano
 - Submarine — Poly by Google
 - Oil Field ("Oil pump") — Poly by Google
+- War Factory ("Factory") — Poly by Google
 
 Models sourced from https://poly.pizza (CC0 + CC-BY catalog).
 Buildings and effects are procedurally generated.
