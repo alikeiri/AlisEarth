@@ -1044,16 +1044,20 @@ export class Renderer {
     this.gemMesh.castShadow = false; // ground clutter — kept out of the shadow pass
     this.scene.add(this.gemMesh);
 
-    // oil wells: a stubby dark derrick/pool marker (land + offshore)
+    // oil wells: an oil-pump model (poly.pizza, CC-BY) swapped in async; until it
+    // loads, a stubby derrick marker stands in. Base sits at y=0 so it rests on the
+    // ground (offshore wells on the sea surface).
     const oilGeo = new THREE.CylinderGeometry(0.16, 0.34, 1.1, 6);
+    oilGeo.translate(0, 0.55, 0);
     this.oilMesh = new THREE.InstancedMesh(
       oilGeo,
-      new THREE.MeshStandardMaterial({ color: 0x1c1c22, roughness: 0.5, metalness: 0.4, emissive: 0x120a04, emissiveIntensity: 0.4 }),
+      new THREE.MeshStandardMaterial({ color: 0x46474d, roughness: 0.55, metalness: 0.55 }),
       1024
     );
     this.oilMesh.frustumCulled = false;
     this.oilMesh.castShadow = false; // ground clutter — kept out of the shadow pass
     this.scene.add(this.oilMesh);
+    this.loadOilModel();
 
     // unit instancing: procedural models first, external GLBs swap in async
     for (const t of ['rifle', 'rocket', 'melody', 'tank', 'heavy', 'harv', 'engineer', 'recon', 'strike', 'msldrone', 'mlrs',
@@ -1414,6 +1418,41 @@ export class Renderer {
         }
       }, undefined, () => { /* missing model — keep procedural */ });
     }
+  }
+
+  // Oil-well model (poly.pizza "Oil pump", CC-BY). Merge all its meshes into one
+  // geometry, normalise it (centre horizontally, base at y=0, fixed height) and
+  // swap it into the instanced oil-well mesh. Few wells per map, so one shared
+  // colour is fine; the shape is what matters. Falls back to the derrick marker.
+  private loadOilModel() {
+    new GLTFLoader().load('./models/oilfield.glb', gltf => {
+      const geos: THREE.BufferGeometry[] = [];
+      gltf.scene.updateMatrixWorld(true);
+      gltf.scene.traverse(o => {
+        const m = o as any;
+        if (!m.isMesh) return;
+        let g = (m.geometry as THREE.BufferGeometry).clone();
+        g.applyMatrix4(m.matrixWorld);
+        if (g.index) g = g.toNonIndexed();
+        for (const k of Object.keys(g.attributes)) if (k !== 'position' && k !== 'normal') g.deleteAttribute(k);
+        if (!g.getAttribute('normal')) g.computeVertexNormals();
+        geos.push(g);
+      });
+      if (!geos.length) return;
+      let merged: THREE.BufferGeometry | null = null;
+      try { merged = mergeGeometries(geos); } catch { merged = null; }
+      if (!merged) return;
+      merged.computeBoundingBox();
+      const bb = merged.boundingBox!;
+      const sz = new THREE.Vector3(); bb.getSize(sz);
+      const ctr = new THREE.Vector3(); bb.getCenter(ctr);
+      const s = 2.0 / Math.max(0.001, sz.y);     // normalise to ~2 units tall
+      merged.translate(-ctr.x, -bb.min.y, -ctr.z); // centre horizontally, base at y=0
+      merged.scale(s, s, s);
+      this.oilMesh.geometry.dispose();
+      this.oilMesh.geometry = merged;
+      this.map.oreDirty = true;                  // re-place the wells with the new model
+    }, undefined, () => { /* missing model — keep the procedural derrick */ });
   }
 
   // group world-baked geometry by material so each keeps its colour/texture.
@@ -2299,7 +2338,7 @@ export class Renderer {
           const oilCell = this.map.oil[cz * W + cx] === 1;
           // oil wells (incl. offshore) sit on top of the ground/water surface
           const baseY = oilCell ? Math.max(this.map.heightAt(x, z), SEA) : this.map.heightAt(x, z);
-          this.dummy.position.set(x, baseY + (oilCell ? 0.5 : 0.15), z);
+          this.dummy.position.set(x, baseY + (oilCell ? 0 : 0.15), z);
           this.dummy.rotation.set(0, (cx * 7 + cz * 13) % 6, 0);
           this.dummy.scale.setScalar(oilCell ? 1 : 0.5 + Math.min(1, amt / 700) * 0.8);
           this.dummy.updateMatrix();

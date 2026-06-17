@@ -552,6 +552,7 @@ class GameClient {
   private lastHover: { x: number; y: number } | null = null;
   private loadHover = false; // hovering my transport with loadable units selected
   private garrisonHover = false; // hovering a garrisonable building with infantry selected
+  private oilHover = false; // engineer selected + hovering a claimable oil well
   private tipEl: HTMLDivElement | null = null;  // delayed name+HP hover tooltip
   private tipEntId = -1;
   private tipSince = 0;
@@ -2136,7 +2137,7 @@ class GameClient {
     const canHover = !this.ui.placing && !this.patrolMode && !this.mouse.dragging
       && !this.mouse.rDragging && this.myUnitIds().length > 0;
     let hover = this.lastHover;
-    if (!canHover) { hover = null; this.lastHover = null; this.loadHover = false; this.garrisonHover = false; }
+    if (!canHover) { hover = null; this.lastHover = null; this.loadHover = false; this.garrisonHover = false; this.oilHover = false; }
     else if (this.frame % 2 === 0) {
       hover = null;
       const enemy = this.pickView(this.mouse.x, this.mouse.y, v => !this.allies.has(v.o));
@@ -2156,6 +2157,20 @@ class GameClient {
       const garrB = hasInf ? this.pickView(this.mouse.x, this.mouse.y, v => v.b === 1 && v.gar === 1 && (v.ne === 1 || v.o === me) && (v.cu || 0) < (v.gcap || 0)) : null;
       this.garrisonHover = !!garrB;
       if (garrB) { hover = null; this.lastHover = null; }
+      // hovering a claimable oil well with an Engineer selected → show the oil-rig
+      // cursor (right-click builds an Oil Rig there). Mirrors the right-click rule:
+      // an Engineer is repair+road, the cell is an unoccupied oil well.
+      const hasEng = this.myUnitIds().some(id => { const d = UNITS[this.byId.get(id)?.t]; return d?.repair && d?.road; });
+      let oilH = false;
+      if (hasEng) {
+        const gp = this.renderer.groundPoint(this.mouse.x / window.innerWidth, this.mouse.y / window.innerHeight);
+        if (gp && gp.ok) {
+          const ocx = Math.floor(gp.x), ocz = Math.floor(gp.z), m = this.game.map;
+          if (m.inB(ocx, ocz) && m.oil[ocz * W + ocx] === 1 && m.occ[ocz * W + ocx] === 0) oilH = true;
+        }
+      }
+      this.oilHover = oilH;
+      if (oilH) { hover = null; this.lastHover = null; }
     }
     // delayed name + HP tooltip for whatever entity sits under the cursor
     this.updateEntTip(t);
@@ -2166,7 +2181,7 @@ class GameClient {
       && this.byId.get([...this.selection][0])?.o === this.game.me;
     // only assign when it changes — re-setting a data-URI cursor every frame
     // makes Chrome re-decode the image and flicker
-    const wantCursor = this.terraMode ? TERRA_CURSOR : siloAiming ? SILO_CURSOR : this.loadHover ? LOAD_CURSOR : this.garrisonHover ? GARRISON_CURSOR : hover ? 'crosshair' : '';
+    const wantCursor = this.terraMode ? TERRA_CURSOR : siloAiming ? SILO_CURSOR : this.loadHover ? LOAD_CURSOR : this.garrisonHover ? GARRISON_CURSOR : this.oilHover ? OIL_CURSOR : hover ? 'crosshair' : '';
     if (wantCursor !== this.lastCursor) { canvas3.style.cursor = wantCursor; this.lastCursor = wantCursor; }
 
     // range/detection circles for the current selection
@@ -2421,6 +2436,9 @@ const TERRA_CURSOR = "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2
 const LOAD_CURSOR = "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='34' height='34'%3E%3Cg fill='none' stroke='%2340c4ff' stroke-width='2'%3E%3Cpath d='M6 20v8h22v-8'/%3E%3Crect x='12' y='10' width='10' height='10' rx='1'/%3E%3Cpath d='M17 1v6M14 4l3-3 3 3'/%3E%3C/g%3E%3C/svg%3E\") 17 17, crosshair";
 // garrison cursor: a green building with a door and an arrow entering it
 const GARRISON_CURSOR = "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='34' height='34'%3E%3Cg fill='none' stroke='%234ade6a' stroke-width='2'%3E%3Crect x='8' y='9' width='18' height='20' rx='1'/%3E%3Crect x='14' y='18' width='6' height='11'/%3E%3Cpath d='M17 1v9M13 6l4 4 4-4'/%3E%3C/g%3E%3C/svg%3E\") 17 17, crosshair";
+// oil-rig cursor: an amber derrick tower — shown when an Engineer hovers a
+// claimable oil well (right-click to build an Oil Rig there)
+const OIL_CURSOR = "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='34' height='34'%3E%3Cg fill='none' stroke='%23ffb02e' stroke-width='2' stroke-linejoin='round'%3E%3Cpath d='M9 29 L17 5 L25 29'/%3E%3Cpath d='M12 21 H22 M14 14 H20 M6 29 H28'/%3E%3C/g%3E%3C/svg%3E\") 17 17, crosshair";
 let selFaction = 'usa';
 let selDiff = 1;
 let selDiff2 = 2;

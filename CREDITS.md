@@ -24,6 +24,7 @@ CC-BY 3.0 / 4.0 (attribution required — used under these terms):
 - Gunboat / Naval Drone ("Military Boat") — Zsky
 - Destroyer ("low poly battleship") — angelo raffaele Catalano
 - Submarine — Poly by Google
+- Oil Field ("Oil pump") — Poly by Google
 
 Models sourced from https://poly.pizza (CC0 + CC-BY catalog).
 Buildings and effects are procedurally generated.
