@@ -1255,6 +1255,15 @@ export class Renderer {
     geo.setAttribute('terra', new THREE.BufferAttribute(terra, 1));
     geo.computeVertexNormals();
 
+    // Metal Plain: ONE flat-shaded metallic-grey slab — no splat shader, no
+    // textures (the cheapest possible ground). Lambert shading still gives the
+    // slab subtle light/shadow depth, but it stays a single colour.
+    if (this.map.metal) {
+      const mesh = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ color: 0x8d9298 }));
+      mesh.receiveShadow = true;
+      return mesh;
+    }
+
     const mat = new THREE.MeshLambertMaterial({ color: 0xffffff });
     const tG = groundTexture('grass', maxAniso), tR = groundTexture('rock', maxAniso);
     const tS = groundTexture('sand', maxAniso), tD = groundTexture('dirt', maxAniso);

@@ -52,8 +52,9 @@ export class GameMap {
   terraVersion = 0;                           // bumped on every terraform edit (minimap cache invalidation)
   spawns: { x: number; z: number }[] = [];
   oreDirty = true;
-  flat = false;        // completely flat height (Flat City / Steel Arena) → cheap coarse terrain mesh
+  flat = false;        // completely flat height (Flat City / Steel Arena / Metal Plain) → cheap coarse terrain mesh
   noTerrainDetail = false; // flat AND no river/mountains → renderer can skip the splat shader entirely
+  metal = false;       // Metal Plain: render the ground as ONE flat-shaded metallic-grey slab (no textures)
 
   node(x: number, z: number): number { return this.hN[z * (W + 1) + x]; }
   cellH(cx: number, cz: number): number {
@@ -299,12 +300,18 @@ export function genMap(seed: number, nPlayers: number): GameMap {
   // big-army matches — no terrain, no roads/buildings, and EVERY ore field is the
   // high-value (gem) kind so the economy sustains huge unit counts.
   const steel = (seed & 0x08000000) !== 0;
+  // Metal Plain (0x04000000): a bare, completely flat slab rendered as a SINGLE
+  // metallic-grey colour with no textures at all. Like Steel Arena minus the
+  // all-gem economy — normal ore, just a clean texture-less battleground.
+  const metal = (seed & 0x04000000) !== 0;
   const anyUrban = urban || flatCity;   // map flavours with roads + buildings
-  const flat = flatCity || steel;       // completely flat height (no river/mountains)
-  const anyFlatLike = urban || flatCity || steel; // skip continent/island terrain + forests
+  const flat = flatCity || steel || metal; // completely flat height (no river/mountains)
+  const anyFlatLike = urban || flatCity || steel || metal; // skip continent/island terrain + forests
   m.flat = flat;
-  // Flat City / Steel Arena have edge-to-edge flat ground with no river/mountains,
-  // so the renderer can drop to a coarse mesh and a single-colour ground shader.
+  m.metal = metal;
+  // Flat City / Steel Arena / Metal Plain have edge-to-edge flat ground with no
+  // river/mountains, so the renderer drops to a coarse mesh; Metal Plain also
+  // skips the splat shader entirely for a solid single-colour ground.
   m.noTerrainDetail = flat;
   const cont = CONTINENTS[(seed >>> 3) % CONTINENTS.length];
   const nIslands = Math.min(4, Math.max(2, nPlayers));

@@ -152,12 +152,13 @@ class LocalGame implements GameLike {
     const minForPlayers = nPlayers >= 4 ? 160 : nPlayers === 3 ? 136 : 112;
     const effSize = Math.min(MAXD, Math.max(size, minForPlayers));
     setMapSize(effSize);
-    // map type rides in seed bits: islands 0x40000000, urban 0x20000000, flatCity 0x10000000, steel 0x08000000
-    let seed = ((Date.now() ^ (Math.random() * 0x7fffffff)) >>> 0) & ~0x78000000;
+    // map type rides in seed bits: islands 0x40000000, urban 0x20000000, flatCity 0x10000000, steel 0x08000000, metal 0x04000000
+    let seed = ((Date.now() ^ (Math.random() * 0x7fffffff)) >>> 0) & ~0x7c000000;
     if (islandsEnabled) seed |= 0x40000000;
     if (urbanEnabled) seed |= 0x20000000;
     if (flatEnabled) seed |= 0x10000000;
     if (steelEnabled) seed |= 0x08000000;
+    if (metalEnabled) seed |= 0x04000000;
     const LVL_NAMES = ['Easy', 'Normal', 'Hard', 'Brutal'];
     const pickFacs = (avoid: string[], n: number) => {
       const pool = Object.keys(FACTIONS).filter(f => !avoid.includes(f));
@@ -2429,6 +2430,7 @@ let islandsEnabled = false; // map-type selector: 2-4 island map split by water
 let urbanEnabled = false;   // map-type selector: flat urban map (roads, river, bridges, buildings)
 let flatEnabled = false;    // map-type selector: completely flat city (roads + buildings only)
 let steelEnabled = false;   // map-type selector: bare metallic arena, all rich ore
+let metalEnabled = false;   // map-type selector: flat metallic-grey slab, no textures
 let selEnemies = 1; // 1-3 AI opponents in skirmish
 let selDiff3 = 2;   // third enemy's difficulty
 let selTeams = [1, 2, 3, 4]; // team per player slot (You, AI1, AI2, AI3); FFA by default
@@ -3216,6 +3218,7 @@ function initMenus() {
     urbanEnabled = mt === 'urban';
     flatEnabled = mt === 'flat';
     steelEnabled = mt === 'steel';
+    metalEnabled = mt === 'metal';
     const levels = [selDiff, selDiff2, selDiff3].slice(0, selEnemies);
     const teams = selTeams.slice(0, 1 + selEnemies);
     startGame(new LocalGame(playerName(), selFaction, selDiff, selSize, null, levels, teams));
@@ -3313,7 +3316,7 @@ function initMenus() {
   // create a game others can see and join from the lobby
   $('btnMpCreate').addEventListener('click', () => {
     $('mpErr').textContent = '';
-    net?.send({ t: 'create', name: playerName(), faction: selFaction, size: selSize, diff: selDiff, islands: ($('mapType') as HTMLSelectElement)?.value === 'islands', urban: ($('mapType') as HTMLSelectElement)?.value === 'urban', flat: ($('mapType') as HTMLSelectElement)?.value === 'flat', steel: ($('mapType') as HTMLSelectElement)?.value === 'steel', lockstep: ($('lockstepChk') as HTMLInputElement)?.checked ?? false });
+    net?.send({ t: 'create', name: playerName(), faction: selFaction, size: selSize, diff: selDiff, islands: ($('mapType') as HTMLSelectElement)?.value === 'islands', urban: ($('mapType') as HTMLSelectElement)?.value === 'urban', flat: ($('mapType') as HTMLSelectElement)?.value === 'flat', steel: ($('mapType') as HTMLSelectElement)?.value === 'steel', metal: ($('mapType') as HTMLSelectElement)?.value === 'metal', lockstep: ($('lockstepChk') as HTMLInputElement)?.checked ?? false });
   });
   $('btnMpJoinCode').addEventListener('click', () => {
     $('mpErr').textContent = '';
