@@ -1571,7 +1571,12 @@ export class Renderer {
   // floating plane read as all-black. Hidden in spectator/replay modes.
   private buildFog() {
     const data = new Uint8Array(W * H * 4);
-    for (let i = 0; i < W * H; i++) data[i * 4 + 3] = 205; // start fully fogged
+    // The veil colour must live in the texture RGB: a MeshBasicMaterial `map`
+    // MULTIPLIES the material colour, so leaving RGB=0 forced a pure-BLACK veil on
+    // every GPU (only see-through on bright monitors). Bake a slate grey instead,
+    // so the shroud reads as fog — visible even on dim laptop panels. setFog()
+    // writes only the alpha channel, so this RGB persists.
+    for (let i = 0; i < W * H; i++) { data[i * 4] = 0x4a; data[i * 4 + 1] = 0x56; data[i * 4 + 2] = 0x64; data[i * 4 + 3] = 205; }
     const tex = new THREE.DataTexture(data, W, H, THREE.RGBAFormat);
     tex.needsUpdate = true;
     tex.flipY = false; // DataTexture row 0 = cz 0, matches mask index cz*W+cx
@@ -1594,7 +1599,7 @@ export class Renderer {
     this.drapeFog(geo); // set vertex heights to hug the terrain
 
     const mat = new THREE.MeshBasicMaterial({
-      map: tex, transparent: true, depthWrite: false, color: 0x2a323c, fog: false, // dark slate shroud (not a black void)
+      map: tex, transparent: true, depthWrite: false, color: 0xffffff, fog: false, // veil colour comes from the texture RGB (slate), opacity from its alpha
     });
     const mesh = new THREE.Mesh(geo, mat);
     mesh.renderOrder = 4;
