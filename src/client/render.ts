@@ -1374,14 +1374,21 @@ export class Renderer {
     // building + unit detail maps: swap the photo INTO the shared singleton
     // textures so every existing and future material picks it up automatically
     const img = new THREE.ImageLoader();
+    // Swap the photo into the shared singleton. dispose() FIRST: on WebGL2/ANGLE
+    // the GPU storage is immutable once allocated (at the 128px canvas size), so
+    // uploading a different-sized JPG into it throws "texSubImage offset overflows
+    // texture dimensions" on D3D11 (Adreno) and the texture goes black. Disposing
+    // frees the old storage so three.js re-allocates at the new image's size.
     img.load('./textures/concrete.jpg', im => {
       const t = detailTex();
+      t.dispose();
       t.image = im;
       t.repeat.set(1.5, 1.5);
       t.needsUpdate = true;
     }, undefined, () => {});
     img.load('./textures/metal.jpg', im => {
       const t = armorTex();
+      t.dispose();
       t.image = im;
       t.repeat.set(1.5, 1.5);
       t.needsUpdate = true;
