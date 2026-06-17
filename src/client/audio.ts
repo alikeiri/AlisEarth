@@ -15,7 +15,7 @@ class AudioMan {
   private eighth = 0;
   private nextT = 0;
   // pre-recorded music tracks (mp3) that play instead of the synth, keyed by style
-  private trackSrc: Record<string, string> = { iron: './audio/iron_directive.mp3', golden: './audio/golden_dreams.mp3' };
+  private trackSrc: Record<string, string> = { iron: './audio/iron_directive.mp3', golden: './audio/golden_dreams.mp3', frozen: './audio/frozen_flower.mp3' };
   private trackBuf: Record<string, AudioBuffer> = {};
   private trackNode: AudioBufferSourceNode | null = null;
   private trackLoading = '';
@@ -28,8 +28,8 @@ class AudioMan {
   musicStyle = 'iron';
   // styles the player may actually select right now; anything else is coerced to
   // 'iron'. Re-add the synth styles / 'playlist' here to bring them back.
-  static ENABLED = ['iron', 'golden', 'off'];
-  private static PLAYLIST = ['iron', 'golden'];
+  static ENABLED = ['iron', 'golden', 'frozen', 'off'];
+  private static PLAYLIST = ['iron', 'golden', 'frozen'];
   private plIdx = 0;                 // position within the playlist
   private plTimer: ReturnType<typeof setTimeout> | null = null; // advance timer for synth styles
   // the actual style sounding right now (resolves 'playlist' to its current song)

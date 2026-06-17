@@ -3204,8 +3204,8 @@ function initMenus() {
   muteBtn.addEventListener('click', () => { audio.init(); audio.setMuted(!audio.muted); muteIcon(); });
   // in-game music swap: cycle the track on click and flash the name
   const musBtn = $('musBtn'), musLabel = $('musLabel');
-  const MUS_STYLES = ['iron', 'golden', 'off']; // synth tracks + playlist disabled for now (see AudioMan.ENABLED)
-  const MUS_NAMES: Record<string, string> = { playlist: 'Playlist', battle: 'Battle', hellmarch: 'Hell March', iron: 'Iron Directive', golden: 'Golden Dreams', march: 'Military March', ambient: 'Ambient', off: 'Off' };
+  const MUS_STYLES = ['iron', 'golden', 'frozen', 'off']; // synth tracks + playlist disabled for now (see AudioMan.ENABLED)
+  const MUS_NAMES: Record<string, string> = { playlist: 'Playlist', battle: 'Battle', hellmarch: 'Hell March', iron: 'Iron Directive', golden: 'Golden Dreams', frozen: 'Frozen Flower', march: 'Military March', ambient: 'Ambient', off: 'Off' };
   let musLabelTimer: any;
   const flashMus = () => {
     musBtn.title = 'Music: ' + (MUS_NAMES[audio.musicStyle] || audio.musicStyle) + ' — click to change';
