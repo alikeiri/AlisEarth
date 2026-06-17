@@ -31,6 +31,10 @@ const U_ICONS: Record<string, string> = {
   mcv: '\u{1F3D7}️', dozer: '\u{1F69C}', patriot: '\u{1F6F0}️',
   tews: '\u{1F4E1}', navengineer: '\u{1F6E0}️', shahed: '\u{1F6F8}',
   mortar: '\u{1F4A3}', artillery: '\u{1F4A5}', artyship: '\u{1F4A5}', airtransport: '\u{1F681}',
+  // faction signature units
+  apoc: '\u{2620}️', shaheen: '\u{1F680}', brahmos: '\u{2604}️', gunship: '\u{1F4B0}',
+  technical: '\u{1F3CE}️', mech: '\u{1F916}', silicondrone: '\u{1F4BB}', jungleraider: '\u{1F33F}',
+  marine: '\u{2693}', hovertank: '\u{2744}️',
 };
 export const B_LIST = ['power', 'refinery', 'radar', 'barracks', 'factory', 'turret', 'sam', 'cannon', 'tesla', 'irondome', 'wall', 'barrier', 'dronefac', 'shipyard', 'airforce', 'airfield', 'lab', 'silo'];
 
@@ -49,6 +53,7 @@ const UPG_INFO: Record<string, string> = {
 };
 export const U_LIST = ['rifle', 'rocket', 'mortar', 'melody', 'hive', 'tank', 'heavy', 'ifv', 'aatank', 'flak', 'patriot', 'fueltruck', 'harv', 'engineer', 'mcv', 'dozer', 'mlrs', 'artillery', 'recon', 'strike', 'msldrone', 'shahed',
   'tews', 'chemtrooper', 'chemtank', 'chemdrone', 'biotrooper', 'biotank', 'biodrone', 'stealthtank',
+  'apoc', 'brahmos', 'gunship', 'technical', 'mech', 'silicondrone', 'jungleraider', 'marine', 'hovertank', 'shaheen',
   'gunboat', 'destroyer', 'artyship', 'sub', 'subhunter', 'mslcruiser', 'flakship', 'navdrone', 'navengineer', 'transport', 'airtransport', 'fighter', 'bomber', 'dbomber', 'heli', 'helidrone',
   'cmissile', 'bbmissile', 'chemissile'];
 
@@ -129,6 +134,17 @@ const DESCRIPTIONS: Record<string, string> = {
   dbomber: 'Drone Bomber: unmanned heavy bomber with a large payload.',
   heli: 'Helicopter: versatile gunship — rockets vs armor, guns vs infantry.',
   helidrone: 'Helidrone: cheap, light attack helicopter.',
+  // faction signature units
+  apoc: 'Apocalypse Tank (Russia): super-heavy twin-cannon tank — devastating against armor and buildings, brutally tough. Very slow and costly; screen it from aircraft and infantry.',
+  shaheen: 'Shaheen Missile (Pakistan): a faction-exclusive ballistic missile — the heaviest warhead and widest blast in the game. Built and launched from the Missile Silo: select the silo and right-click a target.',
+  brahmos: 'BrahMos Launcher (India): supersonic cruise-missile vehicle with extreme range and area splash — flattens bases and outranges all artillery. Fragile, slow, no air defence.',
+  gunship: 'Mercenary Gunship (Gulf): premium hired attack helicopter — strong against vehicles and infantry. Expensive but hits hard. Uses an Airfield slot.',
+  technical: 'Technical (African Union): dirt-cheap, very fast gun-truck — shreds infantry in swarms. Fragile and weak against armor; win with numbers.',
+  mech: 'Combat Mech (South Korea): bipedal assault walker — tough, hits hard against vehicles and buildings. A durable spearhead.',
+  silicondrone: 'Silicon Drone (Taiwan): cheap networked attack drones built three at a time — a flexible light swarm. Flak shreds them, so keep them moving.',
+  jungleraider: 'Jungle Raider (Brazil): fast, cloaked ambush infantry — invisible until it strikes, lethal to other infantry. Weak against armor.',
+  marine: 'Marine Raider (Argentina): amphibious assault infantry — crosses water on its own to land behind enemy lines. Strong vs infantry, no transport needed.',
+  hovertank: 'Arctic Hover-Tank (Canada): amphibious hover tank — drives over land and water alike, tough and reliable. A mobile MBT that ignores shorelines.',
 };
 
 // flag-derived special-ability lines for a unit

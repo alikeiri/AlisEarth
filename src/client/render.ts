@@ -58,6 +58,16 @@ const MODEL_DEFS: Record<string, { file: string; size: number; axis: 'l' | 'h'; 
   stealthtank: { file: 'tank',     size: 1.55, axis: 'l', ry: 0 },
   chemdrone:   { file: 'drone',    size: 1.20, axis: 'l', ry: 0 },
   biodrone:    { file: 'drone',    size: 1.20, axis: 'l', ry: 0 },
+  // faction signature units (reuse base models, themed by tint / size)
+  apoc:        { file: 'heavy',     size: 2.25, axis: 'l', ry: 0, tint: 0x6e3a3a },     // dark-red super-heavy
+  brahmos:     { file: 'mlrs',      size: 1.70, axis: 'l', ry: 0, tint: 0xc97b3a },     // orange missile launcher
+  gunship:     { file: 'heli',      size: 1.85, axis: 'l', ry: 0, tint: 0xb8923a },     // gold mercenary gunship
+  technical:   { file: 'engineer',  size: 1.25, axis: 'l', ry: Math.PI, tint: 0x9a8a55 }, // tan gun-truck
+  mech:        { file: 'heavy',     size: 1.55, axis: 'l', ry: 0, tint: 0x6a7a8a },     // steel-blue walker
+  silicondrone:{ file: 'drone',     size: 1.05, axis: 'l', ry: 0, tint: 0x3aa8b8 },     // cyan networked drone
+  jungleraider:{ file: 'rocket',    size: 1.15, axis: 'h', ry: 0, tint: 0x4a6b3a },     // jungle-green infantry
+  marine:      { file: 'rocket',    size: 1.15, axis: 'h', ry: 0, tint: 0x4a6a8a },     // navy infantry
+  hovertank:   { file: 'tank',      size: 1.55, axis: 'l', ry: 0, tint: 0xcdd8e0 },     // white arctic hover-tank
 };
 
 // spinning rotor / propeller animation per type. y is a fallback hub height —
@@ -74,6 +84,8 @@ const ROTORS: Record<string, { y: number; r: number; speed: number; nose?: boole
   biodrone:  { y: 0.70, r: 0.82, speed: 33 },
   bomber:    { y: 0.42, r: 0.85, speed: 30, nose: true },
   dbomber:   { y: 0.48, r: 0.95, speed: 30, nose: true },
+  gunship:   { y: 1.05, r: 1.45, speed: 26 },       // mercenary attack heli
+  silicondrone: { y: 0.70, r: 0.85, speed: 33 },    // networked attack drone
 };
 import { GameMap, W, H, SEA, fbm } from '../sim/map';
 import { hash2 } from '../sim/rng';

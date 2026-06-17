@@ -151,10 +151,23 @@ export const UNITS: Record<string, UnitDef> = {
   airtransport: { name: 'Air Transport', cost: 1200, hp: 300, speed: 4.0, range: 0, dmg: 0, rof: 1, builtAt: 'airforce', buildTime: 13, kind: 'air', fly: true, alt: 3.0, carrier: true, carryInf: 10, carryVeh: 0, stealthTech: true },
   // suicide truck: fuel + explosives, huge fireball, sets buildings ablaze
   fueltruck: { name: 'Fuel Truck',   cost: 900,  hp: 220, speed: 3.6, range: 4.0, dmg: 280, rof: 1, builtAt: 'factory', buildTime: 10, kind: 'veh', bombTruck: true },
+  // ---- faction signature units: each nation's exclusive unit, no research needed ----
+  apoc:        { name: 'Apocalypse Tank',  cost: 2200, hp: 1150, speed: 1.6, range: 6.5, dmg: 82, rof: 2.6, builtAt: 'factory',  buildTime: 22, kind: 'veh', faction: 'russia' },    // super-heavy twin cannon
+  brahmos:     { name: 'BrahMos Launcher', cost: 1800, hp: 200,  speed: 1.6, range: 19.0, dmg: 96, rof: 5.2, builtAt: 'factory', buildTime: 18, kind: 'veh', splash: 2.6, faction: 'india' }, // supersonic cruise-missile siege
+  gunship:     { name: 'Mercenary Gunship', cost: 2000, hp: 320, speed: 3.4, range: 6.0, dmg: 52, rof: 1.3, builtAt: 'airforce', buildTime: 14, kind: 'air', fly: true, alt: 2.7, pad: true, faction: 'gulf' }, // premium hired attack heli
+  technical:   { name: 'Technical',        cost: 350,  hp: 180,  speed: 4.0, range: 4.5, dmg: 18, rof: 0.5, builtAt: 'factory',  buildTime: 6,  kind: 'veh', faction: 'au' },        // cheap fast gun-truck swarm
+  mech:        { name: 'Combat Mech',      cost: 1300, hp: 540,  speed: 2.2, range: 5.5, dmg: 50, rof: 1.6, builtAt: 'factory',  buildTime: 13, kind: 'veh', faction: 'korea' },     // bipedal assault walker
+  silicondrone:{ name: 'Silicon Drone',    cost: 450,  hp: 70,   speed: 3.6, range: 4.5, dmg: 20, rof: 1.0, builtAt: 'dronefac', buildTime: 9,  kind: 'air', fly: true, alt: 2.4, volley: 3, faction: 'taiwan' }, // networked drone swarm (3 per order)
+  jungleraider:{ name: 'Jungle Raider',    cost: 350,  hp: 130,  speed: 2.5, range: 4.2, dmg: 18, rof: 0.7, builtAt: 'barracks', buildTime: 7,  kind: 'inf', cloak: true, fortify: true, faction: 'brazil' }, // fast cloaked ambush infantry
+  marine:      { name: 'Marine Raider',    cost: 320,  hp: 150,  speed: 2.2, range: 4.5, dmg: 16, rof: 0.8, builtAt: 'barracks', buildTime: 7,  kind: 'inf', amphibious: true, fortify: true, faction: 'argentina' }, // amphibious assault infantry
+  hovertank:   { name: 'Arctic Hover-Tank', cost: 1100, hp: 540, speed: 2.8, range: 5.5, dmg: 40, rof: 1.6, builtAt: 'factory',  buildTime: 13, kind: 'veh', amphibious: true, faction: 'canada' }, // amphibious all-terrain MBT
   // missiles: built AT the silo, stored there, launched at any map position
   cmissile:   { name: 'Cruise Missile', cost: 1400, hp: 1, speed: 7, range: 0, dmg: 360, rof: 1, builtAt: 'silo', buildTime: 28, kind: 'air', missile: true, blastR: 2.8 },
   bbmissile:  { name: 'Bunker Buster',  cost: 1800, hp: 1, speed: 7, range: 0, dmg: 480, rof: 1, builtAt: 'silo', buildTime: 34, kind: 'air', missile: true, blastR: 2.1 },
   chemissile: { name: 'Chem Warhead',   cost: 2000, hp: 1, speed: 7, range: 0, dmg: 250, rof: 1, builtAt: 'silo', buildTime: 36, kind: 'air', missile: true, blastR: 3.4, tech: 'chem' },
+  // Pakistan signature: a devastating ballistic missile — the heaviest warhead and
+  // widest blast in the game. Built and launched from the Missile Silo.
+  shaheen:    { name: 'Shaheen Missile', cost: 2200, hp: 1, speed: 7, range: 0, dmg: 540, rof: 1, builtAt: 'silo', buildTime: 38, kind: 'air', missile: true, blastR: 3.8, faction: 'pakistan' },
 };
 
 export const AIRFIELD_CAP = (lvl: number) => 2 + 2 * lvl; // (legacy) capacity per airfield level
@@ -164,7 +177,7 @@ export const AIRFIELD_HELI = 30, AIRFIELD_PLANE = 10;
 export function airSlotClass(type: string): 'heli' | 'plane' | 'drone' | null {
   if (!UNITS[type]?.pad) return null;          // not airfield-limited (e.g. Air Transport)
   if (type === 'helidrone') return 'drone';    // unlimited
-  if (type === 'heli') return 'heli';
+  if (type === 'heli' || type === 'gunship') return 'heli';
   return 'plane';                              // fighter / bomber / drone bomber
 }
 export const UPG_MAX = 3;
@@ -295,7 +308,7 @@ export const FACTIONS: Record<string, Faction> = {
 export const PLAYER_COLORS = [0x3da5ff, 0xff5043, 0x57d977, 0xffc940];
 
 // drone-class flyers: flak shreds these, but airplanes shrug it off
-export const DRONE_TYPES = new Set(['recon', 'strike', 'msldrone', 'helidrone', 'minidrone', 'chemdrone', 'biodrone', 'dbomber', 'navdrone']);
+export const DRONE_TYPES = new Set(['recon', 'strike', 'msldrone', 'helidrone', 'minidrone', 'chemdrone', 'biodrone', 'dbomber', 'navdrone', 'silicondrone']);
 
 // Damage matrix: attacker type vs target class (tgtType refines air targets).
 export function dmgMul(attType: string, tgtIsBuilding: boolean, tgtKind: string, tgtType?: string): number {
@@ -318,6 +331,10 @@ export function dmgMul(attType: string, tgtIsBuilding: boolean, tgtKind: string,
     if (attType === 'turret' || attType === 'cannon' || attType === 'tesla') return 0; // defensive guns can't elevate (AA = SAM / Patriot)
     if (attType === 'mlrs' || attType === 'mortar' || attType === 'artillery' || attType === 'artyship') return 0; // artillery cannot engage aircraft
     if (attType === 'tank' || attType === 'heavy') return 0.4;
+    // faction signatures vs aircraft
+    if (attType === 'brahmos') return 0;                                                          // cruise-missile siege can't track air
+    if (attType === 'apoc' || attType === 'mech' || attType === 'hovertank') return 0.4; // tank guns barely elevate
+    if (attType === 'technical') return 0.7;                                                       // pickup autocannon peppers drones/aircraft
     if (attType === 'bomber') return 0.1;
     if (attType === 'sub') return 0.15;
     return 1.0;
@@ -342,6 +359,16 @@ export function dmgMul(attType: string, tgtIsBuilding: boolean, tgtKind: string,
   // kamikaze blast: 1-2 drones kill a tank, 3-4 crack a fortification
   if (attType === 'minidrone') return tgtIsBuilding ? 0.9 : (tgtKind === 'veh' ? 1.7 : 1.2);
   if (attType === 'shahed')    return tgtIsBuilding ? 1.1 : (tgtKind === 'veh' ? 1.6 : 1.2); // Shahed loitering munition
+  // --- faction signature units ---
+  if (attType === 'apoc')      return tgtIsBuilding ? 1.5 : (tgtKind === 'inf' ? 0.5 : 1.5);  // super-heavy: armor & structures
+  if (attType === 'hovertank') return tgtIsBuilding ? 1.3 : (tgtKind === 'inf' ? 0.5 : 1.35); // MBT profile
+  if (attType === 'brahmos')   return tgtIsBuilding ? 2.5 : (tgtKind === 'inf' ? 1.2 : 1.0);  // cruise-missile siege
+  if (attType === 'gunship')   return tgtIsBuilding ? 1.0 : (tgtKind === 'veh' ? 1.9 : 1.35); // attack heli: armor & infantry
+  if (attType === 'technical') return tgtIsBuilding ? 0.4 : (tgtKind === 'inf' ? 2.1 : 0.45); // gun-truck: anti-infantry
+  if (attType === 'mech')      return tgtIsBuilding ? 1.5 : (tgtKind === 'veh' ? 1.4 : 0.9);  // walker: anti-armor/siege
+  if (attType === 'silicondrone') return tgtIsBuilding ? 0.6 : (tgtKind === 'veh' ? 1.2 : 1.0); // light networked swarm
+  if (attType === 'jungleraider') return tgtIsBuilding ? 0.4 : (tgtKind === 'veh' ? 0.7 : 1.8); // ambush anti-infantry
+  if (attType === 'marine')    return tgtIsBuilding ? 0.4 : (tgtKind === 'veh' ? 0.5 : 1.5);  // amphibious anti-infantry
   // pronounced rock-paper-scissors: rifles shred infantry but bounce off armor,
   // rockets crack armor but whiff on infantry, tanks duel tanks, artillery
   // flattens structures but loses to anything that closes the distance.
@@ -373,6 +400,7 @@ export function dmgMul(attType: string, tgtIsBuilding: boolean, tgtKind: string,
   if (attType === 'cmissile')  return tgtIsBuilding ? 1.2 : 1.0;
   if (attType === 'bbmissile') return tgtIsBuilding ? 2.0 : 0.4;
   if (attType === 'chemissile') return tgtIsBuilding ? 0.6 : (tgtKind === 'inf' ? 2.6 : 0.8);
+  if (attType === 'shaheen')    return tgtIsBuilding ? 1.8 : 1.2; // ballistic missile: devastates everything in the blast
   if (attType === 'tank' || attType === 'heavy') return tgtIsBuilding ? 1.3 : (tgtKind === 'inf' ? 0.5 : 1.35);
   if (attType === 'turret') return tgtIsBuilding ? 0.8 : (tgtKind === 'veh' ? 0.6 : 1.1); // armor shrugs off turret fire
   if (attType === 'cannon') return tgtIsBuilding ? 1.1 : (tgtKind === 'veh' ? 1.7 : 0.7);  // heavy cannon: anti-armor
