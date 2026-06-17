@@ -1575,14 +1575,24 @@ export class Sim {
     // at it — fast under threat, a slow standing screen when quiet.
     if (def.fortify && u.fortified) {
       u.orders = u.orders.filter(o => o.k === 'fortify');
-      const threat = def.range > 0 ? this.findEnemy(u, def.range * FORT_RANGE_MUL) : null;
+      // When shelled — especially by long-range artillery (MLRS / Mortar) that
+      // out-ranges or out-prioritises the hive's scan — scramble drones after the
+      // ACTUAL attacker, not just the nearest intruder. lastHitBy/lastHitT (set
+      // in dealDamage) name it; drones have a long life + high speed, so they can
+      // chase a distant artillery piece down. Falls back to nearest-in-range.
+      let attacker: Entity | null = null;
+      if (this.tickN - u.lastHitT < 60 && this.ents.has(u.lastHitBy)) {
+        const a = this.ents.get(u.lastHitBy)!;
+        if (a.hp > 0 && this.foe(a.owner, u.owner)) attacker = a;
+      }
+      const threat = attacker || (def.range > 0 ? this.findEnemy(u, def.range * FORT_RANGE_MUL) : null);
       u.emitCd -= TICK;
       if (u.emitCd <= 0 && def.emits) {
         const c = nearestPassable(this.map, Math.floor(u.x), Math.floor(u.z));
         if (c) {
           const d = this.spawnUnit(u.owner, def.emits, c.x + 0.5, c.z + 0.5);
           d.stance = 0;
-          if (threat) { d.orders = [{ k: 'attack', tgt: threat.id }]; d.cmdT = this.tickN; } // dispatch on the intruder
+          if (threat) { d.orders = [{ k: 'attack', tgt: threat.id }]; d.cmdT = this.tickN; } // hunt the attacker / intruder
           u.emitCd = threat ? 1.8 : 9; // swarm a real threat; idle patrol otherwise
         } else u.emitCd = 1;
       }
