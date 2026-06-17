@@ -668,38 +668,27 @@ export function genMap(seed: number, nPlayers: number): GameMap {
   // -- oil wells: a SECOND resource, worked by dedicated oil miners (land vehicle
   // + sea ship) and refined at the Ore Refinery. Flagged in `oil` but stored in
   // the same `ore` field so the whole harvest/regrow/delivery pipeline is reused.
-  const addOilWell = (cx: number, cz: number, sea: boolean) => {
-    for (let z = cz - 1; z <= cz + 1; z++)
-      for (let x = cx - 1; x <= cx + 1; x++) {
-        if (!m.inB(x, z)) continue;
-        const i = z * W + x;
-        const ok = sea ? m.water[i] === 1 : !m.blockedT(x, z);
-        if (!ok) continue;
-        m.ore[i] = 1000 * (0.8 + 0.4 * rng.next());
-        m.oil[i] = 1;
-      }
+  // Oil wells: single contested cells (not patches), on open land away from spawns.
+  // An Engineer builds an Oil Rig on one for steady passive income — no hauling —
+  // and the cell's occupancy caps it at one rig per well.
+  const addOilWell = (cx: number, cz: number) => {
+    if (!m.inB(cx, cz) || m.blockedT(cx, cz)) return false;
+    const i = cz * W + cx;
+    m.ore[i] = 1000 * (0.8 + 0.4 * rng.next()); // legacy richness (drives the derrick render scale)
+    m.oil[i] = 1;
     oreCenters.push({ x: cx, z: cz });
+    return true;
   };
-  // land oil wells: contested, away from spawns
   let oilL = 0, olt = 0;
-  const wantOilLand = Math.max(2, Math.round(W / 40));
-  while (oilL < wantOilLand && olt < 500) {
+  const wantOil = Math.max(3, Math.round(W / 30));
+  while (oilL < wantOil && olt < 800) {
     olt++;
     const cx = centerBiased(W, 18, 0.3), cz = centerBiased(H, 18, 0.3);
     if (m.blockedT(cx, cz) || !farFromOre(cx, cz, 11)) continue;
     let okSpawn = true;
     for (const s of starts) if ((cx - s.x) * (cx - s.x) + (cz - s.z) * (cz - s.z) < 18 * 18) { okSpawn = false; break; }
     if (!okSpawn) continue;
-    addOilWell(cx, cz, false); oilL++;
-  }
-  // sea oil wells (open water) — guarantees an offshore economy on water/island maps
-  let oilS = 0, ost = 0;
-  const wantOilSea = Math.max(2, Math.round(W / 38));
-  while (oilS < wantOilSea && ost < 700) {
-    ost++;
-    const cx = 16 + rng.int(W - 32), cz = 16 + rng.int(H - 32);
-    if (m.water[cz * W + cx] !== 1 || !farFromOre(cx, cz, 9)) continue;
-    addOilWell(cx, cz, true); oilS++;
+    if (addOilWell(cx, cz)) oilL++;
   }
 
   // Steel Arena: pave the whole plain (renders as bare metallic concrete) and make

@@ -697,6 +697,15 @@ export class Sim {
       for (const u of units) if (UNITS[u.type]?.kind === 'inf') { u.orders = [{ k: 'garrison', tgt: c.tgt }]; u.path = null; u.cmdT = this.tickN; }
       return;
     }
+    if (c.k === 'oilrig') {
+      // an Engineer drives to an oil well and builds an Oil Rig on it
+      const i = c.cz * W + c.cx;
+      if (!this.map.inB(c.cx, c.cz) || this.map.oil[i] !== 1 || this.map.occ[i]) return;
+      for (const u of units) if (UNITS[u.type]?.repair && UNITS[u.type]?.road) { // the (land) Engineer
+        u.orders = [{ k: 'oilrig', ox: c.cx, oz: c.cz }]; u.path = null; u.cmdT = this.tickN;
+      }
+      return;
+    }
     if (c.k === 'unload') {
       // transports drop their cargo: onto shore if close, else sail to the nearest coast first
       for (const u of units) if (UNITS[u.type]?.carrier && (u.cargoUnits?.length || 0) > 0) {
@@ -1289,6 +1298,13 @@ export class Sim {
       return;
     }
 
+    // Oil Rig: steady passive income while it stands (faction/difficulty scaled,
+    // like harvester deliveries). It does nothing else, so we're done here.
+    if (def.income) {
+      pl.credits += def.income * TICK * pl.fac.incomeMul * pl.bonusIncome;
+      return;
+    }
+
     // building upgrade in progress: tick it down, then apply the level (and the
     // HP/level bonuses) when it completes. power shortage slows it like a build.
     if (b.upg) {
@@ -1834,6 +1850,20 @@ export class Sim {
         t.hp = Math.min(t.maxHp, t.hp + 14 * TICK);
         if (this.tickN % 10 === u.id % 10) this.events.push({ e: 'heal', x: t.x, z: t.z });
       } else this.moveToward(u, t.x, t.z, def);
+    } else if (ord.k === 'oilrig') {
+      // drive onto the oil well and erect an Oil Rig there; the Engineer is consumed
+      const ox = ord.ox!, oz = ord.oz!, i = oz * W + ox;
+      if (!this.map.inB(ox, oz) || this.map.oil[i] !== 1 || this.map.occ[i]) { u.orders.shift(); u.path = null; return; }
+      if (hyp(ox + 0.5 - u.x, oz + 0.5 - u.z) <= 1.6) {
+        this.addBuilding(u.owner, 'oilrig', ox, oz, true);
+        this.stats.builtB[u.owner]++;
+        this.map.oreDirty = true; // hide the bare oil-well derrick under the new rig
+        this.events.push({ e: 'done', x: ox + 0.5, z: oz + 0.5 });
+        u.hp = 0; // the Engineer is spent building the rig
+        u.orders = []; u.path = null;
+        return;
+      }
+      this.moveToward(u, ox + 0.5, oz + 0.5, def);
     } else if (ord.k === 'rtb') {
       // bomber returns to the nearest airfield (plant as fallback), rearms,
       // then resumes the attack order waiting beneath this one
@@ -2414,6 +2444,7 @@ export class Sim {
         for (let z = e.cz; z < e.cz + e.size; z++)
           for (let x = e.cx; x < e.cx + e.size; x++)
             if (this.map.inB(x, z) && this.map.occ[z * W + x] === e.id) this.map.occ[z * W + x] = 0;
+        if (BUILDINGS[e.type]?.income) this.map.oreDirty = true; // oil rig gone → restore the well marker
         this.events.push({ e: 'boom', x: e.x, z: e.z, big: true });
         if (e.type !== 'wall' && e.type !== 'barrier') this.stats.lostB[e.owner]++;
         // a garrison building destroyed with troops inside: the occupants die with it

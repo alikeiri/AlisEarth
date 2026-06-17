@@ -1760,6 +1760,19 @@ class GameClient {
         return;
       }
     }
+    // right-click an Engineer on an oil well → build an Oil Rig there (passive income)
+    if (hasEngineer) {
+      const ocx = Math.floor(g.x), ocz = Math.floor(g.z);
+      if (this.game.map.inB(ocx, ocz) && this.game.map.oil[ocz * W + ocx] === 1 && this.game.map.occ[ocz * W + ocx] === 0) {
+        const engs = ids.filter(id => { const d = UNITS[this.byId.get(id)?.t]; return d?.repair && d?.road; });
+        if (engs.length) {
+          this.game.issue({ k: 'oilrig', p: me, ids: engs, cx: ocx, cz: ocz });
+          audio.ack('engineer', 'move');
+          this.markCmd(engs, ocx + 0.5, ocz + 0.5, false);
+          return;
+        }
+      }
+    }
     // right-click a friendly unit (not one of the selected ones) with combat
     // units selected → escort it: follow it and engage anything that threatens it
     if (ids.some(id => UNITS[this.byId.get(id)?.t]?.dmg > 0)) {

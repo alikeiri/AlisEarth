@@ -315,7 +315,7 @@ function unitGeoSmooth(type: string): [THREE.BufferGeometry, THREE.BufferGeometr
   const ALIAS: Record<string, string> = {
     hive: 'harv', minidrone: 'recon', melodydrone: 'recon', chemtrooper: 'rifle', biotrooper: 'rifle',
     chemtank: 'tank', biotank: 'tank', stealthtank: 'tank', chemdrone: 'recon', biodrone: 'recon',
-    mcv: 'harv', dozer: 'harv', oiltruck: 'harv', oilship: 'gunboat', tews: 'mlrs', transport: 'destroyer', navengineer: 'gunboat',
+    mcv: 'harv', dozer: 'harv', tews: 'mlrs', transport: 'destroyer', navengineer: 'gunboat',
     mortar: 'rocket', artillery: 'mlrs', artyship: 'destroyer', airtransport: 'heli',
   };
   if (ALIAS[type]) type = ALIAS[type];
@@ -701,6 +701,14 @@ function buildingGroupPro(type: string, teamColor: number): THREE.Group {
     add(new THREE.ConeGeometry(0.18, 0.55, 10), mat(0xd8dde2, 0.4, 0.5), 0, 0.85, 0); // warhead tip
     add(new THREE.BoxGeometry(0.32, 0.5, 0.32), olive, 0.65, 0.55, 0.65); // control bunker
     add(roundedSlabGeo(1.4, 0.18, 0.06, 0.06), team, 0, 0.4, -0.78);
+  } else if (type === 'oilrig') {
+    // pump-jack on a pad: tapered derrick tower + a nodding beam + a team band
+    add(roundedSlabGeo(0.9, 0.9, 0.16), concrete, 0, 0.08, 0);
+    add(new THREE.CylinderGeometry(0.06, 0.18, 1.15, 6), steel, -0.16, 0.66, 0);   // derrick tower
+    add(new THREE.CylinderGeometry(0.17, 0.2, 0.22, 10), mat(0x6f767c), -0.16, 0.22, 0); // wellhead
+    add(new THREE.BoxGeometry(0.78, 0.09, 0.11), darkM, 0.08, 1.0, 0);             // nodding beam
+    add(new THREE.BoxGeometry(0.13, 0.46, 0.13), darkM, 0.36, 0.55, 0);            // counterweight post
+    add(roundedSlabGeo(0.82, 0.15, 0.05, 0.05), team, 0, 0.2, 0.42);              // team-colour band
   } else if (type === 'airfield') {
     add(roundedSlabGeo(1.9, 1.9, 0.14, 0.08), mat(0x4e545a));
     for (const sz2 of [-0.55, 0, 0.55]) add(new THREE.BoxGeometry(0.1, 0.02, 0.45), mat(0xd8d8d8), 0, 0.16, sz2);
@@ -1051,7 +1059,7 @@ export class Renderer {
     for (const t of ['rifle', 'rocket', 'melody', 'tank', 'heavy', 'harv', 'engineer', 'recon', 'strike', 'msldrone', 'mlrs',
       'gunboat', 'destroyer', 'sub', 'navdrone', 'fighter', 'bomber', 'dbomber', 'heli', 'helidrone',
       'hive', 'minidrone', 'melodydrone', 'chemtrooper', 'chemtank', 'chemdrone', 'biotrooper', 'biotank', 'biodrone', 'stealthtank',
-      'oiltruck', 'oilship', 'tews', 'transport', 'navengineer', 'mortar', 'artillery', 'artyship', 'airtransport']) {
+      'tews', 'transport', 'navengineer', 'mortar', 'artillery', 'artyship', 'airtransport']) {
       const [body, accent] = unitGeoSmooth(t);
       const bm = new THREE.InstancedMesh(body, new THREE.MeshStandardMaterial({ vertexColors: true, map: armorTex(), roughness: 0.72, metalness: 0.2 }), MAX_INST);
       const am = new THREE.InstancedMesh(accent, new THREE.MeshStandardMaterial({ color: 0xffffff, map: detailTex(), roughness: 0.5, metalness: 0.25 }), MAX_INST);
@@ -2286,7 +2294,7 @@ export class Renderer {
           this.dummy.rotation.set(0, (cx * 7 + cz * 13) % 6, 0);
           this.dummy.scale.setScalar(oilCell ? 1 : 0.5 + Math.min(1, amt / 700) * 0.8);
           this.dummy.updateMatrix();
-          if (oilCell) { if (on < 1024) this.oilMesh.setMatrixAt(on++, this.dummy.matrix); }
+          if (oilCell) { if (this.map.occ[cz * W + cx] === 0 && on < 1024) this.oilMesh.setMatrixAt(on++, this.dummy.matrix); } // hidden once a rig is built on it
           else if (this.map.gem[cz * W + cx] === 1) { if (gn < 512) this.gemMesh.setMatrixAt(gn++, this.dummy.matrix); }
           else if (n < 2048) this.oreMesh.setMatrixAt(n++, this.dummy.matrix);
         }

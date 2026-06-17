@@ -71,9 +71,8 @@ export const UNITS: Record<string, UnitDef> = {
   tank:   { name: 'Battle Tank',  cost: 800,  hp: 340, speed: 2.6, range: 5.5, dmg: 34, rof: 1.6, builtAt: 'factory',  buildTime: 12, kind: 'veh' },
   heavy:  { name: 'Heavy Tank',   cost: 1250, hp: 640, speed: 2.0, range: 6.0, dmg: 58, rof: 2.2, builtAt: 'factory',  buildTime: 17, kind: 'veh' },
   harv:   { name: 'Harvester',    cost: 900,  hp: 450, speed: 1.6, range: 0,   dmg: 0,  rof: 1,   builtAt: 'factory',  buildTime: 14, kind: 'veh', cargo: 400 },
-  // oil economy: dedicated miners that work OIL wells and refine them at the Ore Refinery
-  oiltruck: { name: 'Oil Miner',  cost: 1000, hp: 480, speed: 1.7, range: 0,   dmg: 0,  rof: 1,   builtAt: 'factory',  buildTime: 13, kind: 'veh', cargo: 450, oilMiner: true },
-  oilship:  { name: 'Oil Rig Ship', cost: 1150, hp: 540, speed: 2.8, range: 0, dmg: 0,  rof: 1,   builtAt: 'shipyard', buildTime: 13, kind: 'sea', move: 'sea', cargo: 520, oilMiner: true },
+  // oil is no longer hauled: an Engineer builds an Oil Rig on an oil well for steady
+  // passive income (see BUILDINGS.oilrig). The old Oil Miner / Oil Rig Ship are gone.
   // sea counterpart to the Engineer: repairs friendly ships (and coastal structures) on the water
   navengineer: { name: 'Naval Engineer', cost: 700, hp: 240, speed: 2.6, range: 0, dmg: 0, rof: 1, builtAt: 'shipyard', buildTime: 11, kind: 'sea', move: 'sea', repair: true },
   // TEWS: electronic-warfare vehicle — jams enemy radar/satellite in a bubble and
@@ -179,6 +178,7 @@ export interface BuildingDef {
   forceFire?: boolean;                            // player may Ctrl+force-fire this gun at a ground point/entity
   garrison?: boolean;                             // neutral urban building: infantry garrison it & fire out
   neutral?: boolean;                              // not buildable; spawned by the map (owned by the neutral slot)
+  income?: number;                                // passive credits/sec while it stands (Oil Rig)
 }
 
 export const BUILDINGS: Record<string, BuildingDef> = {
@@ -203,6 +203,9 @@ export const BUILDINGS: Record<string, BuildingDef> = {
   airfield: { name: 'Airfield',          cost: 800,  hp: 600,  power: -15,  buildTime: 8,  size: 2, prereq: 'airforce' },
   lab:      { name: 'Research Lab',       cost: 2000, hp: 850,  power: -50,  buildTime: 14, size: 2, prereq: 'factory' },
   silo:     { name: 'Missile Silo',       cost: 2500, hp: 900,  power: -60,  buildTime: 16, size: 2, prereq: 'lab' },
+  // Oil Rig: not in the build menu — an Engineer constructs it on an oil well, then
+  // it pumps a steady passive income. Soft target; destroying it frees the well.
+  oilrig:   { name: 'Oil Rig',            cost: 0,    hp: 600,  power: 0,    buildTime: 0,  size: 1, income: 15 },
   // neutral garrisonable city buildings (urban map only; spawned, not buildable).
   // Infantry move in and fire out; capacity scales with footprint.
   bldgsm:   { name: 'Building',           cost: 0,    hp: 700,  power: 0,    buildTime: 0,  size: 2, garrison: true, neutral: true },

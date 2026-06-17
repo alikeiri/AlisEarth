@@ -29,7 +29,7 @@ const U_ICONS: Record<string, string> = {
   subhunter: '\u{1F42C}', mslcruiser: '\u{1F6A2}', flakship: '\u{1F387}', transport: '\u{26F4}️',
   fighter: '\u{1F6E9}️', bomber: '\u{1F4A3}', dbomber: '\u{1F916}', heli: '\u{1F681}', helidrone: '\u{1FA81}',
   mcv: '\u{1F3D7}️', dozer: '\u{1F69C}', patriot: '\u{1F6F0}️',
-  oiltruck: '\u{1F6E2}️', oilship: '\u{1F6E2}️', tews: '\u{1F4E1}', navengineer: '\u{1F6E0}️',
+  tews: '\u{1F4E1}', navengineer: '\u{1F6E0}️',
   mortar: '\u{1F4A3}', artillery: '\u{1F4A5}', artyship: '\u{1F4A5}', airtransport: '\u{1F681}',
 };
 export const B_LIST = ['power', 'refinery', 'radar', 'barracks', 'factory', 'turret', 'sam', 'cannon', 'tesla', 'irondome', 'wall', 'barrier', 'dronefac', 'shipyard', 'airforce', 'airfield', 'lab', 'silo'];
@@ -47,9 +47,9 @@ const UPG_INFO: Record<string, string> = {
   airforce: '+25% production speed',
   shipyard: '+25% production speed',
 };
-export const U_LIST = ['rifle', 'rocket', 'mortar', 'melody', 'hive', 'tank', 'heavy', 'ifv', 'aatank', 'flak', 'patriot', 'fueltruck', 'harv', 'oiltruck', 'engineer', 'mcv', 'dozer', 'mlrs', 'artillery', 'recon', 'strike', 'msldrone',
+export const U_LIST = ['rifle', 'rocket', 'mortar', 'melody', 'hive', 'tank', 'heavy', 'ifv', 'aatank', 'flak', 'patriot', 'fueltruck', 'harv', 'engineer', 'mcv', 'dozer', 'mlrs', 'artillery', 'recon', 'strike', 'msldrone',
   'tews', 'chemtrooper', 'chemtank', 'chemdrone', 'biotrooper', 'biotank', 'biodrone', 'stealthtank',
-  'gunboat', 'destroyer', 'artyship', 'sub', 'subhunter', 'mslcruiser', 'flakship', 'navdrone', 'oilship', 'navengineer', 'transport', 'airtransport', 'fighter', 'bomber', 'dbomber', 'heli', 'helidrone',
+  'gunboat', 'destroyer', 'artyship', 'sub', 'subhunter', 'mslcruiser', 'flakship', 'navdrone', 'navengineer', 'transport', 'airtransport', 'fighter', 'bomber', 'dbomber', 'heli', 'helidrone',
   'cmissile', 'bbmissile', 'chemissile'];
 
 // strengths/weaknesses tooltip, derived from the live damage matrix so it can
@@ -75,7 +75,7 @@ const TIP_NOTES: Record<string, string> = {
   tesla: 'Tesla Coil: high-damage bolt that briefly EMP-freezes the unit it hits. Power-hungry; needs a Research Lab.',
   irondome: 'Iron Dome: shoots down incoming silo missiles aimed inside its shield. One kill per reload — a heavy salvo can still overwhelm a single dome. Needs a Radar Dome.',
   patriot: 'Patriot SAM: mobile missile interceptor. Park it over what you want protected — it downs incoming silo missiles. No offensive weapon. Fortify (F) to dig in and deploy its own radar: wide vision + early-warning detection of incoming enemies.',
-  engineer: 'Repairs units, builds roads, and lays proximity mines (press F to lay one from its stock of 4).',
+  engineer: 'Repairs units, builds roads, and lays proximity mines (press F to lay one from its stock of 4). Right-click an oil well to build an Oil Rig there (consumes the engineer) for steady passive income.',
   destroyer: 'Armored gun ship: duels other warships and bombards the coast. Its sonar also detects and depth-charges submarines.',
   sub: 'Submarine: cloaked until a sonar ship (Destroyer / Sub Hunter) pings it or you get very close. Devastating ambush torpedoes, but a thin hull.',
   subhunter: 'Sub Hunter: fast sonar escort that reveals and depth-charges submarines. Weak against everything else.',
@@ -106,8 +106,6 @@ const DESCRIPTIONS: Record<string, string> = {
   heavy: 'Heavy Tank: slow, heavily armored bruiser with big guns.',
   ifv: 'IFV: fast autocannon carrier — shreds infantry, can pepper aircraft.',
   harv: 'Harvester: gathers ore and returns it to a refinery. Unarmed.',
-  oiltruck: 'Oil Miner: works land OIL wells and refines them at the Ore Refinery for credits. Unarmed.',
-  oilship: 'Oil Rig Ship: works offshore OIL wells and pumps the oil to a coastal Ore Refinery. Unarmed.',
   navengineer: 'Naval Engineer: repairs friendly ships (and coastal structures) out on the water. Unarmed. Right-click a damaged ship to repair; right-drag to set an auto-repair zone.',
   airtransport: 'Air Transport: carries up to 10 infantry (Melody included) over any terrain. Right-click it with infantry selected to load; press U to drop them. Unarmed — cloaks once Stealth Systems is researched.',
   tews: 'TEWS: jams enemy Radar Dome + Spy Satellite vision in a bubble (their units’ own eyes and Patriots still see). Pulses an area EMP that only damages drones.',
