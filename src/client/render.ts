@@ -1237,27 +1237,13 @@ export class Renderer {
     geo.rotateX(-Math.PI / 2);
     geo.translate(W / 2, 0, H / 2);
     const pos = geo.getAttribute('position') as THREE.BufferAttribute;
-    const splat = new Float32Array(pos.count * 4); // grass, rock, sand, dirt
-    const terra = new Float32Array(pos.count);     // 1 = terraformed → concrete
+    const uv = geo.getAttribute('uv') as THREE.BufferAttribute;
     for (let i = 0; i < pos.count; i++) {
       const x = pos.getX(i), z = pos.getZ(i);
-      const h = this.map.heightAt(x, z);
-      pos.setY(i, h);
-      const e = 0.5;
-      const gx = this.map.heightAt(x + e, z) - this.map.heightAt(x - e, z);
-      const gz = this.map.heightAt(x, z + e) - this.map.heightAt(x, z - e);
-      const slope = Math.hypot(gx, gz);
-      let sand = 1 - sstep(SEA + 0.12, SEA + 0.55, h);
-      let rock = Math.min(1, sstep(0.85, 1.5, slope) + sstep(6.6, 7.8, h));
-      let dirt = sstep(0.56, 0.70, fbm(12345, x * 0.09, z * 0.09)) * 0.85 * (1 - sand) * (1 - rock);
-      let grass = Math.max(0, 1 - sand - rock - dirt);
-      const sum = sand + rock + dirt + grass;
-      splat[i * 4] = grass / sum; splat[i * 4 + 1] = rock / sum;
-      splat[i * 4 + 2] = sand / sum; splat[i * 4 + 3] = dirt / sum;
-      terra[i] = this.terraAt(x, z);
+      pos.setY(i, this.map.heightAt(x, z));
+      uv.setXY(i, x / W, z / H); // sample the baked ground map by world position
     }
-    geo.setAttribute('splat', new THREE.BufferAttribute(splat, 4));
-    geo.setAttribute('terra', new THREE.BufferAttribute(terra, 1));
+    uv.needsUpdate = true;
     geo.computeVertexNormals();
 
     // Metal Plain: ONE flat-shaded metallic-grey slab — no splat shader, no
@@ -1269,50 +1255,79 @@ export class Renderer {
       return mesh;
     }
 
-    const mat = new THREE.MeshLambertMaterial({ color: 0xffffff });
-    const tG = groundTexture('grass', maxAniso), tR = groundTexture('rock', maxAniso);
-    const tS = groundTexture('sand', maxAniso), tD = groundTexture('dirt', maxAniso);
-    mat.onBeforeCompile = shader => {
-      shader.uniforms.tGrass = { value: this.extTex.grass || tG };
-      shader.uniforms.tRock = { value: this.extTex.rock || tR };
-      shader.uniforms.tSand = { value: this.extTex.sand || tS };
-      shader.uniforms.tDirt = { value: this.extTex.dirt || tD };
-      this.terrainShader = shader;
-      shader.vertexShader = shader.vertexShader
-        .replace('#include <common>', '#include <common>\nattribute vec4 splat;\nattribute float terra;\nvarying vec4 vSplat;\nvarying float vTerra;\nvarying vec3 vPosW;')
-        .replace('#include <begin_vertex>', '#include <begin_vertex>\nvSplat = splat;\nvTerra = terra;\nvPosW = position;');
-      const cheap = `
-          // FLAT-MAP fast path: no rock/sand layers exist on flat ground (slope 0,
-          // uniform height), so blend just grass + dirt — 2 fetches instead of 4.
-          vec2 uvT = vPosW.xz * 0.42;
-          vec3 g = texture2D(tGrass, uvT).rgb;
-          vec3 d = texture2D(tDirt, uvT * 0.8).rgb;
-          vec3 tex = mix(g, d, clamp(vSplat.w, 0.0, 1.0));
-          vec3 concrete = vec3(0.56, 0.56, 0.54) * (0.82 + 0.32 * d.g);
-          tex = mix(tex, concrete, clamp(vTerra, 0.0, 1.0));
-          diffuseColor.rgb *= pow(tex, vec3(2.2));
-        `;
-      const full = `
-          // ONE texture fetch per ground layer (was ~10 fetches/pixel with two
-          // anti-tile scales + patchiness) — terrain fill-rate was the bottleneck.
-          vec2 uvT = vPosW.xz * 0.42;
-          vec3 g = texture2D(tGrass, uvT).rgb;
-          vec3 r = texture2D(tRock, uvT * 0.55).rgb;
-          vec3 s = texture2D(tSand, uvT).rgb;
-          vec3 d = texture2D(tDirt, uvT * 0.8).rgb;
-          vec3 tex = g * vSplat.x + r * vSplat.y + s * vSplat.z + d * vSplat.w;
-          // terraformed/paved ground reads as concrete; grain reuses the dirt fetch
-          vec3 concrete = vec3(0.56, 0.56, 0.54) * (0.82 + 0.32 * d.g);
-          tex = mix(tex, concrete, clamp(vTerra, 0.0, 1.0));
-          diffuseColor.rgb *= pow(tex, vec3(2.2));
-        `;
-      shader.fragmentShader = shader.fragmentShader
-        .replace('#include <common>', '#include <common>\nuniform sampler2D tGrass, tRock, tSand, tDirt;\nvarying vec4 vSplat;\nvarying float vTerra;\nvarying vec3 vPosW;')
-        .replace('#include <map_fragment>', flatPath ? cheap : full);
-    };
+    // Pre-baked ground: the four splat layers are composited into ONE map texture
+    // at load (see bakeGround), so the terrain renders with a plain material —
+    // one texture fetch, no per-frame splat blend. (Sampled at uv 0..1, so it also
+    // avoids the large-tiled-UV mip bug that blanked terrain on some Adreno GPUs.)
+    const mat = new THREE.MeshLambertMaterial({ map: this.bakeGround() });
     const mesh = new THREE.Mesh(geo, mat);
     mesh.receiveShadow = true;
     return mesh;
+  }
+
+  // Bake the grass/rock/sand/dirt layers into a single map texture, blended by the
+  // same per-cell splat weights the shader used. Runs once at map load; the result
+  // is a normal mipmapped texture the terrain mesh samples by world-uv.
+  private bakeGround(): THREE.Texture {
+    const S = Math.max(5, Math.floor(1024 / Math.max(W, H))); // texels per cell (cap ~1024 across — keeps the one-time bake fast)
+    const NW = W * S, NH = H * S;
+    // per-cell splat weights (identical formula to the old vertex splat)
+    const wt = new Float32Array(W * H * 4);
+    for (let cz = 0; cz < H; cz++) for (let cx = 0; cx < W; cx++) {
+      const x = cx + 0.5, z = cz + 0.5, h = this.map.heightAt(x, z), e = 0.5;
+      const gx = this.map.heightAt(x + e, z) - this.map.heightAt(x - e, z);
+      const gz = this.map.heightAt(x, z + e) - this.map.heightAt(x, z - e);
+      const slope = Math.hypot(gx, gz);
+      const sand = 1 - sstep(SEA + 0.12, SEA + 0.55, h);
+      const rock = Math.min(1, sstep(0.85, 1.5, slope) + sstep(6.6, 7.8, h));
+      const dirt = sstep(0.56, 0.70, fbm(12345, x * 0.09, z * 0.09)) * 0.85 * (1 - sand) * (1 - rock);
+      const grass = Math.max(0, 1 - sand - rock - dirt);
+      const s = sand + rock + dirt + grass || 1, o = (cz * W + cx) * 4;
+      wt[o] = grass / s; wt[o + 1] = rock / s; wt[o + 2] = sand / s; wt[o + 3] = dirt / s;
+    }
+    // source layer pixels (procedural textures; always available synchronously)
+    const grab = (k: string) => { const cv = groundTexture(k, 1).image as HTMLCanvasElement; return cv.getContext('2d')!.getImageData(0, 0, cv.width, cv.height).data; };
+    const G = grab('grass'), R = grab('rock'), Sd = grab('sand'), D = grab('dirt'), TS = 256;
+    const tx = (u: number) => (((Math.floor(u * TS) % TS) + TS) % TS); // tiled texel coord
+    // hoist the per-column tiling indices + cell interpolation out of the inner loop
+    const colGx = new Int32Array(NW), colRx = new Int32Array(NW), colDx = new Int32Array(NW);
+    const colX0 = new Int32Array(NW), colX1 = new Int32Array(NW), colFx = new Float32Array(NW);
+    for (let px = 0; px < NW; px++) {
+      const x = (px / NW) * W, u = x * 0.42;
+      colGx[px] = tx(u); colRx[px] = tx(u * 0.55); colDx[px] = tx(u * 0.8);
+      const cx = Math.max(0, Math.min(W - 1.001, x - 0.5)), x0 = Math.floor(cx);
+      colX0[px] = x0; colX1[px] = Math.min(W - 1, x0 + 1); colFx[px] = cx - x0;
+    }
+    const cv = document.createElement('canvas'); cv.width = NW; cv.height = NH;
+    const img = cv.getContext('2d')!.createImageData(NW, NH), d = img.data;
+    for (let py = 0; py < NH; py++) {
+      const z = (py / NH) * H, v = z * 0.42;
+      const rowG = tx(v) * TS, rowR = tx(v * 0.55) * TS, rowD = tx(v * 0.8) * TS; // sand shares grass scale
+      const cz = Math.max(0, Math.min(H - 1.001, z - 0.5)), z0 = Math.floor(cz), z1 = Math.min(H - 1, z0 + 1), fz = cz - z0;
+      const r0 = z0 * W, r1 = z1 * W;
+      let o = py * NW * 4;
+      for (let px = 0; px < NW; px++ , o += 4) {
+        const x0 = colX0[px], x1 = colX1[px], fx = colFx[px];
+        const o00 = (r0 + x0) * 4, o10 = (r0 + x1) * 4, o01 = (r1 + x0) * 4, o11 = (r1 + x1) * 4;
+        const w00 = (1 - fx) * (1 - fz), w10 = fx * (1 - fz), w01 = (1 - fx) * fz, w11 = fx * fz;
+        const gw = wt[o00] * w00 + wt[o10] * w10 + wt[o01] * w01 + wt[o11] * w11;
+        const rw = wt[o00 + 1] * w00 + wt[o10 + 1] * w10 + wt[o01 + 1] * w01 + wt[o11 + 1] * w11;
+        const sw = wt[o00 + 2] * w00 + wt[o10 + 2] * w10 + wt[o01 + 2] * w01 + wt[o11 + 2] * w11;
+        const dw = wt[o00 + 3] * w00 + wt[o10 + 3] * w10 + wt[o01 + 3] * w01 + wt[o11 + 3] * w11;
+        const iG = (rowG + colGx[px]) * 4, iR = (rowR + colRx[px]) * 4, iS = (rowG + colGx[px]) * 4, iD = (rowD + colDx[px]) * 4;
+        d[o]     = (G[iG] * gw + R[iR] * rw + Sd[iS] * sw + D[iD] * dw) | 0;
+        d[o + 1] = (G[iG + 1] * gw + R[iR + 1] * rw + Sd[iS + 1] * sw + D[iD + 1] * dw) | 0;
+        d[o + 2] = (G[iG + 2] * gw + R[iR + 2] * rw + Sd[iS + 2] * sw + D[iD + 2] * dw) | 0;
+        d[o + 3] = 255;
+      }
+    }
+    cv.getContext('2d')!.putImageData(img, 0, 0);
+    const tex = new THREE.CanvasTexture(cv);
+    tex.flipY = false;                       // row py == world z (matches the world-uv we set)
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
+    tex.anisotropy = 4;
+    return tex;
   }
 
   // show/hide the terraform preview box over a rectangle, filling from the area's
@@ -1335,12 +1350,12 @@ export class Renderer {
     return (cx >= 0 && cz >= 0 && cx < W && cz < H && this.map.terraMask[cz * W + cx]) ? 1 : 0;
   }
 
-  // re-read the heightfield into the terrain mesh after terraforming edits it
+  // re-read the heightfield into the terrain mesh after terraforming edits it.
+  // The ground COLOUR is baked once (bakeGround), so only the heightfield/normals
+  // are refreshed here — reshaped ground keeps its original ground colour.
   refreshTerrain() {
     const geo = this.terrain.geometry;
     const pos = geo.getAttribute('position') as THREE.BufferAttribute;
-    const splat = geo.getAttribute('splat') as THREE.BufferAttribute;
-    const terra = geo.getAttribute('terra') as THREE.BufferAttribute;
     // only recompute the terraformed region (with a margin for slope/normals) —
     // rebuilding every vertex each frame is what made bulldozing lag
     const m = this.map as any;
@@ -1351,21 +1366,9 @@ export class Renderer {
     for (let i = 0; i < pos.count; i++) {
       const x = pos.getX(i), z = pos.getZ(i);
       if (x < minX || x > maxX || z < minZ || z > maxZ) continue;
-      const h = this.map.heightAt(x, z);
-      pos.setY(i, h);
-      terra.setX(i, this.terraAt(x, z));
-      const e = 0.5;
-      const gx = this.map.heightAt(x + e, z) - this.map.heightAt(x - e, z);
-      const gz = this.map.heightAt(x, z + e) - this.map.heightAt(x, z - e);
-      const slope = Math.hypot(gx, gz);
-      const sand = 1 - sstep(SEA + 0.12, SEA + 0.55, h);
-      const rock = Math.min(1, sstep(0.85, 1.5, slope) + sstep(6.6, 7.8, h));
-      const dirt = sstep(0.56, 0.70, fbm(12345, x * 0.09, z * 0.09)) * 0.85 * (1 - sand) * (1 - rock);
-      const grass = Math.max(0, 1 - sand - rock - dirt);
-      const sum = sand + rock + dirt + grass || 1;
-      splat.setXYZW(i, grass / sum, rock / sum, sand / sum, dirt / sum);
+      pos.setY(i, this.map.heightAt(x, z));
     }
-    pos.needsUpdate = true; splat.needsUpdate = true; terra.needsUpdate = true;
+    pos.needsUpdate = true;
     if (this.fogGeo) this.drapeFog(this.fogGeo); // keep the fog hugging the reshaped ground
     geo.computeVertexNormals();
   }
