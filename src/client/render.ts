@@ -145,6 +145,11 @@ function groundTexture(kind: string, maxAniso: number): THREE.CanvasTexture {
   const tex = new THREE.CanvasTexture(cv);
   tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
   tex.anisotropy = maxAniso;
+  // No mipmaps: the terrain shader samples at LARGE tiled UVs (worldXZ*0.42), and
+  // computing the mip LOD from those big-derivative coords silently returns black
+  // on some mobile/Adreno D3D11 drivers. Plain bilinear samples fine at any UV.
+  tex.generateMipmaps = false;
+  tex.minFilter = THREE.LinearFilter;
   return tex;
 }
 
@@ -1276,7 +1281,7 @@ export class Renderer {
           vec3 tex = mix(g, d, clamp(vSplat.w, 0.0, 1.0));
           vec3 concrete = vec3(0.56, 0.56, 0.54) * (0.82 + 0.32 * d.g);
           tex = mix(tex, concrete, clamp(vTerra, 0.0, 1.0));
-          diffuseColor.rgb *= pow(tex, vec3(2.2));
+          diffuseColor.rgb *= tex * tex; // ~gamma 2.0 (avoids pow(); some D3D11 translators choke on it)
         `;
       const full = `
           // ONE texture fetch per ground layer (was ~10 fetches/pixel with two
@@ -1290,10 +1295,10 @@ export class Renderer {
           // terraformed/paved ground reads as concrete; grain reuses the dirt fetch
           vec3 concrete = vec3(0.56, 0.56, 0.54) * (0.82 + 0.32 * d.g);
           tex = mix(tex, concrete, clamp(vTerra, 0.0, 1.0));
-          diffuseColor.rgb *= pow(tex, vec3(2.2));
+          diffuseColor.rgb *= tex * tex; // ~gamma 2.0 (avoids pow(); some D3D11 translators choke on it)
         `;
       shader.fragmentShader = shader.fragmentShader
-        .replace('#include <common>', '#include <common>\nuniform sampler2D tGrass, tRock, tSand, tDirt;\nvarying vec4 vSplat;\nvarying float vTerra;\nvarying vec3 vPosW;')
+        .replace('#include <common>', '#include <common>\nuniform sampler2D tGrass;\nuniform sampler2D tRock;\nuniform sampler2D tSand;\nuniform sampler2D tDirt;\nvarying vec4 vSplat;\nvarying float vTerra;\nvarying vec3 vPosW;')
         .replace('#include <map_fragment>', flatPath ? cheap : full);
     };
     const mesh = new THREE.Mesh(geo, mat);
@@ -1364,6 +1369,8 @@ export class Renderer {
       loader.load('./textures/' + name + '.jpg', t => {
         t.wrapS = t.wrapT = THREE.RepeatWrapping;
         t.anisotropy = maxAniso;
+        t.generateMipmaps = false;        // see groundTexture(): large tiled UVs + mip LOD = black on Adreno
+        t.minFilter = THREE.LinearFilter;
         this.extTex[name] = t;
         if (this.terrainShader) {
           const key = 't' + name[0].toUpperCase() + name.slice(1);
