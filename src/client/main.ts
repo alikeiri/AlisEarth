@@ -1540,14 +1540,14 @@ class GameClient {
     const nat = this.natMask; nat.fill(0);
     for (let i = 0; i < f.length; i++) if (f[i] === 2) f[i] = 1;
     const players = this.game.players?.() || [];
-    const powered = (owner: number) => { const p = players[owner]; return !p || (p.pm ?? 1) >= (p.pu ?? 0); };
     for (const v of allViews) {
       if (!this.allies.has(v.o)) continue; // my team (incl. allies) grants vision
       const def = (UNITS as any)[v.t] || (BUILDINGS as any)[v.t];
       let sight = v.b ? 7 : Math.max(5, (def?.range || 4) + 3);
       // the Radar Dome's wide sweep is long-range INTEL (jammable by a TEWS); a
       // unit's own eyes and a deployed Patriot are NATURAL sight (never jammed).
-      const radar = !!(v.b && def?.sight) && !(powered(v.o) === false || (v.pr ?? 1) < 1);
+      // a power-shed (v.po) or still-building (pr<1) dome grants no radar vision.
+      const radar = !!(v.b && def?.sight) && !v.po && (v.pr ?? 1) >= 1;
       if (radar) sight = def.sight * (1 + 0.25 * ((v.lv || 1) - 1)); // +25% coverage per upgrade level
       if (!v.b && v.t === 'patriot' && v.fo) sight = 20; // fortified Patriot: bigger deployed radar
       const cx = Math.floor(v.x), cz = Math.floor(v.z), r = Math.ceil(sight);

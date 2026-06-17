@@ -494,11 +494,14 @@ export class UI {
     const secs = Math.floor(tickN / 10);
     document.getElementById('gameClock')!.textContent =
       `${String(Math.floor(secs / 60)).padStart(2, '0')}:${String(secs % 60).padStart(2, '0')}`;
+    // power is a stored battery now: the bar fills with stored power out of the max
+    // storage; the max is shown as the value to the right. Amber while draining
+    // (draw exceeds generation), red when the store is empty.
     const bar = document.getElementById('powerbar')! as HTMLElement;
-    const ratio = pl.pm > 0 ? pl.pu / pl.pm : 1;
-    bar.style.width = Math.min(100, ratio * 100) + '%';
-    bar.style.background = ratio > 1 ? 'var(--bad)' : ratio > 0.8 ? 'var(--accent)' : 'var(--good)';
-    document.getElementById('powerTxt')!.textContent = `${pl.pu}/${pl.pm}`;
+    const stored = (pl as any).pwr ?? 0, max = (pl as any).pmax ?? 0;
+    bar.style.width = (max > 0 ? Math.min(100, (stored / max) * 100) : 0) + '%';
+    bar.style.background = stored <= 0 ? 'var(--bad)' : pl.pu > pl.pm ? 'var(--accent)' : 'var(--good)';
+    document.getElementById('powerTxt')!.textContent = `${stored} / ${max}`;
 
     // my completed buildings by type + unit queue info + airfield capacity
     const myDone: Record<string, number> = {};

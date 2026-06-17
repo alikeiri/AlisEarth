@@ -28,6 +28,7 @@ export interface Entity {
   lastHitBy: number; lastHitT: number; reactCd: number; // return-fire / flee reactions
   fortified: boolean; emitCd: number; ephLife: number; // drone hive + ephemeral units
   fortT: number; fortGoal: boolean; // fortify deploy/pack transition (vulnerable while changing)
+  pOff?: boolean;                   // auto-shed this tick: not enough stored power to run it
   aimX?: number; aimZ?: number; // last firing target — renderer turns the unit toward it
   hx?: number; hz?: number; // last travel heading (unit vector) — facing follows this, NOT raw
                             // position deltas, so collision shoves don't spin clustered units
@@ -72,6 +73,7 @@ export interface PlayerState {
   left?: boolean;                          // departed via "Just Exit" — not a defeat
   passive?: boolean;                       // tutorial target: AI does nothing
   powerMade: number; powerUsed: number; pf: number;
+  power: number; powerMax: number;         // stored power (battery) + capacity (500 per power plant)
   bonusCost: number; bonusIncome: number; // brutal-AI handicaps
   godmode?: boolean;                       // cheat: instant builds (taints the game)
   tech: Record<string, boolean>;          // researched technologies
@@ -80,6 +82,18 @@ export interface PlayerState {
 }
 
 export type Cmd = any;
+
+// power-shed priority: higher keeps power longer when the battery runs dry.
+// Defenses fire to the last; the economy and production outrank labs/silos.
+function powerPrio(type: string): number {
+  const d = BUILDINGS[type];
+  if (d?.attack || d?.intercept) return 100;   // turrets, SAM, tesla, iron dome
+  if (type === 'refinery') return 90;
+  if (type === 'radar') return 85;
+  if (type === 'barracks' || type === 'factory' || type === 'dronefac' || type === 'shipyard' || type === 'airforce') return 70;
+  if (type === 'lab' || type === 'silo') return 50;
+  return 60;
+}
 
 const FORT_TIME = 2.0;      // seconds to dig in or pack up (vulnerable meanwhile)
 const FORT_ATK_MUL = 1.5;   // fortified infantry hit harder
@@ -165,7 +179,7 @@ export class Sim {
       this.players.push({
         name: s.name, faction: fac.id, fac, isAI: !!s.isAI, aiLvl: lvl,
         team: s.team ?? i, // default: everyone on their own team (free-for-all)
-        credits: START_CREDITS, alive: true, powerMade: 0, powerUsed: 0, pf: 1,
+        credits: START_CREDITS, alive: true, powerMade: 0, powerUsed: 0, pf: 1, power: 200, powerMax: 200,
         // Brutal gets a leg up; Easy gets a handicap (pricier builds, less income)
         bonusCost: s.isAI ? (lvl >= 3 ? 0.85 : lvl === 0 ? 1.25 : 1) : 1,
         bonusIncome: s.isAI ? (lvl >= 3 ? 1.3 : lvl === 0 ? 0.8 : 1) : 1,
@@ -183,7 +197,7 @@ export class Sim {
       this.neutralP = this.players.length;
       this.players.push({
         name: 'Neutral', faction: FACTIONS.usa.id, fac: FACTIONS.usa, isAI: false, aiLvl: 0,
-        team: -99, credits: 0, alive: true, neutral: true, powerMade: 0, powerUsed: 0, pf: 1,
+        team: -99, credits: 0, alive: true, neutral: true, powerMade: 0, powerUsed: 0, pf: 1, power: 0, powerMax: 0,
         bonusCost: 1, bonusIncome: 1, tech: {}, spawn: { x: 0, z: 0 },
       });
       this.aiMem.push(null);
@@ -921,23 +935,41 @@ export class Sim {
       for (const bl of due) this.missileBlast(bl);
     }
 
-    // power factors
+    // POWER as a stored resource (battery). Plants GENERATE power each tick and add
+    // 500 storage each; consumers DRAW continuously. Each tick the store integrates
+    // (generation - draw), clamped to [0, max] (full = overflow, excess lost). A
+    // building runs only if it fits the tick's budget = generation + whatever can be
+    // pulled from the store; when the store empties the lowest-priority consumers are
+    // shed (deactivated) down to what generation alone sustains, and switch back on
+    // automatically once there's power again (defenses keep power longest).
     const labs = new Array(this.players.length).fill(0);
-    for (const pl of this.players) { pl.powerMade = 10; pl.powerUsed = 0; }
+    const cons: Entity[][] = this.players.map(() => []);
+    for (const pl of this.players) { pl.powerMade = 10; pl.powerUsed = 0; pl.powerMax = 200; }
     for (const e of this.ents.values()) {
       if (!e.b || e.progress < e.total) continue;
       const pw = BUILDINGS[e.type].power;
       const pl = this.players[e.owner];
-      if (pw > 0) pl.powerMade += pw * pl.fac.powerMul * (1 + 0.5 * (e.lvl - 1));
-      else pl.powerUsed -= pw;
       if (e.type === 'lab') labs[e.owner]++;
+      if (pw > 0) { pl.powerMade += pw * pl.fac.powerMul * (1 + 0.5 * (e.lvl - 1)); pl.powerMax += 500; }
+      else if (pw < 0) cons[e.owner].push(e);
     }
     for (let i = 0; i < this.players.length; i++) {
       const pl = this.players[i];
-      pl.pf = pl.powerMade >= pl.powerUsed ? 1 : Math.max(0.4, pl.powerMade / Math.max(1, pl.powerUsed));
-      // Spy Satellite only stays online while powered AND a research lab survives;
-      // lose either and the map goes dark again (but it stays researched)
-      pl.satOk = !!pl.tech.satellite && pl.powerMade >= pl.powerUsed && labs[i] > 0;
+      // this tick we can spend generation plus a drawdown of the stored battery
+      const budget = pl.powerMade + pl.power / TICK;
+      // most-important first (defenses last to lose power); deterministic id tie-break
+      cons[i].sort((a, b) => (powerPrio(b.type) - powerPrio(a.type)) || (a.id - b.id));
+      let onDraw = 0;
+      for (const e of cons[i]) {
+        const d = -BUILDINGS[e.type].power;
+        if (onDraw + d <= budget + 1e-6) { e.pOff = false; onDraw += d; }
+        else e.pOff = true;
+      }
+      pl.powerUsed = onDraw;
+      pl.power = Math.max(0, Math.min(pl.powerMax, pl.power + (pl.powerMade - onDraw) * TICK));
+      pl.pf = 1; // no brownout slowdown: under-power sheds whole buildings instead
+      // Spy Satellite only stays online while powered AND a research lab survives
+      pl.satOk = !!pl.tech.satellite && labs[i] > 0 && (pl.power > 0 || pl.powerMade >= pl.powerUsed);
     }
 
     this.rebuildGrid();
@@ -1298,6 +1330,10 @@ export class Sim {
       }
       return;
     }
+
+    // power-shed: an under-powered building is deactivated — it produces nothing,
+    // can't fire, runs no research and grants no radar vision until power returns
+    if (b.pOff) return;
 
     // Oil Rig: steady passive income while it stands (faction/difficulty scaled,
     // like harvester deliveries). It does nothing else, so we're done here.
@@ -2593,6 +2629,7 @@ export class Sim {
       };
       if (e.b) {
         v.cx = e.cx; v.cz = e.cz; v.sz = e.size; v.lv = e.lvl;
+        if (e.pOff) v.po = 1; // power-shed: deactivated this tick (no fire/produce/vision)
         v.qn = e.queue.length;
         if (e.queue.length) {
           v.qt = 1 - e.queue[0].t / e.queue[0].t0;
@@ -2644,6 +2681,7 @@ export class Sim {
       e: ents,
       p: this.players.map(pl => ({
         c: Math.round(pl.credits), a: pl.alive, pm: Math.round(pl.powerMade), pu: Math.round(pl.powerUsed),
+        pwr: Math.round(pl.power), pmax: Math.round(pl.powerMax), // stored battery + capacity
         n: pl.name, f: pl.faction, tm: pl.team, ai: pl.isAI, tech: Object.keys(pl.tech).filter(k => pl.tech[k]),
         god: pl.godmode ? 1 : 0, // cheat: client unlocks every unit in the build menu
       })),
