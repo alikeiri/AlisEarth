@@ -2401,9 +2401,10 @@ export class Renderer {
         this.dummy.updateMatrix();
         this.sandbagMesh.setMatrixAt(bagN++, this.dummy.matrix);
       }
-      // deployed radar dish on a fortified Patriot
+      // deployed radar dish on a fortified Patriot — set on the ground BEHIND the
+      // launcher (opposite its facing), not floating on top of it
       if (v.t === 'patriot' && (v.fo || v.ft) && dishN < MAX_INST) {
-        this.dummy.position.set(v.x, gy + 0.5, v.z);
+        this.dummy.position.set(v.x - Math.sin(f.a) * 1.7, gy + 0.05, v.z - Math.cos(f.a) * 1.7);
         const s = v.ft ? 0.6 : 1; // rising into place while deploying
         this.dummy.rotation.set(0, this.time * 0.9 + v.i, 0); // slow radar sweep
         this.dummy.scale.set(s, s, s);
