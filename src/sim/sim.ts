@@ -1094,6 +1094,8 @@ export class Sim {
   //  - a submarine itself can only hit ships (torpedoes) and buildings (cruise
   //    missiles) — never land units or aircraft
   canHarm(att: Entity, tgt: Entity): boolean {
+    // dedicated SAM (Patriot): only ever engages aircraft — never ground or buildings
+    if (!att.b && UNITS[att.type]?.aaOnly) return !tgt.b && UNITS[tgt.type]?.kind === 'air';
     if (!tgt.b && UNITS[tgt.type]?.cloak && UNITS[tgt.type]?.move === 'sea')
       return !att.b && !!UNITS[att.type]?.sonar;
     if (!att.b && UNITS[att.type]?.cloak && UNITS[att.type]?.move === 'sea')
@@ -1148,11 +1150,13 @@ export class Sim {
       const score = (dangerous ? 1000 : 0) - d; // dangerous first, then closest
       if (score > bestScore) { bestScore = score; best = u; }
     };
+    const aaOnly = !e.b && !!attDef?.aaOnly;        // dedicated SAM: aircraft only
     for (const u of this.nearbyUnits(e.x, e.z, range + 1)) {
       if (!this.foe(u.owner, e.owner) || u.hp <= 0 || !this.players[u.owner].alive) continue;
       const d = this.distToEnt(e.x, e.z, u);
       const tdef = UNITS[u.type];
       if (tdef?.mine) continue;                     // buried proximity mines aren't visible targets
+      if (aaOnly && tdef?.kind !== 'air') continue; // SAM ignores ground/naval units
       if (subAtt && tdef?.kind !== 'sea') continue; // subs only torpedo other ships
       const cloaked = tdef?.cloak || (tdef?.stealthTech && this.players[u.owner]?.tech?.stealth);
       if (cloaked) {
@@ -1170,7 +1174,7 @@ export class Sim {
     // buildings (few — linear scan). Walls and tank barriers are inert obstacles,
     // never auto-targeted: ground units route around them, air flies over.
     // submarines never AUTO-target buildings (only on an explicit player order).
-    if (!subAtt) for (const u of this.ents.values()) {
+    if (!subAtt && !aaOnly) for (const u of this.ents.values()) {
       if (!u.b || !this.foe(u.owner, e.owner) || u.hp <= 0 || !this.players[u.owner].alive) continue;
       if (u.type === 'wall' || u.type === 'barrier') continue;
       const d = this.distToEnt(e.x, e.z, u);

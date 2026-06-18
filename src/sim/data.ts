@@ -61,6 +61,7 @@ export interface UnitDef {
   demoCharge?: number;                           // commando: flat damage dealt when planting explosives on a building
   faction?: string;                              // faction-exclusive signature unit (only that faction can build it)
   volley?: number;                               // one build order produces this many units at once (Shahed swarm)
+  aaOnly?: boolean;                              // dedicated SAM: only ever targets aircraft (ignores ground & buildings)
 }
 
 export const UNITS: Record<string, UnitDef> = {
@@ -102,7 +103,7 @@ export const UNITS: Record<string, UnitDef> = {
   aatank: { name: 'AA Vehicle',   cost: 950,  hp: 280, speed: 3.0, range: 8.0, dmg: 42, rof: 1.6, builtAt: 'factory',  buildTime: 11, kind: 'veh' },
   flak:   { name: 'Flak Gun',     cost: 650,  hp: 240, speed: 2.6, range: 6.5, dmg: 16, rof: 0.45, builtAt: 'factory', buildTime: 9,  kind: 'veh' },
   engineer: { name: 'Engineer',   cost: 600,  hp: 200, speed: 2.2, range: 0,   dmg: 0,  rof: 1,   builtAt: 'factory',  buildTime: 10, kind: 'veh', repair: true, road: true, lays: 'mine', mines: 4 },
-  patriot:  { name: 'Patriot SAM', cost: 1100, hp: 200, speed: 2.4, range: 0,  dmg: 0,  rof: 1,   builtAt: 'factory',  buildTime: 12, kind: 'veh', intercept: { range: 11, cd: 4 }, fortify: true, sight: 14 }, // mobile radar picket: reveals fog
+  patriot:  { name: 'Patriot SAM', cost: 1100, hp: 200, speed: 2.4, range: 11, dmg: 60, rof: 2.8, builtAt: 'factory',  buildTime: 12, kind: 'veh', intercept: { range: 11, cd: 4 }, fortify: true, sight: 14, aaOnly: true }, // long-range SAM: only engages aircraft + intercepts silo missiles; mobile radar picket
   mine:     { name: 'Land Mine',  cost: 0,    hp: 1,   speed: 0,   range: 0,   dmg: 150, rof: 1,  builtAt: '',         buildTime: 0,  kind: 'veh', internal: true, mine: true, trigger: 1.5, blastR: 2.4 },
   // Construction Vehicle: slow, defenceless; press F to deploy it into a forward
   // construction yard (enables building structures around the new spot)
@@ -320,6 +321,7 @@ export function dmgMul(attType: string, tgtIsBuilding: boolean, tgtKind: string,
     // air superiority: fighters murder drones AND bombers (their whole job)
     if (attType === 'fighter') return tgtType && (tgtType === 'bomber' || tgtType === 'dbomber') ? 3.2 : 2.8;
     if (attType === 'sam') return 2.2;
+    if (attType === 'patriot') return tgtType && (tgtType === 'bomber' || tgtType === 'dbomber') ? 3.4 : 2.7; // long-range SAM: shreds aircraft & big drones
     if (attType === 'aatank') return 2.3;        // dedicated mobile AA
     if (attType === 'flak') return tgtType && DRONE_TYPES.has(tgtType) ? 2.4 : 0.5; // drone shredder
     if (attType === 'rocket') return 1.8;
@@ -400,6 +402,7 @@ export function dmgMul(attType: string, tgtIsBuilding: boolean, tgtKind: string,
   if (attType === 'rifle')  return tgtIsBuilding ? 0.35 : (tgtKind === 'veh' ? 0.35 : 1.35);
   if (attType === 'ifv')    return tgtIsBuilding ? 0.5 : (tgtKind === 'inf' ? 2.2 : 0.5);
   if (attType === 'aatank') return 0.25; // AA missiles are wasted on ground targets
+  if (attType === 'patriot') return 0.2; // dedicated SAM — barely scratches ground
   if (attType === 'flak')   return tgtIsBuilding ? 0.3 : (tgtKind === 'inf' ? 0.9 : 0.4);
   // suicide truck fireball: incinerates infantry; the burn DoT handles buildings
   if (attType === 'fueltruck') return tgtIsBuilding ? 0.8 : (tgtKind === 'inf' ? 2.2 : 0.7);

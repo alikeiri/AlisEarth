@@ -81,7 +81,7 @@ const TIP_NOTES: Record<string, string> = {
   cannon: 'Heavy Cannon: long-range, hard-hitting anti-armor emplacement. Outranges most attackers; cannot hit aircraft.',
   tesla: 'Tesla Coil: high-damage bolt that briefly EMP-freezes the unit it hits. Power-hungry; needs a Research Lab.',
   irondome: 'Iron Dome: shoots down incoming silo missiles aimed inside its shield. One kill per reload — a heavy salvo can still overwhelm a single dome. Needs a Radar Dome.',
-  patriot: 'Patriot SAM: mobile missile interceptor. Park it over what you want protected — it downs incoming silo missiles. No offensive weapon. Fortify (F) to dig in and deploy its own radar: wide vision + early-warning detection of incoming enemies.',
+  patriot: 'Patriot SAM: long-range air defence — shreds fighters, bombers and large drones, AND intercepts incoming silo missiles. Weak vs ground. Fortify (F) to dig in and deploy its own radar: wide vision + early-warning detection of incoming enemies.',
   engineer: 'Repairs units, builds roads, and lays proximity mines (press F to lay one from its stock of 4). Right-click an oil well to build an Oil Rig there (consumes the engineer) for steady passive income.',
   destroyer: 'Armored gun ship: duels other warships and bombards the coast. Its sonar also detects and depth-charges submarines.',
   sub: 'Submarine: cloaked until a sonar ship (Destroyer / Sub Hunter) pings it or you get very close. Devastating ambush torpedoes, but a thin hull.',

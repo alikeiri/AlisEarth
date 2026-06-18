@@ -21,7 +21,7 @@ const MODEL_DEFS: Record<string, { file: string; size: number; axis: 'l' | 'h'; 
   heavy:     { file: 'heavy',     size: 1.85, axis: 'l', ry: 0 },
   ifv:       { file: 'ifv',       size: 1.55, axis: 'l', ry: 0 }, // M2 Bradley (Sketchfab, CC-BY)
   aatank:    { file: 'mlrs',      size: 1.40, axis: 'l', ry: 0, tint: 0x7c93b5 }, // blue-gray missile carrier
-  patriot:   { file: 'mlrs',      size: 1.45, axis: 'l', ry: 0, tint: 0x5f7d5a }, // olive interceptor battery
+  patriot:   { file: 'patriot',   size: 1.6,  axis: 'l', ry: 0 }, // MIM-104 Patriot launcher (Sketchfab, CC-BY)
   mine:      { file: 'drone',     size: 0.42, axis: 'l', ry: 0, tint: 0x33352f }, // small dark buried charge
   fueltruck: { file: 'harv',      size: 1.50, axis: 'l', ry: Math.PI, tint: 0xc0392b }, // red bomb truck (harv flip)
   flak:      { file: 'engineer',  size: 1.30, axis: 'l', ry: Math.PI, tint: 0x848e97 }, // gun truck (same flip as the pickup)
@@ -1081,7 +1081,7 @@ export class Renderer {
     this.scene.add(this.oilMesh);
     this.loadOilModel();
     this.loadFactoryModel();
-    this.loadBuildingModel('refinery', 'refinery', 3.875); // Ore Refinery GLB (Sketchfab, CC-BY) — 25% larger
+    this.loadBuildingModel('refinery', 'refinery', 4.65); // Ore Refinery GLB (Sketchfab, CC-BY) — 50% larger than original
     this.loadBuildingModel('airfield', 'airfield', 3.15);  // Airfield GLB (C&C-style building, Sketchfab, CC-BY) — 50% larger
 
     // unit instancing: procedural models first, external GLBs swap in async
