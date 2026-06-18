@@ -100,6 +100,7 @@ function simViews(sim: Sim, a: number): any[] {
       if (e.holdFire) v.hf = 1;
       if (e.orders[0]?.k === 'patrol') v.pa = 1;
       if (e.orders[0]?.k === 'harvest') v.hv = 1; // actively on a gather/deliver run
+      if (e.terraPath && e.terraPath.length) v.tf = 1; // bulldozer mid-terraform: ride the real ground, never float
       if (e.cargoUnits && e.cargoUnits.length) v.cu = e.cargoUnits.length; // transport: units aboard
       { const cap = UNITS[e.type]?.cargo; if (cap) v.cg = Math.max(0, Math.min(1, e.cargo / cap)); } // harvester/oil-miner fill %
       if (e.wpLoop && e.wpLoop.length) v.lp = 1;                          // waypoint repeat on
@@ -2023,7 +2024,12 @@ class GameClient {
       const g = this.renderer.groundPoint(this.mouse.x / window.innerWidth, this.mouse.y / window.innerHeight);
       if (g) { this.terraRect.x1 = g.x; this.terraRect.z1 = g.z; }
       const r = this.terraRect;
-      this.renderer.setTerraPreview({ x0: r.x0, z0: r.z0, x1: r.x1, z1: r.z1, h: this.game.map.heightAt((r.x0 + r.x1) / 2, (r.z0 + r.z1) / 2), base: this.game.map.heightAt((r.x0 + r.x1) / 2, (r.z0 + r.z1) / 2) - 0.1 });
+      // anchor the rectangle preview to the BULLDOZER'S ground height, so the
+      // selection slab sits level with the dozer instead of floating at the area's
+      // own (possibly very different) terrain height
+      const dz = this.myUnitIds().map(id => this.byId.get(id)).find(v => v && UNITS[v.t]?.terra);
+      const dh = dz ? this.game.map.heightAt(dz.x, dz.z) : this.game.map.heightAt((r.x0 + r.x1) / 2, (r.z0 + r.z1) / 2);
+      this.renderer.setTerraPreview({ x0: r.x0, z0: r.z0, x1: r.x1, z1: r.z1, h: dh, base: dh - 0.1 });
       if (terraHint) { terraHint.textContent = 'TERRAFORM — drag the area, release to set its height'; terraHint.classList.remove('hidden'); }
     } else if (this.terraMode === 'height' && this.terraRect) {
       // moving the mouse UP raises the target, DOWN lowers it

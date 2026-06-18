@@ -1522,6 +1522,21 @@ export class Sim {
     const def = UNITS[u.type];
     u.cd -= TICK;
 
+    // naval self-rescue: a ship that ends up on a non-water cell (shoved into the
+    // coast, or spawned at a tight shore) can't path out under sea rules — ease it
+    // straight back to the nearest open water before doing anything else
+    if (def.move === 'sea' && !this.map.passableSea(Math.floor(u.x), Math.floor(u.z))) {
+      const sea = nearestSea(this.map, Math.floor(u.x), Math.floor(u.z), 14);
+      if (sea) {
+        const tx = sea.x + 0.5, tz = sea.z + 0.5;
+        const dx = tx - u.x, dz = tz - u.z, d = hyp(dx, dz) || 1;
+        const step = Math.min(d, def.speed * TICK);
+        u.x += (dx / d) * step; u.z += (dz / d) * step;
+        u.hx = dx / d; u.hz = dz / d; u.mvi = this.tickN; u.path = null;
+      }
+      return; // skip the rest of the tick while un-beaching
+    }
+
     // TEWS area EMP: a periodic pulse that ONLY damages enemy drones in range
     // (and briefly stuns survivors). Harmless to infantry/vehicles/aircraft/ships.
     if (def.droneEmp && u.cd <= 0) {
@@ -2077,7 +2092,9 @@ export class Sim {
         // immediately so commands stay responsive)
         if (u.repath <= 0 || (!u.path && (u.pathFail || 0) === 0)) {
           u.path = def.fly ? [{ x: tgt.x, z: tgt.z }]
-            : findPath(this.map, u.x, u.z, tgt.x, tgt.z, 4500, def.move === 'sea');
+            // ships get a far larger A* budget: open water means routing AROUND a
+            // big island can expand a lot of nodes before the way around is found
+            : findPath(this.map, u.x, u.z, tgt.x, tgt.z, def.move === 'sea' ? 16000 : 4500, def.move === 'sea');
           u.pi = 0; u.repath = 12;
           // can't reach the target. If a wall/barrier is blocking the way, BREACH
           // it (attack the nearest one toward the target) instead of giving up;
@@ -2452,7 +2469,7 @@ export class Sim {
     if (!u.path || u.pi >= u.path.length) {
       const end = u.path?.[u.path.length - 1];
       if (!end || (end.x - x) * (end.x - x) + (end.z - z) * (end.z - z) > 1) {
-        u.path = findPath(this.map, u.x, u.z, x, z, 9000, sea, amphi, crawl);
+        u.path = findPath(this.map, u.x, u.z, x, z, sea ? 16000 : 9000, sea, amphi, crawl);
         u.pi = 0;
         if (!u.path) return true; // unreachable — give up
       } else if (u.pi >= u.path.length) return true;
@@ -2496,6 +2513,17 @@ export class Sim {
     return false;
   }
 
+  // which cell-passability test applies to this unit's movement domain — so a
+  // separation shove respects where the unit can actually be (a ship is never
+  // pushed onto land, a land unit never onto water)
+  private passDomain(u: Entity, cx: number, cz: number): boolean {
+    const def = UNITS[u.type];
+    if (def.terra) return this.map.passableCrawler(cx, cz);
+    if (def.amphibious) return this.map.passableAmphi(cx, cz);
+    if (def.move === 'sea') return this.map.passableSea(cx, cz);
+    return this.map.passable(cx, cz);
+  }
+
   private separation() {
     for (const e of this.ents.values()) {
       if (e.b) continue;
@@ -2510,8 +2538,10 @@ export class Sim {
         if (d < 0.01) { dx = ((e.id % 7) - 3) * 0.01 || 0.01; dz = 0.01; d = Math.sqrt(dx * dx + dz * dz); }
         const push = (0.7 - d) * 0.25;
         const px = (dx / d) * push, pz = (dz / d) * push;
-        if (this.map.passable(Math.floor(e.x + px), Math.floor(e.z + pz))) { e.x += px; e.z += pz; }
-        if (this.map.passable(Math.floor(o.x - px), Math.floor(o.z - pz))) { o.x -= px; o.z -= pz; }
+        // shove each unit only onto a cell IT can occupy — a ship pushed toward the
+        // shore stays on the water instead of beaching itself and getting stuck
+        if (this.passDomain(e, Math.floor(e.x + px), Math.floor(e.z + pz))) { e.x += px; e.z += pz; }
+        if (this.passDomain(o, Math.floor(o.x - px), Math.floor(o.z - pz))) { o.x -= px; o.z -= pz; }
       }
     }
   }

@@ -2332,8 +2332,10 @@ export class Renderer {
       else if (md?.move === 'sea') {
         y = SEA + (v.t === 'sub' ? -0.08 : 0.02) + Math.sin(this.time * 1.6 + v.i) * 0.03;
         gy = SEA; // selection ring floats on the water
-      } else if (md?.amphibious && gy < SEA + 0.1) {
+      } else if (md?.amphibious && gy < SEA + 0.1 && !v.tf) {
         // amphibious unit out over water — float on the surface like a barge
+        // (but a bulldozer mid-terraform rides the ground it is reshaping, so it
+        //  never appears to hover over the half-raised land)
         y = SEA + 0.05 + Math.sin(this.time * 1.6 + v.i) * 0.03;
         gy = SEA;
       } else y = gy;
