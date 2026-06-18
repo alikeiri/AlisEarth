@@ -870,10 +870,14 @@ interface FxRocket { x0: number; y0: number; z0: number; x1: number; y1: number;
 // quality lever is now SHADOWS (the dominant GPU cost): Low turns them off for
 // max FPS, Medium uses a 1024 shadow map, High a sharper 2048 one. `pr` is capped
 // to the display's devicePixelRatio so a hi-DPI panel isn't wastefully supersampled.
-export const GFX_QUALITY: Record<string, { pr: number; shadows: boolean; shadowSize: number }> = {
-  low:    { pr: 1.0, shadows: false, shadowSize: 1024 }, // crisp, no shadows — max FPS
-  medium: { pr: 1.0, shadows: true,  shadowSize: 1024 }, // crisp + shadows
-  high:   { pr: 1.0, shadows: true,  shadowSize: 2048 }, // crisp + sharper shadows
+// `groundTex` is the target width (texels) of the one-time baked ground colour map
+// across the WHOLE map — higher = crisper ground when zoomed in. It's a one-time
+// bake (no per-frame cost), so only memory + load time scale with it; Low stays
+// modest for old hardware, High goes much sharper.
+export const GFX_QUALITY: Record<string, { pr: number; shadows: boolean; shadowSize: number; groundTex: number }> = {
+  low:    { pr: 1.0, shadows: false, shadowSize: 1024, groundTex: 1024 }, // crisp, no shadows — max FPS
+  medium: { pr: 1.0, shadows: true,  shadowSize: 1024, groundTex: 2048 }, // crisp + shadows
+  high:   { pr: 1.0, shadows: true,  shadowSize: 2048, groundTex: 3072 }, // crisp + sharper shadows + sharp ground
 };
 export function gfxQuality(): string {
   try { return safeLS.getItem('fe_quality') || 'medium'; } catch { return 'medium'; }
@@ -1328,7 +1332,11 @@ export class Renderer {
   // same per-cell splat weights the shader used. Runs once at map load; the result
   // is a normal mipmapped texture the terrain mesh samples by world-uv.
   private bakeGround(): THREE.Texture {
-    const S = Math.max(5, Math.floor(1024 / Math.max(W, H))); // texels per cell (cap ~1024 across — keeps the one-time bake fast)
+    // texels per cell — the bake spans `groundTex` texels across the whole map at
+    // the current quality (Low ~1024, High ~3072). One-time cost, so a higher tier
+    // just buys a crisper ground without any per-frame penalty.
+    const budget = GFX_QUALITY[gfxQuality()]?.groundTex || 1024;
+    const S = Math.max(5, Math.floor(budget / Math.max(W, H)));
     const NW = W * S, NH = H * S;
     // per-cell splat weights (identical formula to the old vertex splat)
     const wt = new Float32Array(W * H * 4);
@@ -1385,7 +1393,9 @@ export class Renderer {
     tex.flipY = false;                       // row py == world z (matches the world-uv we set)
     tex.colorSpace = THREE.SRGBColorSpace;
     tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
-    tex.anisotropy = 4;
+    // anisotropy keeps the (now higher-res) ground sharp at grazing angles — the
+    // exact case where the baked map looked blurry before. Clamped to GPU max.
+    tex.anisotropy = Math.min(8, this.three.capabilities.getMaxAnisotropy());
     return tex;
   }
 
