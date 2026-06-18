@@ -12,6 +12,7 @@ export interface Order {
   pts?: { x: number; z: number }[]; i?: number; dir?: number; loop?: boolean; // patrol route
   ban?: number[]; // harvest: ore cells proven unreachable (don't re-pick them)
   pD?: number; pT?: number; // harvest approach progress watchdog
+  r?: number; // force-fire barrage (Sperrfeuer): shells scatter randomly in this radius around x,z
   keep?: boolean; // attack: a player-issued order — stick to THIS target, no auto-switch
 } // kinds: move attack harvest patrol rtb flee repair road
 
@@ -770,7 +771,9 @@ export class Sim {
       } else if (c.k === 'forcefire') {
         // force-fire at a point or entity, ignoring allegiance (armed units only)
         if (UNITS[u.type].dmg > 0 && (c.tgt != null || c.x != null))
-          ord = { k: 'force', tgt: c.tgt, x: c.x, z: c.z, keep: true };
+          // a radius (Sperrfeuer) only applies to splash units firing at the ground
+          ord = { k: 'force', tgt: c.tgt, x: c.x, z: c.z, keep: true,
+                  r: (c.r && c.tgt == null && UNITS[u.type].splash) ? c.r : undefined };
       }
       if (!ord) return;
       u.cmdT = this.tickN; // explicit order — shield it from auto-reactions
@@ -1883,18 +1886,30 @@ export class Sim {
       if (d <= range) {
         u.path = null;
         if (u.cd <= 0) {
-          // resolve whatever sits at the point (explicit target preferred), any owner
-          let hit: Entity | null = te && te.hp > 0 ? te : null;
-          if (!hit) {
-            let hd = 1.8;
-            for (const o of this.nearbyUnits(px, pz, 2.4)) { if (o.hp <= 0 || o.id === u.id) continue; const dd = hyp(o.x - px, o.z - pz); if (dd < hd) { hd = dd; hit = o; } }
-            for (const o of this.ents.values()) { if (!o.b || o.hp <= 0) continue; const dd = this.distToEnt(px, pz, o); if (dd < hd) { hd = dd; hit = o; } }
-          }
-          if (hit) this.fire(u, hit, def.dmg, def.rof, true); // force = bypass allegiance
-          else { // empty ground: suppressive shot at the spot
-            u.cd = this.nextCd(u, def.rof); u.aimX = px; u.aimZ = pz;
-            const w = u.type === 'sub' ? 7 : UNITS[u.type]?.kind === 'air' ? 3 : 2;
-            this.events.push({ e: 'shot', x: u.x, z: u.z, tx: px, tz: pz, w, f: def.fly ? 1 : undefined });
+          if (ord.r && ord.r > 0 && def.splash) {
+            // Sperrfeuer barrage: lob each shell to a random point inside the circle
+            // (uniform over the disc), splashing whatever it lands on, friend or foe
+            const ang = this.rng.next() * Math.PI * 2;
+            const rad = Math.sqrt(this.rng.next()) * ord.r;
+            const tx = px + Math.cos(ang) * rad, tz = pz + Math.sin(ang) * rad;
+            u.cd = this.nextCd(u, def.rof); u.aimX = tx; u.aimZ = tz;
+            this.splashHit(u, tx, tz, def.dmg, def.splash, -1, true);
+            const w = UNITS[u.type]?.kind === 'air' ? 3 : 2;
+            this.events.push({ e: 'shot', x: u.x, z: u.z, tx, tz, w, f: def.fly ? 1 : undefined });
+          } else {
+            // resolve whatever sits at the point (explicit target preferred), any owner
+            let hit: Entity | null = te && te.hp > 0 ? te : null;
+            if (!hit) {
+              let hd = 1.8;
+              for (const o of this.nearbyUnits(px, pz, 2.4)) { if (o.hp <= 0 || o.id === u.id) continue; const dd = hyp(o.x - px, o.z - pz); if (dd < hd) { hd = dd; hit = o; } }
+              for (const o of this.ents.values()) { if (!o.b || o.hp <= 0) continue; const dd = this.distToEnt(px, pz, o); if (dd < hd) { hd = dd; hit = o; } }
+            }
+            if (hit) this.fire(u, hit, def.dmg, def.rof, true); // force = bypass allegiance
+            else { // empty ground: suppressive shot at the spot
+              u.cd = this.nextCd(u, def.rof); u.aimX = px; u.aimZ = pz;
+              const w = u.type === 'sub' ? 7 : UNITS[u.type]?.kind === 'air' ? 3 : 2;
+              this.events.push({ e: 'shot', x: u.x, z: u.z, tx: px, tz: pz, w, f: def.fly ? 1 : undefined });
+            }
           }
         }
       } else this.moveToward(u, px, pz, def); // close into weapon range
@@ -2687,6 +2702,8 @@ export class Sim {
           }
           if (wp.length) v.wp = wp;
         }
+        { const fo = e.orders?.find(o => o.k === 'force' && o.tgt == null && o.x != null);
+          if (fo) { v.fax = fo.x; v.faz = fo.z; if (fo.r) v.far = fo.r; } }
         if (e.rzr && e.rzr > 0) { v.rzx = e.rzx; v.rzz = e.rzz; v.rzr = e.rzr; }
         if (e.hzr && e.hzr > 0) { v.hzx = e.hzx; v.hzz = e.hzz; v.hzr = e.hzr; }
         if (e.cd > 0 && UNITS[e.type]?.dmg > 0) {

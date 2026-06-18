@@ -113,6 +113,10 @@ function simViews(sim: Sim, a: number): any[] {
         }
         if (wp.length) v.wp = wp;
       }
+      // standing ground force-fire / barrage target — kept so the marker (and the
+      // barrage circle) stays drawn on the ground while the unit is selected
+      const fo: any = e.orders.find((o: any) => o.k === 'force' && o.tgt == null && o.x != null);
+      if (fo) { v.fax = fo.x; v.faz = fo.z; if (fo.r) v.far = fo.r; }
     }
     out.push(v);
   }
@@ -531,7 +535,7 @@ class GameClient {
     mode: '' as '' | 'pan' | 'box' | 'pinch', sx: 0, sy: 0, downT: 0, moved: false,
     pinchD: 0, pinchA: 0, boxToggle: false, longTimer: 0 as any,
   };
-  private rMode: 'pan' | 'form' | 'aatk' | 'silo' | 'reparea' | 'harvarea' | 'rotate' = 'pan';
+  private rMode: 'pan' | 'form' | 'aatk' | 'silo' | 'reparea' | 'harvarea' | 'rotate' | 'barrage' = 'pan';
   private rotLast = { x: 0, y: 0 }; // last cursor pos while Ctrl+right-dragging to rotate the camera
   private formPath: { x: number; z: number }[] | null = null;
   private areaDrag: { cx: number; cz: number; r: number } | null = null;
@@ -1395,10 +1399,20 @@ class GameClient {
         ? this.pickView(e.clientX, e.clientY, v => !this.allies.has(v.o)) : null;
       const siloSel = (this.selection.size === 1 && !this.myUnitIds().length) ? this.byId.get([...this.selection][0]) : null;
       if (e.ctrlKey) {
-        // Ctrl + right-drag rotates (and tilts) the camera. A Ctrl+right-CLICK
-        // (no drag) still falls through to force-fire via contextCommand on release.
-        this.rMode = 'rotate';
-        this.rotLast = { x: e.clientX, y: e.clientY };
+        // Ctrl + right-drag normally rotates (and tilts) the camera. But when the
+        // selection is purely mortar/artillery (splash units), Ctrl + right-drag
+        // instead draws a Sperrfeuer barrage circle — shells scatter across it.
+        // A Ctrl+right-CLICK (no drag) still force-fires via contextCommand.
+        const sids = this.myUnitIds();
+        const allSplash = sids.length > 0 && sids.every(id => UNITS[this.byId.get(id)?.t]?.splash);
+        if (allSplash) {
+          const g = this.renderer.groundPoint(e.clientX / window.innerWidth, e.clientY / window.innerHeight);
+          this.rMode = 'barrage';
+          this.areaDrag = g ? { cx: g.x, cz: g.z, r: 0 } : null;
+        } else {
+          this.rMode = 'rotate';
+          this.rotLast = { x: e.clientX, y: e.clientY };
+        }
       } else if (enemyUnder) {
         const g = this.renderer.groundPoint(e.clientX / window.innerWidth, e.clientY / window.innerHeight);
         this.rMode = 'aatk';
@@ -1449,6 +1463,20 @@ class GameClient {
         if (ids.length) {
           this.game.issue({
             k: 'aattack', p: this.game.me, ids,
+            x: Math.round(area.cx * 10) / 10, z: Math.round(area.cz * 10) / 10,
+            r: Math.round(area.r * 10) / 10,
+          });
+          audio.play('confirm');
+          audio.ack(this.dominantType(ids), 'attack');
+          this.markCmd(ids, area.cx, area.cz, true);
+        }
+      }
+      else if (this.rMode === 'barrage' && area && area.r >= 1) {
+        // Sperrfeuer: order the selected mortar/artillery to bombard the whole circle
+        const ids = this.myUnitIds().filter(id => UNITS[this.byId.get(id)?.t]?.splash);
+        if (ids.length) {
+          this.game.issue({
+            k: 'forcefire', p: this.game.me, ids,
             x: Math.round(area.cx * 10) / 10, z: Math.round(area.cz * 10) / 10,
             r: Math.round(area.r * 10) / 10,
           });
@@ -2038,8 +2066,8 @@ class GameClient {
           }
         }
         this.renderer.setFormationPath(this.formPath);
-      } else if ((this.rMode === 'aatk' || this.rMode === 'silo' || this.rMode === 'reparea' || this.rMode === 'harvarea') && this.areaDrag) {
-        // attack / strike / repair-zone / harvest-zone circle grows with the drag
+      } else if ((this.rMode === 'aatk' || this.rMode === 'silo' || this.rMode === 'reparea' || this.rMode === 'harvarea' || this.rMode === 'barrage') && this.areaDrag) {
+        // attack / strike / repair-zone / harvest-zone / barrage circle grows with the drag
         const g = this.renderer.groundPoint(this.mouse.x / window.innerWidth, this.mouse.y / window.innerHeight);
         if (g) this.areaDrag.r = Math.min(this.rMode === 'silo' ? 20 : (this.rMode === 'reparea' || this.rMode === 'harvarea') ? 24 : 14, Math.hypot(g.x - this.areaDrag.cx, g.z - this.areaDrag.cz));
       }
@@ -2241,7 +2269,7 @@ class GameClient {
       }
     }
     // live attack/strike-circle while dragging
-    if (this.mouse.rDragging && (this.rMode === 'aatk' || this.rMode === 'silo') && this.areaDrag && this.areaDrag.r > 0.5)
+    if (this.mouse.rDragging && (this.rMode === 'aatk' || this.rMode === 'silo' || this.rMode === 'barrage') && this.areaDrag && this.areaDrag.r > 0.5)
       circles.push({ x: this.areaDrag.cx, z: this.areaDrag.cz, r: this.areaDrag.r, atk: true, fill: true } as any);
     // live engineer repair-zone / harvester work-area circle while dragging (green)
     if (this.mouse.rDragging && (this.rMode === 'reparea' || this.rMode === 'harvarea') && this.areaDrag && this.areaDrag.r > 0.5)
@@ -2255,6 +2283,10 @@ class GameClient {
     // standing missile-strike zones on my silos (red)
     for (const v of views) if (v.kr && v.o === this.game.me)
       circles.push({ x: v.kx, z: v.kz, r: v.kr, atk: true, fill: true } as any);
+    // selected units holding a ground force-fire order: keep the red marker on the
+    // ground (a filled barrage circle if it's a Sperrfeuer area, a small ring if a point)
+    for (const v of views) if (v.fax !== undefined && v.o === this.game.me && this.selection.has(v.i))
+      circles.push({ x: v.fax, z: v.faz, r: v.far || 0.8, atk: true, fill: !!v.far } as any);
     // selected silo: amber preview of the target area under the cursor
     if (siloAiming && !this.mouse.rDragging && this.mouse.x < window.innerWidth - 250) {
       const g = this.renderer.groundPoint(this.mouse.x / window.innerWidth, this.mouse.y / window.innerHeight);
