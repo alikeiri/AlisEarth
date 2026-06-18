@@ -10,6 +10,7 @@ import { UI } from './ui';
 import { twemojify, twemojiParse } from './twemoji';
 import { safeLS } from './store';
 import { Net } from './net';
+import { RtcMesh } from './rtc';
 import { audio } from './audio';
 import { runDeterminismProbe, mathCanary, detMathCanary } from '../sim/determinism';
 import { runNetlessLockstep, LockstepEngine } from '../sim/lockstep';
@@ -424,6 +425,7 @@ class NetLockstepGame implements GameLike {
   private evQ: any[] = [];
   private chatQ: any[] = [];
   private roster: { name: string; isAI: boolean }[] = [];
+  private rtc: RtcMesh | null = null;
 
   constructor(private net: Net, m: any) {
     setMapSize(m.size || 112);
@@ -437,11 +439,27 @@ class NetLockstepGame implements GameLike {
     this.engine = new LockstepEngine(this.sim, this.me, specs.length, { delay: m.delay || 6, redundancy: 16 });
     this.engine.aiFor = (s, p) => aiTick(s as any, p);
     this.engine.localInput = () => { const c = this.pending; this.pending = []; return c; };
-    this.engine.send = msg => this.net.send({ t: 'lsin', frames: msg.frames });
+    // P2P input transport (WebRTC): the human peers in this room. We send input
+    // over a DataChannel when EVERY peer's channel is open, else fall back to the
+    // WS relay below — so a hardened browser or un-traversable NAT never regresses.
+    const aiSet = new Set<number>(m.aiSlots || []);
+    const peerSlots = specs.map((_: any, i: number) => i).filter((i: number) => i !== this.me && !aiSet.has(i) && !specs[i].isAI);
+    if (peerSlots.length) {
+      this.rtc = new RtcMesh(s => this.net.send(s), this.me, peerSlots);
+      this.rtc.onFrame = (player, frames) => this.engine.receive({ player, frames });
+      net.on('rtc', (x: any) => this.rtc?.onSignal(x));
+    }
+    this.engine.send = msg => {
+      // prefer the unreliable DataChannel (no head-of-line blocking) once P2P is up
+      if (this.rtc && this.rtc.allConnected()) this.rtc.send(msg.frames, this.me);
+      else this.net.send({ t: 'lsin', frames: msg.frames }); // TCP relay fallback
+    };
     this.engine.recordHashes = false;                 // no per-tick hashing in real play
     this.engine.onTick = () => { this.evQ.push(...this.sim.events); }; // drain each executed tick's events
     // AI slots are computed locally by EVERY client from tick 0 (deterministic)
     for (const slot of (m.aiSlots || [])) this.engine.dropToAI(slot, 0);
+    // receive on BOTH paths — engine.receive is idempotent, so a frame arriving via
+    // P2P and the WS fallback during a transition is harmless (first value wins)
     net.on('lsin', (x: any) => this.engine.receive({ player: x.player, frames: x.frames }));
     net.on('lsdropvote', (x: any) => this.net.send({ t: 'lslast', player: x.player, tick: this.engine.lastInputTickFor(x.player) }));
     net.on('lsdrop', (x: any) => this.engine.dropToAI(x.player, x.tick));
@@ -478,7 +496,7 @@ class NetLockstepGame implements GameLike {
   players(): any[] { return simPlayers(this.sim); }
   drainEvents() { const e = this.evQ; this.evQ = []; return e; }
   // debug overlay telemetry: socket counters + ping + lockstep-specific health
-  netStats() { return { ...this.net.stats, stalls: this.engine.stalls, tick: this.sim.tickN, delay: this.engine.delay, leads: this.engine.inputLeads(), roster: this.roster }; }
+  netStats() { return { ...this.net.stats, stalls: this.engine.stalls, tick: this.sim.tickN, delay: this.engine.delay, leads: this.engine.inputLeads(), roster: this.roster, rtc: this.rtc ? { n: this.rtc.connectedCount(), of: this.rtc.peerCount() } : null }; }
   status() { return this.sim.done ? { over: true, winner: this.sim.winner } : { over: false, winner: -2 }; }
   sendChat(to: any, msg: string) { this.net.send({ t: 'chat', to, msg }); }
   drainChat() { const q = this.chatQ; this.chatQ = []; return q; }
@@ -487,7 +505,7 @@ class NetLockstepGame implements GameLike {
     this.roster.forEach((p, i) => { if (i !== this.me && !p.isAI) t.push({ v: i, label: '@ ' + p.name }); });
     return t;
   }
-  leave() { this.net.close(); }
+  leave() { this.rtc?.close(); this.net.close(); }
 }
 
 // ---------------- Game client (render + input loop) ----------------
@@ -2465,7 +2483,16 @@ class GameClient {
           + `\n<span style="color:${staleCol}">last snap ${stale.toFixed(0)}ms ago</span>`;
       } else if (ns.stalls !== undefined) {          // lockstep game
         const stCol = ns.stalls > 50 ? '#ffc940' : '#7be08a';
-        s += `\n<span style="color:#7bdcff">lockstep</span>  tick ${ns.tick}  delay ${ns.delay}`
+        // transport: P2P (WebRTC, no head-of-line blocking) once every peer's
+        // DataChannel is open, otherwise the TCP relay fallback
+        let trans = '';
+        if (ns.rtc) {
+          const p2p = ns.rtc.of > 0 && ns.rtc.n >= ns.rtc.of;
+          trans = p2p
+            ? `  <span style="color:#7be08a">P2P ${ns.rtc.n}/${ns.rtc.of}</span>`
+            : `  <span style="color:#ffc940">relay (P2P ${ns.rtc.n}/${ns.rtc.of})</span>`;
+        }
+        s += `\n<span style="color:#7bdcff">lockstep</span>  tick ${ns.tick}  delay ${ns.delay}${trans}`
           + `\n<span style="color:${stCol}">stalls ${ns.stalls}</span>`;
         // per-player input lead: how many ticks ahead each player's input is buffered.
         // The player whose lead sits near 0 is the one starving the lockstep.

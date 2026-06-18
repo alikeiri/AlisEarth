@@ -553,6 +553,12 @@ wss.on('connection', ws => {
       // can show it to others in the lobby / room
       send(ws, { t: 'pong', ts: m.ts });
       if (me && typeof m.rtt === 'number') me.ping = Math.max(0, Math.round(m.rtt));
+      // ping doubles as a liveness signal: a P2P client sends its input over a
+      // DataChannel (not 'lsin'), so the stall watchdog must count pings too or it
+      // would wrongly drop a perfectly healthy peer-to-peer player. (A still-loading
+      // client hasn't pinged in-room yet, so lastLsin stays unset and it's never a
+      // drop candidate until it's actually live.)
+      if (me && me.room && me.room.started && me.room.lockstep) me.lastLsin = Date.now();
       return;
     }
     if (m.t === 'hello') {
@@ -642,6 +648,15 @@ wss.on('connection', ws => {
         me.lastLsin = Date.now();               // liveness: this client is still feeding the lockstep
         const payload = JSON.stringify({ t: 'lsin', player: me.slot, frames: m.frames });
         for (const c of room.clients) if (c !== me && c.ws.readyState === WebSocket.OPEN) c.ws.send(payload);
+      }
+    } else if (m.t === 'rtc') {
+      // WebRTC signaling relay: forward an SDP offer/answer or ICE candidate to the
+      // target slot in this room, tagging it with the sender's slot. The server only
+      // shuttles signaling — the media (lockstep input) flows peer-to-peer.
+      if (room && room.lockstep && me && typeof m.to === 'number') {
+        const dest = room.clients.find(c => c.slot === m.to);
+        if (dest && dest.ws.readyState === WebSocket.OPEN)
+          dest.ws.send(JSON.stringify({ t: 'rtc', from: me.slot, kind: m.kind, data: m.data }));
       }
     } else if (m.t === 'lslast') {
       // LOCKSTEP drop consensus: a client reports the last tick it holds input for
