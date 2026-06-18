@@ -10,6 +10,7 @@ const KIND: Record<string, string> = { inf: 'Infantry', veh: 'Vehicle', air: 'Ai
 function unitDesc(d: any): string {
   const b: string[] = [KIND[d.kind] || ''];
   if (d.dmg > 0) b.push(`dmg ${d.dmg}`, `range ${d.range}`, `rof ${d.rof}s`);
+  if (d.capacity > 1) b.push(`magazine ${d.capacity}, reload ${d.reload || 0}s`);
   if (d.splash) b.push(`splash ${d.splash}`);
   if (d.cargo) b.push('harvester');
   if (d.oilMiner) b.push('oil miner');
@@ -57,12 +58,16 @@ const hpOf = (c: Combatant) => c.def.hp;
 const atkOf = (c: Combatant) => (c.isB ? c.def.attack : c.def); // {dmg,range,rof}
 const kindOf = (c: Combatant) => (c.isB ? 'building' : c.def.kind);
 
+// sustained seconds for one full magazine cycle: cap rounds at rof spacing + reload.
+// Collapses to plain rof for normal weapons (capacity 1 / reload 0).
+const cycleSecs = (at: any) => (at.capacity || 1) * Math.max(0.1, at.rof) + (at.reload || 0);
+
 // effective DPS of attacker `a` against defender `d` (0 if it can't hurt it)
 function dps(a: Combatant, d: Combatant): number {
   const at = atkOf(a); if (!at || !at.dmg) return 0;
   const mul = dmgMul(a.key, d.isB, kindOf(d), d.key);
   if (mul <= 0) return 0;
-  return (at.dmg * mul) / Math.max(0.1, at.rof);
+  return (at.dmg * (at.capacity || 1) * mul) / cycleSecs(at); // sustained over the magazine cycle
 }
 
 // How many of `a` are needed to kill ONE `d`, modelled with the Lanchester square
@@ -106,8 +111,9 @@ function tableRows(items: { key: string; isB: boolean }[], faction: string): str
   }).join('');
 }
 
-// ---- Units table: sortable, with DPS (dmg ÷ rof) and ROF columns ----
-const dpsOf = (d: any) => (d.dmg > 0 && d.rof > 0) ? d.dmg / d.rof : 0;
+// ---- Units table: sortable, with sustained DPS and ROF columns ----
+// sustained DPS accounts for the magazine (burst of `capacity` then `reload`)
+const dpsOf = (d: any) => (d.dmg > 0 && d.rof > 0) ? (d.dmg * (d.capacity || 1)) / cycleSecs(d) : 0;
 type Col = { key: string; label: string; num?: boolean; val: (d: any) => number | string; cell: (d: any) => string };
 const UNIT_COLS: Col[] = [
   { key: 'name',  label: 'Name',    val: d => d.name,        cell: d => `<td class="nm">${d.name}</td>` },

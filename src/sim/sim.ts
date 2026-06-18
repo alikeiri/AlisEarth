@@ -24,6 +24,7 @@ export interface Entity {
   cd: number; mt: number; cargo: number; cargoVal: number; repath: number;
   wx: number; wz: number; stuckT: number; mvi: number; pathFail: number; // stuck/unreachable detection
   ammo: number; // bombers: shots left this sortie (-1 = unlimited)
+  mag?: number; // missile units: rounds left in the current magazine (refills to def.capacity after reload)
   stance: number; // 0 aggressive (default), 1 hold position
   lastHitBy: number; lastHitT: number; reactCd: number; // return-fire / flee reactions
   fortified: boolean; emitCd: number; ephLife: number; // drone hive + ephemeral units
@@ -1230,10 +1231,25 @@ export class Sim {
     this.dmgLog.push({ vOwner: tgt.owner, victim: tgt.id, by: att.id, x: tgt.x, z: tgt.z, b: tgt.b });
   }
 
+  // post-shot cooldown with the magazine model: a missile unit empties `capacity`
+  // rounds at `rof` spacing (a quick burst), then sits on a long `reload` before
+  // the next salvo. Normal weapons (capacity 1 / reload 0) just return `rof`, so
+  // the firing cadence is unchanged for everything else.
+  private nextCd(att: Entity, rof: number): number {
+    const adef = att.b ? null : UNITS[att.type];
+    const cap = adef?.capacity || 1;
+    if (cap <= 1) return rof;
+    if (att.mag == null) att.mag = cap;
+    att.mag--;
+    if (att.mag > 0) return rof;            // rounds left — quick burst spacing
+    att.mag = cap;                          // emptied — refill, but pay the reload first
+    return rof + (adef?.reload || 0);
+  }
+
   private fire(att: Entity, tgt: Entity, dmg: number, rof: number, force = false): boolean {
     if (att.holdFire && !force) return false; // weapons-hold: never fires on its own
     if (att.cd > 0) return false;
-    att.cd = rof;
+    att.cd = this.nextCd(att, rof);
     att.aimX = tgt.x; att.aimZ = tgt.z;
     this.dealDamage(att, tgt, dmg, force);
     const ud = UNITS[att.type];
@@ -1876,7 +1892,7 @@ export class Sim {
           }
           if (hit) this.fire(u, hit, def.dmg, def.rof, true); // force = bypass allegiance
           else { // empty ground: suppressive shot at the spot
-            u.cd = def.rof; u.aimX = px; u.aimZ = pz;
+            u.cd = this.nextCd(u, def.rof); u.aimX = px; u.aimZ = pz;
             const w = u.type === 'sub' ? 7 : UNITS[u.type]?.kind === 'air' ? 3 : 2;
             this.events.push({ e: 'shot', x: u.x, z: u.z, tx: px, tz: pz, w, f: def.fly ? 1 : undefined });
           }
