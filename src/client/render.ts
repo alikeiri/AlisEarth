@@ -19,7 +19,7 @@ const MODEL_DEFS: Record<string, { file: string; size: number; axis: 'l' | 'h'; 
   rocket:    { file: 'rocket',    size: 1.18, axis: 'h', ry: 0, tint: 0x4d5a6b },
   tank:      { file: 'tank',      size: 1.50, axis: 'l', ry: 0 },
   heavy:     { file: 'heavy',     size: 1.85, axis: 'l', ry: 0 },
-  ifv:       { file: 'tank',      size: 1.25, axis: 'l', ry: 0, tint: 0x9aa86a }, // light olive scout chassis
+  ifv:       { file: 'ifv',       size: 1.55, axis: 'l', ry: 0 }, // M2 Bradley (Sketchfab, CC-BY)
   aatank:    { file: 'mlrs',      size: 1.40, axis: 'l', ry: 0, tint: 0x7c93b5 }, // blue-gray missile carrier
   patriot:   { file: 'mlrs',      size: 1.45, axis: 'l', ry: 0, tint: 0x5f7d5a }, // olive interceptor battery
   mine:      { file: 'drone',     size: 0.42, axis: 'l', ry: 0, tint: 0x33352f }, // small dark buried charge

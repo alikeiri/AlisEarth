@@ -24,6 +24,7 @@ CC-BY 3.0 / 4.0 (attribution required — used under these terms):
 - Gunboat / Naval Drone ("Military Boat") — Zsky
 - Destroyer ("low poly battleship") — angelo raffaele Catalano
 - Submarine — Poly by Google
+- IFV ("M2 Bradley IFV") — 42manako (Sketchfab, CC-BY 4.0)
 - Oil Field ("Oil pump") — Poly by Google
 - War Factory ("Factory") — Poly by Google
 
