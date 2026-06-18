@@ -26,7 +26,7 @@ const MODEL_DEFS: Record<string, { file: string; size: number; axis: 'l' | 'h'; 
   fueltruck: { file: 'harv',      size: 1.50, axis: 'l', ry: Math.PI, tint: 0xc0392b }, // red bomb truck (harv flip)
   flak:      { file: 'engineer',  size: 1.30, axis: 'l', ry: Math.PI, tint: 0x848e97 }, // gun truck (same flip as the pickup)
   mlrs:      { file: 'mlrs',      size: 1.60, axis: 'l', ry: 0 },
-  artillery: { file: 'artillery', size: 1.75, axis: 'l', ry: 0 }, // Ha-To SP artillery (Sketchfab, CC-BY)
+  artillery: { file: 'artillery', size: 1.75, axis: 'l', ry: Math.PI }, // Ha-To SP artillery (Sketchfab, CC-BY) — flipped to face forward
   // trucks: cab/bed geometry defeats the front heuristic — flip both (user-verified)
   harv:      { file: 'harv',      size: 1.70, axis: 'l', ry: Math.PI },
   engineer:  { file: 'engineer',  size: 1.35, axis: 'l', ry: Math.PI },
@@ -1081,8 +1081,8 @@ export class Renderer {
     this.scene.add(this.oilMesh);
     this.loadOilModel();
     this.loadFactoryModel();
-    this.loadBuildingModel('refinery', 'refinery', 3.1); // Ore Refinery GLB (Sketchfab, CC-BY)
-    this.loadBuildingModel('airfield', 'airfield', 2.1);  // Airfield GLB (C&C-style building, Sketchfab, CC-BY)
+    this.loadBuildingModel('refinery', 'refinery', 3.875); // Ore Refinery GLB (Sketchfab, CC-BY) — 25% larger
+    this.loadBuildingModel('airfield', 'airfield', 3.15);  // Airfield GLB (C&C-style building, Sketchfab, CC-BY) — 50% larger
 
     // unit instancing: procedural models first, external GLBs swap in async
     for (const t of ['rifle', 'rocket', 'melody', 'tank', 'heavy', 'harv', 'engineer', 'recon', 'strike', 'msldrone', 'mlrs',
@@ -1480,6 +1480,7 @@ export class Renderer {
       proto.rotation.y = ry;                                      // ramp → +Z
       this.factoryProto = proto;
       this.factoryTop = size.y * s;
+      this.refreshBuildingModel('factory'); // swap any factory placed before the GLB loaded
     }, undefined, () => { /* missing model — keep the procedural factory */ });
   }
 
@@ -1497,7 +1498,17 @@ export class Renderer {
       const inner = new THREE.Group(); inner.add(src); inner.scale.setScalar(s);
       const proto = new THREE.Group(); proto.add(inner);
       this.bldgProtos[type] = proto;
+      this.refreshBuildingModel(type); // swap any already-placed buildings (e.g. the starting refinery)
     }, undefined, () => { /* missing model — keep the procedural building */ });
+  }
+
+  // a GLB building model loads async — after game start for the pre-placed base.
+  // Drop existing render groups of that type so updateViews rebuilds them with the
+  // now-loaded model (the construction-progress scale is reapplied each frame).
+  private refreshBuildingModel(type: string) {
+    for (const [id, rec] of this.buildings) {
+      if (rec.type === type) { this.scene.remove(rec.g); this.buildings.delete(id); }
+    }
   }
 
   // a building's render group: a GLB model once loaded, else the procedural one.
