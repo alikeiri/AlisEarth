@@ -940,6 +940,7 @@ export class Renderer {
   private factoryProto: THREE.Group | null = null; // War Factory GLB (poly.pizza), cloned per building
   private factoryTop = 2.6;                         // scaled model height (team band sits here)
   private bldgProtos: Record<string, THREE.Group> = {}; // other GLB building models, cloned per building
+  private cruiseY = 12; // constant flight altitude (set from the map's tallest terrain in buildTerrain)
   private rampAnim = new Map<number, number>();     // unit id → seconds left of the "drive down the ramp" descent
   private prevVeh = new Set<number>();              // ground-vehicle ids seen last frame (to detect freshly-built ones)
   private fogTex: THREE.DataTexture | null = null;
@@ -1290,11 +1291,17 @@ export class Renderer {
     geo.translate(W / 2, 0, H / 2);
     const pos = geo.getAttribute('position') as THREE.BufferAttribute;
     const uv = geo.getAttribute('uv') as THREE.BufferAttribute;
+    let maxH = SEA;
     for (let i = 0; i < pos.count; i++) {
       const x = pos.getX(i), z = pos.getZ(i);
-      pos.setY(i, this.map.heightAt(x, z));
+      const h = this.map.heightAt(x, z);
+      pos.setY(i, h);
+      if (h > maxH) maxH = h;
       uv.setXY(i, x / W, z / H); // sample the baked ground map by world position
     }
+    // aircraft cruise at a constant altitude above the TALLEST terrain, so they
+    // fly level instead of dipping into valleys (per-unit alt added on top)
+    this.cruiseY = maxH + 1.5;
     uv.needsUpdate = true;
     geo.computeVertexNormals();
 
@@ -2321,7 +2328,7 @@ export class Renderer {
       }
       let gy = this.map.heightAt(v.x, v.z);
       let y: number;
-      if (md?.fly) y = gy + (md.alt || 2.3) + Math.sin(this.time * 2.5 + v.i * 1.7) * 0.12;
+      if (md?.fly) y = this.cruiseY + (md.alt || 2.3) + Math.sin(this.time * 2.5 + v.i * 1.7) * 0.12; // level flight above the tallest terrain
       else if (md?.move === 'sea') {
         y = SEA + (v.t === 'sub' ? -0.08 : 0.02) + Math.sin(this.time * 1.6 + v.i) * 0.03;
         gy = SEA; // selection ring floats on the water

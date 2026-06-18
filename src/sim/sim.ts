@@ -470,7 +470,7 @@ export class Sim {
     if (c.k === 'upg') {
       const b = this.ents.get(c.bid);
       if (!b || !b.b || b.owner !== c.p || b.type === 'conyard') return;
-      if (b.type === 'wall' || b.type === 'barrier') return; // walls/barriers can't be upgraded
+      if (b.type === 'wall' || b.type === 'barrier' || b.type === 'oilrig') return; // these can't be upgraded
       if (b.progress < b.total || b.lvl >= UPG_MAX || b.upg) return; // maxed or already upgrading
       const cost = Math.round(upgCost(b.type, b.lvl, pl.fac.costMul) * pl.bonusCost);
       if (pl.credits < cost) return;
@@ -2469,8 +2469,9 @@ export class Sim {
     for (const e of this.ents.values()) {
       if (e.b) continue;
       const ef = !!UNITS[e.type].fly;
+      if (e.fortified) continue;                 // dug-in units aren't shoved; others pass through them
       for (const o of this.nearbyUnits(e.x, e.z, 0.8)) {
-        if (o.id <= e.id || o.b) continue;
+        if (o.id <= e.id || o.b || o.fortified) continue;
         if (!!UNITS[o.type].fly !== ef) continue; // air and ground don't collide
         let dx = e.x - o.x, dz = e.z - o.z;
         let d = Math.sqrt(dx * dx + dz * dz);

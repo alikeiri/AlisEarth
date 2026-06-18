@@ -365,7 +365,7 @@ export class UI {
     if (selection && selection.size === 1) {
       const id = [...selection][0];
       const v = views.find(x => x.i === id);
-      if (v && v.b && v.o === me && v.t !== 'conyard' && v.t !== 'wall' && v.t !== 'barrier') {
+      if (v && v.b && v.o === me && v.t !== 'conyard' && v.t !== 'wall' && v.t !== 'barrier' && v.t !== 'oilrig') {
         if (v.up !== undefined) {
           // upgrade in progress — show a progress bar, no click (upgTarget stays -1)
           const pct = Math.round(v.up * 100);

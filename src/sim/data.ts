@@ -100,7 +100,7 @@ export const UNITS: Record<string, UnitDef> = {
   // the anti-infantry vehicle: autocannon IFV — shreds infantry, loses to tanks
   ifv:    { name: 'IFV',          cost: 700,  hp: 300, speed: 3.4, range: 5.0, dmg: 24, rof: 0.8, builtAt: 'factory',  buildTime: 9,  kind: 'veh' },
   // mobile anti-air pair: missile AA hunts airplanes, flak shreds drone swarms
-  aatank: { name: 'AA Vehicle',   cost: 950,  hp: 280, speed: 3.0, range: 8.0, dmg: 42, rof: 1.6, builtAt: 'factory',  buildTime: 11, kind: 'veh' },
+  aatank: { name: 'AA Vehicle',   cost: 950,  hp: 280, speed: 3.0, range: 8.0, dmg: 42, rof: 1.6, builtAt: 'factory',  buildTime: 11, kind: 'veh', aaOnly: true }, // dedicated anti-air: only engages aircraft
   flak:   { name: 'Flak Gun',     cost: 650,  hp: 240, speed: 2.6, range: 6.5, dmg: 16, rof: 0.45, builtAt: 'factory', buildTime: 9,  kind: 'veh' },
   engineer: { name: 'Engineer',   cost: 600,  hp: 200, speed: 2.2, range: 0,   dmg: 0,  rof: 1,   builtAt: 'barracks', altBuiltAt: 'factory', buildTime: 10, kind: 'veh', repair: true, road: true, lays: 'mine', mines: 4 }, // trainable from the Barracks (infantry) AND the War Factory
   patriot:  { name: 'Patriot SAM', cost: 1100, hp: 200, speed: 2.4, range: 11, dmg: 60, rof: 2.8, builtAt: 'factory',  buildTime: 12, kind: 'veh', intercept: { range: 11, cd: 4 }, fortify: true, sight: 14, aaOnly: true }, // long-range SAM: only engages aircraft + intercepts silo missiles; mobile radar picket
@@ -325,6 +325,7 @@ export function dmgMul(attType: string, tgtIsBuilding: boolean, tgtKind: string,
     if (attType === 'aatank') return 2.3;        // dedicated mobile AA
     if (attType === 'flak') return tgtType && DRONE_TYPES.has(tgtType) ? 2.4 : 0.5; // drone shredder
     if (attType === 'rocket') return 1.8;
+    if (attType === 'fueltruck') return 0; // suicide truck can't reach aircraft — land/buildings only
     // warships carry VLS air-defence containers now — destroyers shrug off air
     if (attType === 'flakship') return 2.7;      // dedicated fleet AA
     if (attType === 'destroyer') return 2.1;
