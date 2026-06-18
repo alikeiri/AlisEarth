@@ -92,6 +92,30 @@ import { GameMap, W, H, SEA, fbm } from '../sim/map';
 import { hash2 } from '../sim/rng';
 import { PLAYER_COLORS, BUILDINGS, UNITS } from '../sim/data';
 
+// ---- model GLB cache + startup preloader ----
+// Parse every GLB once and cache it, so each new game applies models instantly
+// (no procedural-placeholder pop-in) and so we can preload them all behind a
+// loading screen before the menu is shown.
+const GLTF_CACHE = new Map<string, any>();
+function loadGLB(file: string): Promise<any> {
+  const cached = GLTF_CACHE.get(file);
+  if (cached) return Promise.resolve(cached);
+  return new Promise((resolve, reject) => {
+    new GLTFLoader().load('./models/' + file + '.glb',
+      g => { GLTF_CACHE.set(file, g); resolve(g); }, undefined, reject);
+  });
+}
+// Load every unit + building model into the cache. Resolves once all settle
+// (a missing file just resolves null — never blocks the menu).
+export async function preloadModels(onProgress?: (done: number, total: number) => void): Promise<void> {
+  const files = new Set<string>();
+  for (const t in MODEL_DEFS) files.add(MODEL_DEFS[t].file);
+  for (const f of ['oilfield', 'factory', 'refinery', 'airfield']) files.add(f);
+  const list = [...files]; let done = 0;
+  onProgress?.(0, list.length);
+  await Promise.all(list.map(f => loadGLB(f).catch(() => null).then(() => { onProgress?.(++done, list.length); })));
+}
+
 const MAX_INST = 360;
 const MAX_TRACER = 256;
 // War Factory model orientation: rotate so the exit ramp faces +Z (where new
@@ -1438,13 +1462,12 @@ export class Renderer {
       const f = MODEL_DEFS[t].file;
       byFile.set(f, [...(byFile.get(f) || []), t]);
     }
-    const loader = new GLTFLoader();
     for (const [file, types] of byFile) {
-      loader.load('./models/' + file + '.glb', gltf => {
+      loadGLB(file).then(gltf => {
         for (const t of types) {
           try { this.applyModel(t, gltf); } catch { /* keep procedural */ }
         }
-      }, undefined, () => { /* missing model — keep procedural */ });
+      }).catch(() => { /* missing model — keep procedural */ });
     }
   }
 
@@ -1456,8 +1479,8 @@ export class Renderer {
   // (centred, base at y=0, scaled to the 3-cell footprint), the ramp oriented to
   // +Z — the side new vehicles exit from. Cloned per factory in makeBuildingGroup.
   private loadFactoryModel() {
-    new GLTFLoader().load('./models/factory.glb', gltf => {
-      const src = gltf.scene; src.updateMatrixWorld(true);
+    loadGLB('factory').then(gltf => {
+      const src = gltf.scene.clone(true); src.updateMatrixWorld(true); // clone: we mutate transforms
       const box = new THREE.Box3().setFromObject(src);
       const size = new THREE.Vector3(); box.getSize(size);
       const ctr = new THREE.Vector3(); box.getCenter(ctr);
@@ -1481,14 +1504,14 @@ export class Renderer {
       this.factoryProto = proto;
       this.factoryTop = size.y * s;
       this.refreshBuildingModel('factory'); // swap any factory placed before the GLB loaded
-    }, undefined, () => { /* missing model — keep the procedural factory */ });
+    }).catch(() => { /* missing model — keep the procedural factory */ });
   }
 
   // Load a GLB building model once: normalise it (centre x/z, base at y=0, scale to
   // its cell footprint) and cache a prototype cloned per building in makeBuildingGroup.
   private loadBuildingModel(type: string, file: string, footprint: number) {
-    new GLTFLoader().load('./models/' + file + '.glb', gltf => {
-      const src = gltf.scene; src.updateMatrixWorld(true);
+    loadGLB(file).then(gltf => {
+      const src = gltf.scene.clone(true); src.updateMatrixWorld(true); // clone: we mutate transforms
       const box = new THREE.Box3().setFromObject(src);
       const size = new THREE.Vector3(); box.getSize(size);
       const ctr = new THREE.Vector3(); box.getCenter(ctr);
@@ -1499,7 +1522,7 @@ export class Renderer {
       const proto = new THREE.Group(); proto.add(inner);
       this.bldgProtos[type] = proto;
       this.refreshBuildingModel(type); // swap any already-placed buildings (e.g. the starting refinery)
-    }, undefined, () => { /* missing model — keep the procedural building */ });
+    }).catch(() => { /* missing model — keep the procedural building */ });
   }
 
   // a GLB building model loads async — after game start for the pre-placed base.
@@ -1521,7 +1544,7 @@ export class Renderer {
   }
 
   private loadOilModel() {
-    new GLTFLoader().load('./models/oilfield.glb', gltf => {
+    loadGLB('oilfield').then(gltf => {
       const geos: THREE.BufferGeometry[] = [];
       gltf.scene.updateMatrixWorld(true);
       gltf.scene.traverse(o => {
@@ -1548,7 +1571,7 @@ export class Renderer {
       this.oilMesh.geometry.dispose();
       this.oilMesh.geometry = merged;
       this.map.oreDirty = true;                  // re-place the wells with the new model
-    }, undefined, () => { /* missing model — keep the procedural derrick */ });
+    }).catch(() => { /* missing model — keep the procedural derrick */ });
   }
 
   // group world-baked geometry by material so each keeps its colour/texture.

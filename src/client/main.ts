@@ -5,7 +5,7 @@ import { Sim } from '../sim/sim';
 import { aiTick } from '../sim/ai';
 import { FACTIONS, BUILDINGS, UNITS, PLAYER_COLORS, SIM_VERSION, UPG_MAX } from '../sim/data';
 import { GameMap, genMap, setMapSize, W, H, MAXD, SEA } from '../sim/map';
-import { Renderer, gfxQuality } from './render';
+import { Renderer, gfxQuality, preloadModels } from './render';
 import { UI } from './ui';
 import { twemojify, twemojiParse } from './twemoji';
 import { safeLS } from './store';
@@ -3472,6 +3472,18 @@ if (!glOk) {
   // tell the startup-diagnostic in index.html that the app booted cleanly (so it
   // won't show the "code did not start" banner)
   (window as any).__feBooted = true;
+  // preload every 3D model behind the loading screen, THEN reveal the menu — so
+  // nothing pops in from its procedural placeholder once a game starts.
+  const pre = document.getElementById('preload');
+  const bar = document.getElementById('preloadBar');
+  const txt = document.getElementById('preloadTxt');
+  const finishPreload = () => { if (pre) pre.style.display = 'none'; };
+  preloadModels((done, total) => {
+    if (bar) bar.style.width = Math.round((done / total) * 100) + '%';
+    if (txt) txt.textContent = `Loading models… ${done}/${total}`;
+  }).catch(() => { /* missing models just fall back to procedural */ }).finally(finishPreload);
+  // safety net: never trap the player on the loading screen if a model hangs
+  setTimeout(finishPreload, 25000);
 }
 
 // version stamp on the menu: revision auto-increments with every commit; the
