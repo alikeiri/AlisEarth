@@ -229,7 +229,7 @@ const http = createServer(async (req, res) => {
   }
 });
 
-interface Client { ws: WebSocket; name: string; faction: string; slot: number; lastChat?: number; room?: Room | null; ping?: number }
+interface Client { ws: WebSocket; name: string; faction: string; slot: number; lastChat?: number; room?: Room | null; ping?: number; lastLsin?: number }
 interface Room {
   code: string; clients: Client[]; started: boolean;
   sim: Sim | null; timer: ReturnType<typeof setInterval> | null; cmdQ: any[];
@@ -639,6 +639,7 @@ wss.on('connection', ws => {
       // LOCKSTEP: relay this client's input frames to the room's other clients.
       // The server is a dumb relay — it never inspects or runs the sim.
       if (room && room.started && room.lockstep && me && Array.isArray(m.frames)) {
+        me.lastLsin = Date.now();               // liveness: this client is still feeding the lockstep
         const payload = JSON.stringify({ t: 'lsin', player: me.slot, frames: m.frames });
         for (const c of room.clients) if (c !== me && c.ws.readyState === WebSocket.OPEN) c.ws.send(payload);
       }
@@ -697,6 +698,26 @@ setInterval(() => {
   if (online.size) broadcastLobby();
   for (const r of rooms.values()) if (!r.started && r.clients.length) sendRoom(r);
 }, 3000);
+
+// lockstep liveness watchdog: a peer whose tab froze / backgrounded / went to a
+// half-open socket keeps the connection alive but stops sending inputs, which
+// stalls the WHOLE match for everyone (the sim can't advance without its input).
+// If a previously-active client (lastLsin set) goes silent past the threshold,
+// close its socket — the normal disconnect path then runs the drop-vote consensus
+// so all survivors switch it to AI at the same tick and the game resumes.
+const STALL_DROP_MS = 8000;
+setInterval(() => {
+  const now = Date.now();
+  for (const r of rooms.values()) {
+    if (!r.started || !r.lockstep || r.dropVote || r.clients.length < 2) continue;
+    for (const c of r.clients) {
+      if (c.lastLsin !== undefined && now - c.lastLsin > STALL_DROP_MS && c.ws.readyState === WebSocket.OPEN) {
+        try { c.ws.close(); } catch { /* already gone */ }
+        break; // one drop per sweep; its close handler starts the consensus vote
+      }
+    }
+  }
+}, 2000);
 
 http.listen(PORT, () => {
   console.log(`ALI'S EARTH server: http://localhost:${PORT} (HTTP + WebSocket)`);
