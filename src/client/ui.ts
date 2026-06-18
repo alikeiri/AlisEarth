@@ -525,6 +525,11 @@ export class UI {
     bar.style.width = (max > 0 ? Math.min(100, (stored / max) * 100) : 0) + '%';
     bar.style.background = stored <= 0 ? 'var(--bad)' : pl.pu > pl.pm ? 'var(--accent)' : 'var(--good)';
     document.getElementById('powerTxt')!.textContent = `${stored} / ${max}`;
+    // mouseover breakdown: production vs demand (and the net balance per second)
+    const net = pl.pm - pl.pu;
+    document.getElementById('powerbarWrap')!.setAttribute('title',
+      `Production: ${pl.pm}\nDemand: ${pl.pu}\nBalance: ${net >= 0 ? '+' : ''}${net}` +
+      (net < 0 ? '  (draining battery)' : '') + `\nStored: ${stored} / ${max}`);
 
     // my completed buildings by type + unit queue info + airfield capacity
     const myDone: Record<string, number> = {};
