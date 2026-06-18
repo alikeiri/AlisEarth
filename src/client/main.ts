@@ -2897,6 +2897,9 @@ function renderEndStats(game: GameLike) {
 }
 
 function startGame(game: GameLike) {
+  // first game: preload all models behind the loading screen, then start (the
+  // menu loads instantly; models are fetched only once a game is actually starting)
+  if (!modelsReady) { startWithModels(() => startGame(game)); return; }
   if (client) { client.destroy(); client = null; }
   if (advisor) { advisor.stop(); advisor = null; }
   if (tutCtl) { tutCtl.stop(); tutCtl = null; }
@@ -3472,18 +3475,26 @@ if (!glOk) {
   // tell the startup-diagnostic in index.html that the app booted cleanly (so it
   // won't show the "code did not start" banner)
   (window as any).__feBooted = true;
-  // preload every 3D model behind the loading screen, THEN reveal the menu — so
-  // nothing pops in from its procedural placeholder once a game starts.
+}
+
+// Preload every 3D model behind the loading screen, then run start(). Models are
+// cached after the first call, so this is only slow the first time a game starts —
+// the menu itself appears instantly (we no longer preload at app boot).
+let modelsReady = false;
+function startWithModels(start: () => void) {
+  if (modelsReady) { start(); return; }
   const pre = document.getElementById('preload');
   const bar = document.getElementById('preloadBar');
   const txt = document.getElementById('preloadTxt');
-  const finishPreload = () => { if (pre) pre.style.display = 'none'; };
-  preloadModels((done, total) => {
-    if (bar) bar.style.width = Math.round((done / total) * 100) + '%';
-    if (txt) txt.textContent = `Loading models… ${done}/${total}`;
-  }).catch(() => { /* missing models just fall back to procedural */ }).finally(finishPreload);
-  // safety net: never trap the player on the loading screen if a model hangs
-  setTimeout(finishPreload, 25000);
+  if (pre) pre.style.display = 'flex';
+  const done = () => { modelsReady = true; start(); if (pre) pre.style.display = 'none'; }; // hide AFTER the game renders (no menu flash)
+  let finished = false;
+  const finish = () => { if (finished) return; finished = true; done(); };
+  preloadModels((d, t) => {
+    if (bar) bar.style.width = Math.round((d / t) * 100) + '%';
+    if (txt) txt.textContent = `Loading models… ${d}/${t}`;
+  }).catch(() => {}).finally(finish);
+  setTimeout(finish, 25000); // safety net: never trap the player on the loading screen
 }
 
 // version stamp on the menu: revision auto-increments with every commit; the

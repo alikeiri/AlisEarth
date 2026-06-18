@@ -1105,8 +1105,11 @@ export class Renderer {
     this.scene.add(this.oilMesh);
     this.loadOilModel();
     this.loadFactoryModel();
-    this.loadBuildingModel('refinery', 'refinery', 4.65); // Ore Refinery GLB (Sketchfab, CC-BY) — 50% larger than original
+    this.loadBuildingModel('refinery', 'refinery', 5.81); // Ore Refinery GLB (Sketchfab, CC-BY)
     this.loadBuildingModel('airfield', 'airfield', 3.15);  // Airfield GLB (C&C-style building, Sketchfab, CC-BY) — 50% larger
+    // Oil Rig reuses the oil-well "Oil Pump" model, 25% taller than the free well
+    // (well is normalised to 2.0 tall in loadOilModel) so building one just enlarges it
+    this.loadBuildingModel('oilrig', 'oilfield', 2.5, true);
 
     // unit instancing: procedural models first, external GLBs swap in async
     for (const t of ['rifle', 'rocket', 'melody', 'tank', 'heavy', 'harv', 'engineer', 'recon', 'strike', 'msldrone', 'mlrs',
@@ -1509,13 +1512,14 @@ export class Renderer {
 
   // Load a GLB building model once: normalise it (centre x/z, base at y=0, scale to
   // its cell footprint) and cache a prototype cloned per building in makeBuildingGroup.
-  private loadBuildingModel(type: string, file: string, footprint: number) {
+  private loadBuildingModel(type: string, file: string, target: number, byHeight = false) {
     loadGLB(file).then(gltf => {
       const src = gltf.scene.clone(true); src.updateMatrixWorld(true); // clone: we mutate transforms
       const box = new THREE.Box3().setFromObject(src);
       const size = new THREE.Vector3(); box.getSize(size);
       const ctr = new THREE.Vector3(); box.getCenter(ctr);
-      const s = footprint / Math.max(0.001, Math.max(size.x, size.z));
+      // normalise to a target footprint (max x/z) or, for byHeight, a target height
+      const s = target / Math.max(0.001, byHeight ? size.y : Math.max(size.x, size.z));
       src.position.set(-ctr.x, -box.min.y, -ctr.z);
       src.traverse(o => { const m = o as any; if (m.isMesh) { m.castShadow = true; m.receiveShadow = true; } });
       const inner = new THREE.Group(); inner.add(src); inner.scale.setScalar(s);
