@@ -29,6 +29,7 @@ export default defineConfig({
       input: {
         main: 'index.html',
         bench: 'webgpu-bench.html', // standalone WebGL-vs-WebGPU perf prototype
+        overview: 'unit-overview.html', // reference page: buildings/units tables + counter matrix
       },
     },
   }
