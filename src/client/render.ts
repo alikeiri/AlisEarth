@@ -1105,6 +1105,7 @@ export class Renderer {
     this.scene.add(this.oilMesh);
     this.loadOilModel();
     this.loadFactoryModel();
+    this.loadBuildingModel('power', 'power', 2.4);        // Power Plant GLB ("Factory" by ZONK44, CGTrader)
     this.loadBuildingModel('refinery', 'refinery', 5.81); // Ore Refinery GLB (Sketchfab, CC-BY)
     this.loadBuildingModel('airfield', 'airfield', 3.15);  // Airfield GLB (C&C-style building, Sketchfab, CC-BY) — 50% larger
     // Oil Rig reuses the oil-well "Oil Pump" model, 25% taller than the free well
