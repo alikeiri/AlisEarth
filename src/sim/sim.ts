@@ -102,6 +102,9 @@ const FORT_ATK_MUL = 1.5;   // fortified infantry hit harder
 const FORT_DEF_MUL = 0.5;   // ...and take half damage (settled)
 const FORT_DEPLOY_VULN = 1.5; // ...but take extra while deploying / packing
 const FORT_RANGE_MUL = 1.2; // ...and see/shoot 20% farther while dug in
+const HG_STEP = 1.2;        // ground-height advantage (cells) that counts as "high ground"
+const HG_RANGE_MUL = 1.2;   // high ground: +20% attack range against lower targets
+const INF_CLIFF_SPEED = 0.4; // infantry climb cliffs at 40% speed
 const MISSILE_CAP = 25;     // max armed missiles a single silo can stockpile
 const CARRY_VEH = 10;       // transport ship capacity: vehicles
 const CARRY_INF = 30;       // transport ship capacity: infantry
@@ -1155,7 +1158,8 @@ export class Sim {
       if (score > bestScore) { bestScore = score; best = u; }
     };
     const aaOnly = !e.b && !!attDef?.aaOnly;        // dedicated SAM: aircraft only
-    for (const u of this.nearbyUnits(e.x, e.z, range + 1)) {
+    // widen the pre-filter so high-ground targets at the extended range are seen
+    for (const u of this.nearbyUnits(e.x, e.z, range * HG_RANGE_MUL + 1)) {
       if (!this.foe(u.owner, e.owner) || u.hp <= 0 || !this.players[u.owner].alive) continue;
       const d = this.distToEnt(e.x, e.z, u);
       const tdef = UNITS[u.type];
@@ -1173,7 +1177,7 @@ export class Sim {
       }
       // never auto-lock onto air targets the attacker cannot hurt (turret, MLRS)
       if (UNITS[u.type]?.fly && (skipAir || dmgMul(e.type, false, 'air', u.type) <= 0)) continue;
-      if (d <= range) consider(u, d);
+      if (d <= range * this.hgRangeMul(e, u)) consider(u, d); // high ground reaches farther
     }
     // buildings (few — linear scan). Walls and tank barriers are inert obstacles,
     // never auto-targeted: ground units route around them, air flies over.
@@ -1182,9 +1186,19 @@ export class Sim {
       if (!u.b || !this.foe(u.owner, e.owner) || u.hp <= 0 || !this.players[u.owner].alive) continue;
       if (u.type === 'wall' || u.type === 'barrier') continue;
       const d = this.distToEnt(e.x, e.z, u);
-      if (d <= range) consider(u, d);
+      if (d <= range * this.hgRangeMul(e, u)) consider(u, d);
     }
     return best;
+  }
+
+  // high-ground advantage: a unit/building standing meaningfully higher than its
+  // target reaches ~20% farther (shooting downhill). Map-relative, so it needs no
+  // per-map tuning. Deterministic (reads the shared heightfield).
+  private groundH(e: Entity): number {
+    return e.b ? this.map.cellH(e.cx, e.cz) : this.map.heightAt(e.x, e.z);
+  }
+  private hgRangeMul(att: Entity, tgt: Entity): number {
+    return this.groundH(att) - this.groundH(tgt) >= HG_STEP ? HG_RANGE_MUL : 1;
   }
 
   private dealDamage(att: Entity, tgt: Entity, base: number, force = false) {
@@ -2072,7 +2086,7 @@ export class Sim {
         return;
       }
       // subs (and any siege unit) reach buildings at their longer cruise range
-      const atkRange = (tgt.b && def.siegeRange) ? def.siegeRange : def.range;
+      const atkRange = ((tgt.b && def.siegeRange) ? def.siegeRange : def.range) * this.hgRangeMul(u, tgt);
       if (d <= atkRange) {
         u.path = null;
         if (def.payload && u.ammo <= 0) { u.orders.unshift({ k: 'rtb' }); return; }
@@ -2091,10 +2105,12 @@ export class Sim {
         // aren't backing off from a failure (a fresh/just-finished path searches
         // immediately so commands stay responsive)
         if (u.repath <= 0 || (!u.path && (u.pathFail || 0) === 0)) {
+          const aSea = def.move === 'sea', aCrawl = !!def.terra;
+          const aAmphi = !!def.amphibious && !aCrawl, aInf = def.kind === 'inf' && !aAmphi && !aSea && !aCrawl;
           u.path = def.fly ? [{ x: tgt.x, z: tgt.z }]
             // ships get a far larger A* budget: open water means routing AROUND a
             // big island can expand a lot of nodes before the way around is found
-            : findPath(this.map, u.x, u.z, tgt.x, tgt.z, def.move === 'sea' ? 16000 : 4500, def.move === 'sea');
+            : findPath(this.map, u.x, u.z, tgt.x, tgt.z, aSea ? 16000 : 4500, aSea, aAmphi, aCrawl, aInf);
           u.pi = 0; u.repath = 12;
           // can't reach the target. If a wall/barrier is blocking the way, BREACH
           // it (attack the nearest one toward the target) instead of giving up;
@@ -2111,7 +2127,7 @@ export class Sim {
             u.repath = 20 + (u.id % 13); // backoff + per-unit jitter (desync retries)
           } else u.pathFail = 0;
         }
-        this.stepPath(u, speed, def.fly ? 1 : def.move === 'sea' ? 2 : 0);
+        this.stepPath(u, speed, def.fly ? 1 : def.move === 'sea' ? 2 : (!!def.amphibious && !def.terra) ? 3 : def.terra ? 4 : def.kind === 'inf' ? 5 : 0);
       }
     } else if (ord.k === 'harvest') {
       this.tickHarvest(u, ord, def);
@@ -2466,18 +2482,19 @@ export class Sim {
     const sea = def.move === 'sea';
     const crawl = !!def.terra;          // bulldozer: drives over anything
     const amphi = !!def.amphibious && !crawl;
+    const inf = def.kind === 'inf' && !amphi && !sea && !crawl; // foot soldiers climb cliffs
     if (!u.path || u.pi >= u.path.length) {
       const end = u.path?.[u.path.length - 1];
       if (!end || (end.x - x) * (end.x - x) + (end.z - z) * (end.z - z) > 1) {
-        u.path = findPath(this.map, u.x, u.z, x, z, sea ? 16000 : 9000, sea, amphi, crawl);
+        u.path = findPath(this.map, u.x, u.z, x, z, sea ? 16000 : 9000, sea, amphi, crawl, inf);
         u.pi = 0;
         if (!u.path) return true; // unreachable — give up
       } else if (u.pi >= u.path.length) return true;
     }
-    return this.stepPath(u, speed, crawl ? 4 : amphi ? 3 : sea ? 2 : 0);
+    return this.stepPath(u, speed, crawl ? 4 : amphi ? 3 : sea ? 2 : inf ? 5 : 0);
   }
 
-  // mode: 0 ground, 1 air, 2 sea, 3 amphibious (land + water), 4 crawler (anywhere)
+  // mode: 0 ground, 1 air, 2 sea, 3 amphibious (land + water), 4 crawler (anywhere), 5 infantry (ground + cliffs, slow)
   private stepPath(u: Entity, speed: number, mode = 0): boolean {
     if (!u.path || u.pi >= u.path.length) return true;
     const wp = u.path[u.pi];
@@ -2490,14 +2507,17 @@ export class Sim {
     }
     u.mvi = this.tickN; // attempted to move this tick (stuck detection)
     u.hx = dx / d; u.hz = dz / d; // travel heading — what the renderer faces along
-    const step = Math.min(d, speed * TICK);
+    // infantry crawl up cliffs at a fraction of their speed
+    const eff = (mode === 5 && this.map.isCliff(Math.floor(u.x), Math.floor(u.z))) ? speed * INF_CLIFF_SPEED : speed;
+    const step = Math.min(d, eff * TICK);
     dx = (dx / d) * step; dz = (dz / d) * step;
     const nx = u.x + dx, nz = u.z + dz;
     if (mode === 1) {
       u.x = Math.max(0.5, Math.min(W - 0.5, nx));
       u.z = Math.max(0.5, Math.min(H - 0.5, nz));
     } else {
-      const passAt = mode === 4 ? (cx: number, cz: number) => this.map.passableCrawler(cx, cz)
+      const passAt = mode === 5 ? (cx: number, cz: number) => this.map.passableInfantry(cx, cz)
+        : mode === 4 ? (cx: number, cz: number) => this.map.passableCrawler(cx, cz)
         : mode === 3 ? (cx: number, cz: number) => this.map.passableAmphi(cx, cz)
           : mode === 2 ? (cx: number, cz: number) => this.map.passableSea(cx, cz)
             : (cx: number, cz: number) => this.map.passable(cx, cz);
@@ -2521,6 +2541,7 @@ export class Sim {
     if (def.terra) return this.map.passableCrawler(cx, cz);
     if (def.amphibious) return this.map.passableAmphi(cx, cz);
     if (def.move === 'sea') return this.map.passableSea(cx, cz);
+    if (def.kind === 'inf') return this.map.passableInfantry(cx, cz); // foot soldiers may stand on cliffs
     return this.map.passable(cx, cz);
   }
 

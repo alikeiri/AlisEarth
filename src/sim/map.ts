@@ -80,6 +80,20 @@ export class GameMap {
   passableCrawler(cx: number, cz: number): boolean {
     return this.inB(cx, cz) && this.occ[cz * W + cx] === 0;
   }
+  // infantry on foot: open ground PLUS cliffs (climbed slowly), but never water or
+  // dense forest. Lets foot soldiers take cliff routes vehicles can't.
+  passableInfantry(cx: number, cz: number): boolean {
+    if (!this.inB(cx, cz) || this.occ[cz * W + cx] !== 0) return false;
+    const i = cz * W + cx;
+    if (this.tBlocked[i] === 0) return true;          // open ground
+    return this.water[i] === 0 && this.forest[i] === 0; // a cliff (slope-blocked) — climbable
+  }
+  // a slope-blocked cell that is NOT water or forest — i.e. a climbable cliff
+  isCliff(cx: number, cz: number): boolean {
+    if (!this.inB(cx, cz)) return false;
+    const i = cz * W + cx;
+    return this.tBlocked[i] !== 0 && this.water[i] === 0 && this.forest[i] === 0;
+  }
   // land-connectivity components: which cells a GROUND unit can walk between over
   // terrain alone (water/cliffs split the map into islands). Lets harvesters skip
   // ore they could never reach. Recomputed lazily after terraforming changes land.

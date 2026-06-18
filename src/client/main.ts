@@ -1588,6 +1588,12 @@ class GameClient {
       const radar = !!(v.b && def?.sight) && !v.po && (v.pr ?? 1) >= 1;
       if (radar) sight = def.sight * (1 + 0.25 * ((v.lv || 1) - 1)); // +25% coverage per upgrade level
       if (!v.b && v.t === 'patriot' && v.fo) sight = 20; // fortified Patriot: bigger deployed radar
+      // high-ground vantage: standing on elevated terrain sees ~25% farther (not
+      // stacked on the Radar Dome's long-range intel sweep)
+      if (!radar) {
+        const gh = v.b ? this.game.map.cellH(v.cx, v.cz) : this.game.map.heightAt(v.x, v.z);
+        if (gh > SEA + 2.5) sight *= 1.25;
+      }
       const cx = Math.floor(v.x), cz = Math.floor(v.z), r = Math.ceil(sight);
       for (let dz = -r; dz <= r; dz++) for (let dx = -r; dx <= r; dx++) {
         if (dx * dx + dz * dz > sight * sight) continue;
