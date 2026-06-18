@@ -228,6 +228,7 @@ export class UI {
 
   private upgBtn: HTMLElement;
   private upgTarget = -1;
+  private upgLastHtml = ''; // only rewrite the upgrade button when its text changes (per-frame innerHTML churn ate clicks)
   private selSummary = '';
   private selTargetBid = -1;
   private rptBtn: HTMLElement;
@@ -360,7 +361,7 @@ export class UI {
     // upgrade panel: one own, completed building selected (shows progress while
     // an upgrade is running, the upgrade button otherwise)
     this.upgTarget = -1;
-    let upgShown = false;
+    let upgShown = false, upgHtml = '';
     if (selection && selection.size === 1) {
       const id = [...selection][0];
       const v = views.find(x => x.i === id);
@@ -368,14 +369,14 @@ export class UI {
         if (v.up !== undefined) {
           // upgrade in progress — show a progress bar, no click (upgTarget stays -1)
           const pct = Math.round(v.up * 100);
-          this.upgBtn.innerHTML = `⬆ Upgrading ${BUILDINGS[v.t].name}… ${pct}%<div class="prog" style="width:${pct}%"></div>`;
+          upgHtml = `⬆ Upgrading ${BUILDINGS[v.t].name}… ${pct}%<div class="prog" style="width:${pct}%"></div>`;
           this.upgBtn.classList.remove('noafford');
           upgShown = true;
         } else if (v.pr >= 1 && (v.lv || 1) < UPG_MAX) {
           const cost = upgCost(v.t, v.lv || 1, fac.costMul);
           this.upgTarget = id;
           const gain = UPG_INFO[v.t] || 'improved performance';
-          this.upgBtn.innerHTML =
+          upgHtml =
             `⬆ Upgrade ${BUILDINGS[v.t].name} → Lv${(v.lv || 1) + 1}  $${cost}` +
             `<span class="upgInfo">${gain} · +20% HP</span>`;
           this.upgBtn.classList.toggle('noafford', pl.c < cost);
@@ -383,6 +384,9 @@ export class UI {
         }
       }
     }
+    // only touch innerHTML when the text actually changes — rebuilding the button's
+    // child nodes every frame was destroying clicks mid-press (needed re-clicking)
+    if (upgHtml !== this.upgLastHtml) { this.upgBtn.innerHTML = upgHtml; this.upgLastHtml = upgHtml; }
     this.upgBtn.classList.toggle('hidden', !upgShown);
 
     // track single selected building (for the research panel)
@@ -474,7 +478,7 @@ export class UI {
         const looping = units.some(u => u.lp);
         parts.push(kbd('Shift+RMB', 'queue waypoints') + ' · ' + kbd('R', looping ? 'repeat: ON' : 'repeat route') + ' · ' + kbd('Shift', 'show route'));
         if (units.length >= 2) parts.push(kbd('RMB-drag', 'formation'));
-        parts.push(kbd('H', 'stop') + ' · ' + kbd('C', 'ranges'));
+        parts.push(kbd('X', 'stop') + ' · ' + kbd('C', 'ranges'));
         parts.push(kbd('Ctrl+#', 'group'));
       } else if (sel.length === 1 && sel[0].b && sel[0].o === me) {
         if (sel[0].t === 'silo') {

@@ -691,7 +691,7 @@ class GameClient {
         this.terraMode = ''; this.terraRect = null; this.renderer.setTerraPreview(null);
         this.renderer.setFormationPath(null);
       }
-      if (e.code === 'KeyS') this.issueToUnits({ k: 'stop' });
+      if (e.code === 'KeyX') this.issueToUnits({ k: 'stop' }); // Stop (S is taken by WASD map-pan)
       // U: transport ships unload cargo; garrison buildings evacuate their occupants
       if (e.code === 'KeyU') {
         const ships = this.myUnitIds().filter(id => { const v = this.byId.get(id); return v && UNITS[v.t]?.carrier && (v.cu || 0) > 0; });
@@ -3218,8 +3218,8 @@ function initMenus() {
   muteBtn.addEventListener('click', () => { audio.init(); audio.setMuted(!audio.muted); muteIcon(); });
   // in-game music swap: cycle the track on click and flash the name
   const musBtn = $('musBtn'), musLabel = $('musLabel');
-  const MUS_STYLES = ['iron', 'golden', 'frozen', 'enemies', 'off']; // synth tracks + playlist disabled for now (see AudioMan.ENABLED)
-  const MUS_NAMES: Record<string, string> = { playlist: 'Playlist', battle: 'Battle', hellmarch: 'Hell March', iron: 'Iron Directive', golden: 'Golden Dreams', frozen: 'Frozen Flower', enemies: 'Love for Enemies', march: 'Military March', ambient: 'Ambient', off: 'Off' };
+  const MUS_STYLES = ['iron', 'golden', 'frozen', 'enemies', 'playlist', 'off']; // in-game 🎵 cycle
+  const MUS_NAMES: Record<string, string> = { playlist: 'Play All Tracks', battle: 'Battle', hellmarch: 'Hell March', iron: 'Iron Directive', golden: 'Golden Dreams', frozen: 'Frozen Flower', enemies: 'Love for Enemies', march: 'Military March', ambient: 'Ambient', off: 'Off' };
   let musLabelTimer: any;
   const flashMus = () => {
     musBtn.title = 'Music: ' + (MUS_NAMES[audio.musicStyle] || audio.musicStyle) + ' — click to change';

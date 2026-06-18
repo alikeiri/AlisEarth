@@ -28,7 +28,7 @@ class AudioMan {
   musicStyle = 'iron';
   // styles the player may actually select right now; anything else is coerced to
   // 'iron'. Re-add the synth styles / 'playlist' here to bring them back.
-  static ENABLED = ['iron', 'golden', 'frozen', 'enemies', 'off'];
+  static ENABLED = ['iron', 'golden', 'frozen', 'enemies', 'playlist', 'off'];
   private static PLAYLIST = ['iron', 'golden', 'frozen', 'enemies'];
   private plIdx = 0;                 // position within the playlist
   private plTimer: ReturnType<typeof setTimeout> | null = null; // advance timer for synth styles
