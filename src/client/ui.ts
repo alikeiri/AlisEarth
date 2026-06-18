@@ -126,7 +126,7 @@ const DESCRIPTIONS: Record<string, string> = {
   stealthtank: 'Stealth Tank: cloaked raider, invisible until it fires or you get close.',
   gunboat: 'Gunboat: cheap, fast warship for skirmishing and scouting the coast.',
   navdrone: 'Naval Drone: cheap, expendable sea drone.',
-  fighter: 'Fighter: air-superiority jet. Hunts drones and bombers; near-useless vs ground.',
+  fighter: 'Fighter: multi-role jet — owns the skies (hunts drones, aircraft and bombers) and can strafe ground units (infantry and light vehicles). Weak vs heavy armour and buildings; leave sieging to bombers.',
   bomber: 'Bomber: heavy payload vs buildings — flies over, drops its stick, returns to rearm.',
   dbomber: 'Drone Bomber: unmanned heavy bomber with a large payload.',
   heli: 'Helicopter: versatile gunship — rockets vs armor, guns vs infantry.',

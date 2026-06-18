@@ -350,7 +350,7 @@ export function dmgMul(attType: string, tgtIsBuilding: boolean, tgtKind: string,
   // rockets crack armor but whiff on infantry, tanks duel tanks, artillery
   // flattens structures but loses to anything that closes the distance.
   if (attType === 'sam')    return 0.5; // AA battery is weak vs ground
-  if (attType === 'fighter') return 0.45; // interceptor — near-useless vs ground
+  if (attType === 'fighter') return tgtIsBuilding ? 0.8 : (tgtKind === 'inf' ? 1.2 : 1.0); // multi-role jet: air superiority + ground strafing (still no siege punch)
   if (attType === 'bomber') return tgtIsBuilding ? 2.4 : (tgtKind === 'inf' ? 1.3 : 1.0);
   if (attType === 'dbomber') return tgtIsBuilding ? 1.8 : 1.0;
   if (attType === 'heli')   return tgtKind === 'veh' ? 1.8 : 1.25; // rockets vs armor, guns vs inf
