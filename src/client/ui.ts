@@ -221,6 +221,9 @@ export class UI {
   private mmCtx: CanvasRenderingContext2D;
   private terrainCache: HTMLCanvasElement | null = null;
   private terrainCacheVer = -1;                 // map.terraVersion the cache was built at
+  private fogCanvas: HTMLCanvasElement | null = null; // grid-res fog layer, blitted scaled (1 drawImage vs W*H fillRects)
+  private fogCtx: CanvasRenderingContext2D | null = null;
+  private fogImg: ImageData | null = null;
   private mmHp = new Map<number, number>();      // entity hp last minimap frame
   private mmFlash = new Map<number, number>();   // entity id -> flash time remaining (under attack)
   private pings: { x: number; z: number; t: number }[] = [];
@@ -234,6 +237,44 @@ export class UI {
   private rptBtn: HTMLElement;
   private rptTarget = -1;
   private rptState = false;
+
+  // ---- text-sprite cache --------------------------------------------------
+  // The in-world HUD overlay redraws every frame, but the text it shows (unit
+  // names, garrison counts, countdowns) changes rarely. Rasterising glyphs with
+  // fillText every frame is the overlay's biggest cost, so we render each unique
+  // (text, font, colour) ONCE to a small offscreen canvas ("texture") and blit it
+  // with drawImage thereafter. measureText is cached as the sprite's width.
+  private textCache = new Map<string, { cv: HTMLCanvasElement; w: number; h: number }>();
+  private textCacheOrder: string[] = []; // insertion order for simple LRU-ish eviction
+  private textSprite(text: string, font: string, color: string): { cv: HTMLCanvasElement; w: number; h: number } {
+    const key = font + '' + color + '' + text;
+    let e = this.textCache.get(key);
+    if (e) return e;
+    const m = /(\d+)px/.exec(font);
+    const px = m ? +m[1] : 12;
+    const pad = 2;
+    const cv = document.createElement('canvas');
+    const c = cv.getContext('2d')!;
+    c.font = font;
+    const w = Math.ceil(c.measureText(text).width);
+    const h = Math.ceil(px * 1.35);
+    cv.width = w + pad * 2; cv.height = h + pad * 2;
+    // width/height resets the context — set draw state again, then paint
+    c.font = font; c.fillStyle = color; c.textAlign = 'left'; c.textBaseline = 'middle';
+    c.fillText(text, pad, cv.height / 2);
+    e = { cv, w, h: cv.height };
+    this.textCache.set(key, e);
+    this.textCacheOrder.push(key);
+    if (this.textCacheOrder.length > 256) { const old = this.textCacheOrder.shift()!; this.textCache.delete(old); }
+    return e;
+  }
+  // blit a cached text sprite; align: 'left' | 'center', vertically centred on y
+  private drawText(ctx: CanvasRenderingContext2D, text: string, font: string, color: string, x: number, y: number, align: 'left' | 'center' = 'left'): number {
+    const s = this.textSprite(text, font, color);
+    const dx = align === 'center' ? x - s.w / 2 : x;
+    ctx.drawImage(s.cv, Math.round(dx - 2), Math.round(y - s.h / 2));
+    return s.w;
+  }
 
   constructor(
     private onBuild: (t: string) => void,
@@ -700,14 +741,26 @@ export class UI {
           ctx.fillStyle = map.oil[cz * W + cx] === 1 ? '#2a2a33' : map.gem[cz * W + cx] === 1 ? '#3ee8e0' : '#d9a520';
           ctx.fillRect(mx(cx + 1), my(cz + 1), 1.6, 1.6);
         }
-    // fog overlay (drawn over terrain+ore, under entities the player can see)
+    // fog overlay (drawn over terrain+ore, under entities the player can see).
+    // Painted into a grid-resolution ImageData and blitted ONCE scaled, instead of
+    // a fillRect per cell — the old way was up to W*H canvas calls every frame.
     if (fog) {
+      if (!this.fogCanvas) {
+        const c = document.createElement('canvas'); c.width = W; c.height = H;
+        this.fogCanvas = c; this.fogCtx = c.getContext('2d')!;
+        this.fogImg = this.fogCtx.createImageData(W, H);
+      }
+      const data = this.fogImg!.data;
       for (let cz = 0; cz < H; cz++) for (let cx = 0; cx < W; cx++) {
         const fv = fog(cx, cz);
-        if (fv === 2) continue;
-        ctx.fillStyle = fv === 1 ? 'rgba(5,8,12,0.45)' : 'rgba(5,8,12,0.92)';
-        ctx.fillRect(mx(cx + 1), my(cz + 1), sx + 1, sz + 1);
+        // same axis flip as the terrain cache so fog lines up with the map
+        const i = ((H - 1 - cz) * W + (W - 1 - cx)) * 4;
+        if (fv === 2) { data[i + 3] = 0; }                                  // visible → clear
+        else { data[i] = 5; data[i + 1] = 8; data[i + 2] = 12; data[i + 3] = fv === 1 ? 115 : 235; } // explored dim / unseen dark
       }
+      this.fogCtx!.putImageData(this.fogImg!, 0, 0);
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(this.fogCanvas, 0, 0, 200, 200);
     }
     // detect entities that just took damage → flash them on the minimap
     const newHp = new Map<number, number>();
@@ -846,14 +899,12 @@ export class UI {
         if (name) {
           const p = project(v.x, v.z, 1.5);
           if (p.ok) {
-            ctx.font = '12px "Segoe UI", sans-serif';
-            ctx.textAlign = 'center';
-            const w = ctx.measureText(name).width + 12;
+            const font = '12px "Segoe UI", sans-serif';
+            const spr = this.textSprite(name, font, '#eceff1');
+            const w = spr.w + 12;
             ctx.fillStyle = 'rgba(10,14,18,0.8)';
             ctx.fillRect(p.x - w / 2, p.y - 26, w, 16);
-            ctx.fillStyle = '#eceff1';
-            ctx.fillText(name, p.x, p.y - 14);
-            ctx.textAlign = 'left';
+            this.drawText(ctx, name, font, '#eceff1', p.x, p.y - 18, 'center');
           }
         }
       }
@@ -864,11 +915,7 @@ export class UI {
       const p = project(v.x, v.z, 1.7);
       if (!p.ok) continue;
       const blink = (performance.now() / 250 | 0) % 2 === 0;
-      ctx.font = 'bold 17px "Segoe UI", sans-serif';
-      ctx.textAlign = 'center';
-      ctx.fillStyle = blink ? '#ff3b30' : '#ffb0a0';
-      ctx.fillText('☠ ' + v.sd, p.x, p.y - 16);
-      ctx.textAlign = 'left';
+      this.drawText(ctx, '☠ ' + v.sd, 'bold 17px "Segoe UI", sans-serif', blink ? '#ff3b30' : '#ffb0a0', p.x, p.y - 20, 'center');
     }
     // attack indicator: pulsing bullseye over the hovered enemy
     if (hover) {
@@ -933,8 +980,8 @@ export class UI {
       if (!p.ok) continue;
       const cu = v.cu || 0, cap = v.gcap || 0, full = cu >= cap;
       const label = `${cu}/${cap}`;
-      ctx.font = '700 11px system-ui,sans-serif';
-      const tw = Math.ceil(ctx.measureText(label).width) + 18;
+      const font = '700 11px system-ui,sans-serif';
+      const tw = this.textSprite(label, font, '#ffffff').w + 18; // cached width, no per-frame measureText
       const x0 = p.x - tw / 2, y0 = p.y - 16, h = 15;
       ctx.fillStyle = full ? 'rgba(60,66,72,0.9)' : 'rgba(28,120,52,0.92)';
       ctx.beginPath();
@@ -945,13 +992,11 @@ export class UI {
       ctx.fillRect(x0 + 4, y0 + 3, 6, 9);
       ctx.fillStyle = full ? 'rgba(60,66,72,0.92)' : 'rgba(28,120,52,0.95)';
       ctx.fillRect(x0 + 6, y0 + 6, 3, 6);
-      // count text
-      ctx.fillStyle = '#ffffff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillText(label, p.x + 5, y0 + h / 2 + 0.5);
+      // count text (cached sprite, blitted)
+      this.drawText(ctx, label, font, '#ffffff', p.x + 5, y0 + h / 2 + 0.5, 'center');
       // pin pointing down at the building
       ctx.fillStyle = full ? 'rgba(60,66,72,0.9)' : 'rgba(28,120,52,0.92)';
       ctx.beginPath(); ctx.moveTo(p.x - 4, y0 + h); ctx.lineTo(p.x + 4, y0 + h); ctx.lineTo(p.x, y0 + h + 5); ctx.closePath(); ctx.fill();
-      ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
     }
     // "packing up" indicator: a pulsing amber up-chevron above any unit that is
     // un-fortifying (pulling up stakes), so it reads clearly as leaving its dig-in
