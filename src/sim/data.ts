@@ -317,7 +317,7 @@ export function dmgMul(attType: string, tgtIsBuilding: boolean, tgtKind: string,
     if (attType === 'navdrone') return 1.1;
     if (attType === 'subhunter') return 0.3;     // sub-killer, not an AA platform
     if (attType === 'mslcruiser') return 0.4;
-    if (attType === 'rifle') return 1.2;
+    if (attType === 'rifle') return tgtType && DRONE_TYPES.has(tgtType) ? 0.4 : 0; // small-arms only nick low drones; can't touch aircraft
     if (attType === 'ifv') return 0.8;           // autocannon can pepper aircraft
     if (attType === 'turret' || attType === 'cannon' || attType === 'tesla') return 0; // defensive guns can't elevate (AA = SAM / Patriot)
     if (attType === 'mlrs' || attType === 'mortar' || attType === 'mortartrack' || attType === 'artillery' || attType === 'fieldgun' || attType === 'artyship') return 0; // artillery cannot engage aircraft
