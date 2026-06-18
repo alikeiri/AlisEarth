@@ -333,7 +333,10 @@ export class UI {
     const b = document.createElement('div');
     b.className = 'bbtn';
     b.id = 'btn_' + key;
-    b.innerHTML = `<span class="ico">${twemojify(icon)}</span>${name}<span class="cost"></span><span class="badge hidden"></span><div class="prog"></div>`;
+    // faction-exclusive unit/building → show its country flag in the top-left corner
+    const facId = UNITS[key]?.faction || BUILDINGS[key]?.faction;
+    const flag = facId && FACTIONS[facId] ? `<span class="facflag">${twemojify(FACTIONS[facId].flag)}</span>` : '';
+    b.innerHTML = `${flag}<span class="ico">${twemojify(icon)}</span>${name}<span class="cost"></span><span class="badge hidden"></span><div class="prog"></div>`;
     b.addEventListener('click', fn);
     if (ctxFn) b.addEventListener('contextmenu', e => { e.preventDefault(); ctxFn(); });
     this.btns[key] = b;

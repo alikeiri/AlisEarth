@@ -202,6 +202,7 @@ export interface BuildingDef {
   garrison?: boolean;                             // neutral urban building: infantry garrison it & fire out
   neutral?: boolean;                              // not buildable; spawned by the map (owned by the neutral slot)
   income?: number;                                // passive credits/sec while it stands (Oil Rig)
+  faction?: string;                               // faction-exclusive building (only that faction can build it)
 }
 
 export const BUILDINGS: Record<string, BuildingDef> = {
