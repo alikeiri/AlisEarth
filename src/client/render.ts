@@ -2041,6 +2041,26 @@ export class Renderer {
     };
   }
 
+  // project at an ABSOLUTE world Y (not relative to the ground) — used to pick
+  // flyers, which render at a fixed cruise altitude rather than hugging the ground
+  projectY(x: number, y: number, z: number): { x: number; y: number; ok: boolean } {
+    this.vTmp.set(x, y, z).project(this.camera);
+    return {
+      x: (this.vTmp.x + 1) / 2 * window.innerWidth,
+      y: (1 - this.vTmp.y) / 2 * window.innerHeight,
+      ok: this.vTmp.z < 1 && Math.abs(this.vTmp.x) < 1.15 && Math.abs(this.vTmp.y) < 1.15,
+    };
+  }
+
+  // the absolute flight altitude for a flyer at (x,z): a level cruise line that
+  // never dips into valleys (cruiseY floor) AND always clears terrain taller than
+  // that line — e.g. a mountain raised by terraforming after the cruise line was
+  // baked. `alt` is the per-model extra height. Shared by rendering AND picking so
+  // the click target sits exactly on the model.
+  flyY(x: number, z: number, alt = 2.3): number {
+    return Math.max(this.cruiseY, Math.max(this.map.heightAt(x, z), SEA) + 1.5) + alt;
+  }
+
   // ---- per-frame state ----
   setGhost(active: boolean, type?: string, cx?: number, cz?: number, ok?: boolean) {
     this.ghost.visible = active;
@@ -2338,7 +2358,7 @@ export class Renderer {
       }
       let gy = this.map.heightAt(v.x, v.z);
       let y: number;
-      if (md?.fly) y = this.cruiseY + (md.alt || 2.3) + Math.sin(this.time * 2.5 + v.i * 1.7) * 0.12; // level flight above the tallest terrain
+      if (md?.fly) y = this.flyY(v.x, v.z, md.alt || 2.3) + Math.sin(this.time * 2.5 + v.i * 1.7) * 0.12; // level cruise, lifting over any terrain taller than the cruise line
       else if (md?.move === 'sea') {
         y = SEA + (v.t === 'sub' ? -0.08 : 0.02) + Math.sin(this.time * 1.6 + v.i) * 0.03;
         gy = SEA; // selection ring floats on the water

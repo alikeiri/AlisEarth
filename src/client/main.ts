@@ -1257,11 +1257,12 @@ class GameClient {
     let best: any = null, bd = 1e9;
     for (const v of this.lastViews) {
       if (!filter(v)) continue;
-      // aircraft render at altitude — project at the unit's flight height so the
-      // click lands on the model itself, not the empty ground beneath it
+      // aircraft render at a fixed cruise altitude — project at that exact world
+      // height so the click lands on the model itself, not the empty ground beneath
       const ud = UNITS[v.t];
-      const h = v.b ? 1 : (ud?.fly ? (ud.alt || 2.3) : 0.5);
-      const p = this.renderer.project(v.x, v.z, h);
+      const p = (!v.b && ud?.fly)
+        ? this.renderer.projectY(v.x, this.renderer.flyY(v.x, v.z, ud.alt || 2.3), v.z)
+        : this.renderer.project(v.x, v.z, v.b ? 1 : 0.5);
       if (!p.ok) continue;
       const d = Math.hypot(p.x - sx, p.y - sy);
       const r = v.b ? 14 + (v.sz || 1) * 7 : (ud?.fly ? 20 : 16); // a touch more slack for fast movers
@@ -2204,7 +2205,10 @@ class GameClient {
       hover = null;
       const enemy = this.pickView(this.mouse.x, this.mouse.y, v => !this.allies.has(v.o));
       if (enemy) {
-        const p = this.renderer.project(enemy.x, enemy.z, enemy.b ? 1 : 0.5);
+        const ed = UNITS[enemy.t];
+        const p = (!enemy.b && ed?.fly)
+          ? this.renderer.projectY(enemy.x, this.renderer.flyY(enemy.x, enemy.z, ed.alt || 2.3), enemy.z)
+          : this.renderer.project(enemy.x, enemy.z, enemy.b ? 1 : 0.5);
         if (p.ok) hover = { x: p.x, y: p.y };
       }
       this.lastHover = hover;
