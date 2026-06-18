@@ -121,6 +121,7 @@ function simViews(sim: Sim, a: number): any[] {
 function simPlayers(sim: Sim): any[] {
   return sim.players.map(pl => ({
     c: Math.floor(pl.credits), a: pl.alive, pm: Math.round(pl.powerMade), pu: Math.round(pl.powerUsed),
+    pwr: Math.round(pl.power), pmax: Math.round(pl.powerMax), // stored battery + capacity for the HUD meter
     n: pl.name, f: pl.faction, tm: pl.team, ai: pl.isAI, tech: Object.keys(pl.tech).filter(k => pl.tech[k]), satOk: !!pl.satOk,
   }));
 }
@@ -311,6 +312,7 @@ class ReplayGame implements GameLike {
   players(): any[] {
     return this.sim.players.map(pl => ({
       c: Math.floor(pl.credits), a: pl.alive, pm: Math.round(pl.powerMade), pu: Math.round(pl.powerUsed),
+      pwr: Math.round(pl.power), pmax: Math.round(pl.powerMax), // stored battery + capacity for the HUD meter
       n: pl.name, f: pl.faction, tm: pl.team, ai: pl.isAI, tech: Object.keys(pl.tech).filter(k => pl.tech[k]), satOk: !!pl.satOk,
     }));
   }
