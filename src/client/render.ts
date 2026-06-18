@@ -26,6 +26,7 @@ const MODEL_DEFS: Record<string, { file: string; size: number; axis: 'l' | 'h'; 
   fueltruck: { file: 'harv',      size: 1.50, axis: 'l', ry: Math.PI, tint: 0xc0392b }, // red bomb truck (harv flip)
   flak:      { file: 'engineer',  size: 1.30, axis: 'l', ry: Math.PI, tint: 0x848e97 }, // gun truck (same flip as the pickup)
   mlrs:      { file: 'mlrs',      size: 1.60, axis: 'l', ry: 0 },
+  artillery: { file: 'artillery', size: 1.75, axis: 'l', ry: 0 }, // Ha-To SP artillery (Sketchfab, CC-BY)
   // trucks: cab/bed geometry defeats the front heuristic — flip both (user-verified)
   harv:      { file: 'harv',      size: 1.70, axis: 'l', ry: Math.PI },
   engineer:  { file: 'engineer',  size: 1.35, axis: 'l', ry: Math.PI },
@@ -914,6 +915,7 @@ export class Renderer {
   private extTex: Record<string, THREE.Texture> = {};
   private factoryProto: THREE.Group | null = null; // War Factory GLB (poly.pizza), cloned per building
   private factoryTop = 2.6;                         // scaled model height (team band sits here)
+  private bldgProtos: Record<string, THREE.Group> = {}; // other GLB building models, cloned per building
   private rampAnim = new Map<number, number>();     // unit id → seconds left of the "drive down the ramp" descent
   private prevVeh = new Set<number>();              // ground-vehicle ids seen last frame (to detect freshly-built ones)
   private fogTex: THREE.DataTexture | null = null;
@@ -1079,6 +1081,7 @@ export class Renderer {
     this.scene.add(this.oilMesh);
     this.loadOilModel();
     this.loadFactoryModel();
+    this.loadBuildingModel('refinery', 'refinery', 3.1); // Ore Refinery GLB (Sketchfab, CC-BY)
 
     // unit instancing: procedural models first, external GLBs swap in async
     for (const t of ['rifle', 'rocket', 'melody', 'tank', 'heavy', 'harv', 'engineer', 'recon', 'strike', 'msldrone', 'mlrs',
@@ -1479,13 +1482,29 @@ export class Renderer {
     }, undefined, () => { /* missing model — keep the procedural factory */ });
   }
 
-  // a building's render group: the GLB factory once loaded, else the procedural one.
+  // Load a GLB building model once: normalise it (centre x/z, base at y=0, scale to
+  // its cell footprint) and cache a prototype cloned per building in makeBuildingGroup.
+  private loadBuildingModel(type: string, file: string, footprint: number) {
+    new GLTFLoader().load('./models/' + file + '.glb', gltf => {
+      const src = gltf.scene; src.updateMatrixWorld(true);
+      const box = new THREE.Box3().setFromObject(src);
+      const size = new THREE.Vector3(); box.getSize(size);
+      const ctr = new THREE.Vector3(); box.getCenter(ctr);
+      const s = footprint / Math.max(0.001, Math.max(size.x, size.z));
+      src.position.set(-ctr.x, -box.min.y, -ctr.z);
+      src.traverse(o => { const m = o as any; if (m.isMesh) { m.castShadow = true; m.receiveShadow = true; } });
+      const inner = new THREE.Group(); inner.add(src); inner.scale.setScalar(s);
+      const proto = new THREE.Group(); proto.add(inner);
+      this.bldgProtos[type] = proto;
+    }, undefined, () => { /* missing model — keep the procedural building */ });
+  }
+
+  // a building's render group: a GLB model once loaded, else the procedural one.
   private makeBuildingGroup(type: string, col: number): THREE.Group {
-    if (type === 'factory' && this.factoryProto) {
-      // the GLB factory speaks for itself; ownership reads via the selection ring,
-      // minimap and HUD. (The old roof team-band floated above the smoke plumes.)
-      return this.factoryProto.clone(true);
-    }
+    // the GLB models speak for themselves; ownership reads via the selection ring,
+    // minimap and HUD.
+    if (type === 'factory' && this.factoryProto) return this.factoryProto.clone(true);
+    if (this.bldgProtos[type]) return this.bldgProtos[type].clone(true);
     return buildingGroupPro(type, col);
   }
 
