@@ -27,6 +27,7 @@ CC-BY 3.0 / 4.0 (attribution required — used under these terms):
 - IFV ("M2 Bradley IFV") — 42manako (Sketchfab, CC-BY 4.0)
 - Ore Refinery ("Rare Earth Element Refinery") — novusod (Sketchfab, CC-BY 4.0)
 - Artillery ("Ha-to artillery") — Herdyn (Sketchfab, CC-BY 4.0)
+- Airfield ("Command and Conquer style building") — AwooSlayer (Sketchfab, CC-BY 4.0)
 - Oil Field ("Oil pump") — Poly by Google
 - War Factory ("Factory") — Poly by Google
 

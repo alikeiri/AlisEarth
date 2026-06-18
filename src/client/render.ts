@@ -1082,6 +1082,7 @@ export class Renderer {
     this.loadOilModel();
     this.loadFactoryModel();
     this.loadBuildingModel('refinery', 'refinery', 3.1); // Ore Refinery GLB (Sketchfab, CC-BY)
+    this.loadBuildingModel('airfield', 'airfield', 2.1);  // Airfield GLB (C&C-style building, Sketchfab, CC-BY)
 
     // unit instancing: procedural models first, external GLBs swap in async
     for (const t of ['rifle', 'rocket', 'melody', 'tank', 'heavy', 'harv', 'engineer', 'recon', 'strike', 'msldrone', 'mlrs',
