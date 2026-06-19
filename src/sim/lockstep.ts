@@ -66,6 +66,12 @@ export class LockstepEngine {
   // input locally via the (deterministic) AI. Every surviving client does the
   // same from the SAME server-agreed tick, so the sims stay identical.
   dropToAI(player: number, fromTick: number) { this.droppedFrom.set(player, fromTick); }
+  // a peer disconnected (left or lost connection): RESIGN them — every client
+  // injects the same surrender at the same agreed tick, scuttling their forces so
+  // the game continues (and ends if only one team is left) instead of freezing.
+  dropToResign(player: number, fromTick: number) { this.resignFrom.set(player, fromTick); }
+  private resignFrom = new Map<number, number>(); // player -> earliest tick they may resign
+  private resignDone = new Set<number>();          // players whose one-time surrender has been injected
   // the last tick we hold this player's input for (for the server's drop vote)
   lastInputTickFor(player: number): number { return this.lastInput[player]; }
   // per-player input "lead": how many ticks ahead of our current sim tick we have
@@ -92,8 +98,10 @@ export class LockstepEngine {
   // is player p's input for tick T available (or supplied by AI because p was dropped)?
   private have(p: number, s: (Cmd[] | undefined)[], tick: number): boolean {
     if (s[p] !== undefined) return true;
-    const from = this.droppedFrom.get(p);
-    return from !== undefined && tick >= from;
+    const ai = this.droppedFrom.get(p);
+    if (ai !== undefined && tick >= ai) return true;
+    const rf = this.resignFrom.get(p);
+    return rf !== undefined && tick >= rf;          // resigned: input is "known" (surrender then nothing)
   }
   private ready(): boolean {
     const s = this.inputs.get(this.sim.tickN);
@@ -133,9 +141,19 @@ export class LockstepEngine {
       const s = this.inputs.get(this.sim.tickN)!;
       const merged: Cmd[] = [];
       for (let p = 0; p < this.nPlayers; p++) {
-        // a dropped player's missing input is regenerated locally by the AI —
-        // deterministic, so every surviving client produces the identical command
-        const cmds = s[p] !== undefined ? s[p]! : this.aiFor(this.sim, p) || [];
+        let cmds: Cmd[];
+        if (s[p] !== undefined) cmds = s[p]!;
+        else if (this.resignFrom.has(p)) {
+          // a disconnected player resigns: inject the surrender ONCE, on the first
+          // tick we lack their real input (the resume point is identical on every
+          // client once the redundant window has converged), then no more input
+          if (!this.resignDone.has(p)) { this.resignDone.add(p); cmds = [{ k: 'surrender', p, reason: 'left' }]; }
+          else cmds = [];
+        } else {
+          // a dropped player's missing input is regenerated locally by the AI —
+          // deterministic, so every surviving client produces the identical command
+          cmds = this.aiFor(this.sim, p) || [];
+        }
         merged.push(...cmds);
       }
       const executed = this.sim.tickN;

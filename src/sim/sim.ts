@@ -468,7 +468,7 @@ export class Sim {
     if (c.k === 'surrender') {
       // white flag: scuttle everything this player owns; the normal
       // elimination flow (deaths → checkEnd) does the rest
-      this.events.push({ e: 'surrender', p: c.p });
+      this.events.push({ e: 'surrender', p: c.p, reason: c.reason }); // reason 'left' = disconnect/resign
       for (const e of this.ents.values()) if (e.owner === c.p) e.hp = 0;
       return;
     }

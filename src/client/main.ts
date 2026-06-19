@@ -462,7 +462,7 @@ class NetLockstepGame implements GameLike {
     // P2P and the WS fallback during a transition is harmless (first value wins)
     net.on('lsin', (x: any) => this.engine.receive({ player: x.player, frames: x.frames }));
     net.on('lsdropvote', (x: any) => this.net.send({ t: 'lslast', player: x.player, tick: this.engine.lastInputTickFor(x.player) }));
-    net.on('lsdrop', (x: any) => this.engine.dropToAI(x.player, x.tick));
+    net.on('lsdrop', (x: any) => this.engine.dropToResign(x.player, x.tick)); // a peer left → resign them, game continues
     net.on('chat', (x: any) => { if (this.chatQ.length < 50) this.chatQ.push(x); });
   }
   get tickN() { return this.sim.tickN; }
@@ -2197,7 +2197,8 @@ class GameClient {
       if (ev.e === 'boom' && ev.big) this.ui.ping(ev.x, ev.z);
       if (ev.e === 'surrender') {
         const who = this.game.players?.()[ev.p]?.n || 'Enemy';
-        this.appendChat({ name: who, to: 'all', msg: 'We surrender! The region is yours.' });
+        const msg = ev.reason === 'left' ? 'has left the battle — resigned.' : 'We surrender! The region is yours.';
+        this.appendChat({ name: who, to: 'all', msg });
       }
       if (ev.e === 'sdtick' && ev.owner === this.game.me) audio.play('sdbeep');
       if (ev.e === 'tech' && ev.tech === 'satellite') {
