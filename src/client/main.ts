@@ -2784,7 +2784,7 @@ function buildTeamRow() {
 }
 
 function show(id: string) {
-  for (const s of ['menu', 'mpLobby', 'lobby', 'endScreen', 'features']) $(s).classList.toggle('hidden', s !== id);
+  for (const s of ['menu', 'lobby', 'endScreen', 'features']) $(s).classList.toggle('hidden', s !== id);
   if (id === 'menu') { rollCallsign(); renderAiIntel(); } // fresh name + AI study readout
 }
 
@@ -2848,7 +2848,7 @@ function rollCallsign() {
   inp.value = pick;
 }
 function hideAll() {
-  for (const s of ['menu', 'mpLobby', 'lobby', 'endScreen', 'features']) $(s).classList.add('hidden');
+  for (const s of ['menu', 'lobby', 'endScreen', 'features']) $(s).classList.add('hidden');
 }
 
 function buildFactionCards() {
@@ -2858,7 +2858,7 @@ function buildFactionCards() {
     const c = document.createElement('div');
     c.className = 'fcard' + (f.id === selFaction ? ' sel' : '');
     c.innerHTML = `<div class="flag">${twemojify(f.flag)}</div><div class="fname">${f.name}</div><div class="fperk">${f.perk}</div>`;
-    c.addEventListener('click', () => { selFaction = f.id; buildFactionCards(); });
+    c.addEventListener('click', () => { selFaction = f.id; buildFactionCards(); if (net && !client) net.send({ t: 'hello', name: playerName(), faction: selFaction }); });
     wrap.appendChild(c);
   }
 }
@@ -3361,9 +3361,33 @@ async function connectNet(): Promise<Net> {
   n.on('lobbymsg', (m: any) => appendLobbyChat(m));
   n.on('err', (m: any) => { $('mpErr').textContent = m.msg || 'Server error'; });
   n.on('_close', () => {
-    if (!client) { $('menuErr').textContent = 'Connection lost'; show('menu'); }
+    net = null;
+    if (!client) {
+      // back on the menu: just reflect "offline" inline; Skirmish still works
+      const st = document.getElementById('mpConnState');
+      if (st) { st.textContent = 'offline — tap CREATE/JOIN to retry'; st.style.color = '#ff6b5e'; }
+    }
   });
   return n;
+}
+
+// connect to the shared lobby and register presence; reflect status inline on the
+// main page. Safe to call repeatedly (no-op if already connected).
+async function goOnline(): Promise<boolean> {
+  const st = document.getElementById('mpConnState');
+  try {
+    if (!net) net = await connectNet();
+    net.send({ t: 'hello', name: playerName(), faction: selFaction });
+    if (st) { st.textContent = '● online'; st.style.color = '#7be08a'; }
+    return true;
+  } catch {
+    net = null;
+    if (st) { st.textContent = 'offline — server unreachable'; st.style.color = '#ff6b5e'; }
+    const u = document.getElementById('mpUsers'), g = document.getElementById('mpGames');
+    if (u) u.innerHTML = '<div style="color:#5f7384">Server offline — Skirmish still works.</div>';
+    if (g) g.innerHTML = '<div style="color:#5f7384">—</div>';
+    return false;
+  }
 }
 
 function initMenus() {
@@ -3483,19 +3507,10 @@ function initMenus() {
       }));
     } catch { list.innerHTML = 'Replays live on the game server — open the deployed site to browse them.'; }
   });
-  // MULTIPLAYER → connect and enter the shared global lobby (presence + games)
-  $('btnMulti').addEventListener('click', async () => {
-    $('menuErr').textContent = '';
-    fogEnabled = ($('fogChk') as HTMLInputElement)?.checked ?? true; // per-client visual choice
-    try {
-      if (!net) net = await connectNet();
-      $('mpErr').textContent = '';
-      $('mpUsers').innerHTML = '<div style="color:#5f7384">Connecting…</div>';
-      $('mpGames').innerHTML = '';
-      net.send({ t: 'hello', name: playerName(), faction: selFaction });
-      show('mpLobby');
-    } catch (e: any) { $('menuErr').textContent = e.message + ' — is the Node server running?'; }
-  });
+  // Multiplayer presence lives inline on the main page: connect on load so the
+  // online-players and open-games lists populate live. Skirmish works regardless,
+  // so a server that's down just shows "offline" here.
+  goOnline();
   // FEATURE REQUESTS: a public suggestion box (stored server-side, human-reviewed)
   const loadFeatures = async () => {
     const list = $('frList'), count = $('frCount');
@@ -3531,19 +3546,21 @@ function initMenus() {
       loadFeatures();
     } catch { err.textContent = 'Feature requests need the deployed game server.'; }
   });
-  // create a game others can see and join from the lobby
-  $('btnMpCreate').addEventListener('click', () => {
+  // create a game others can see and join — uses the map/size options above
+  $('btnMpCreate').addEventListener('click', async () => {
     $('mpErr').textContent = '';
-    net?.send({ t: 'create', name: playerName(), faction: selFaction, size: selSize, diff: selDiff, islands: ($('mapType') as HTMLSelectElement)?.value === 'islands', urban: ($('mapType') as HTMLSelectElement)?.value === 'urban', flat: ($('mapType') as HTMLSelectElement)?.value === 'flat', steel: ($('mapType') as HTMLSelectElement)?.value === 'steel', metal: ($('mapType') as HTMLSelectElement)?.value === 'metal', lockstep: ($('lockstepChk') as HTMLInputElement)?.checked ?? false });
+    fogEnabled = ($('fogChk') as HTMLInputElement)?.checked ?? true;
+    if (!net && !(await goOnline())) { $('mpErr').textContent = 'Server unreachable'; return; }
+    const mt = ($('mapType') as HTMLSelectElement)?.value;
+    net?.send({ t: 'create', name: playerName(), faction: selFaction, size: selSize, diff: selDiff, islands: mt === 'islands', urban: mt === 'urban', flat: mt === 'flat', steel: mt === 'steel', metal: mt === 'metal', lockstep: ($('lockstepChk') as HTMLInputElement)?.checked ?? false });
   });
-  $('btnMpJoinCode').addEventListener('click', () => {
+  $('btnMpJoinCode').addEventListener('click', async () => {
     $('mpErr').textContent = '';
     const code = ($('mpJoinCode') as HTMLInputElement).value.trim().toUpperCase();
     if (code.length !== 4) { $('mpErr').textContent = 'Enter a 4-letter room code'; return; }
+    if (!net && !(await goOnline())) { $('mpErr').textContent = 'Server unreachable'; return; }
     net?.send({ t: 'join', code, name: playerName(), faction: selFaction });
   });
-  // BACK leaves the lobby entirely (drops the connection)
-  $('btnMpBack').addEventListener('click', () => { net?.close(); net = null; show('menu'); });
   // lobby chat: same chat shown on the global lobby AND the room waiting screen
   const sendLobbyChat = (inputId: string) => {
     const inp = $(inputId) as HTMLInputElement;
@@ -3558,10 +3575,11 @@ function initMenus() {
   wireLobbyChat('roomChatInput', 'roomChatSend');
   wireNotifyToggles();
   $('btnStart').addEventListener('click', () => net?.send({ t: 'start' }));
-  // LEAVE a room lobby returns to the global lobby (stay connected)
+  // LEAVE a room's waiting screen returns to the main page (stay connected so the
+  // online/open-games lists keep updating there)
   $('btnLeave').addEventListener('click', () => {
-    if (net) { net.send({ t: 'leaveRoom' }); show('mpLobby'); }
-    else show('menu');
+    if (net) net.send({ t: 'leaveRoom' });
+    show('menu');
   });
   // after a match: multiplayer players return to the lobby (reconnect for a clean
   // socket + fresh handlers); single-player/replay just reloads to the menu
@@ -3569,7 +3587,8 @@ function initMenus() {
     if (endReturnsToLobby) {
       endReturnsToLobby = false;
       if (client) { client.destroy(); client = null; } // also closes the old socket
-      try { net = await connectNet(); net.send({ t: 'hello', name: playerName(), faction: selFaction }); show('mpLobby'); }
+      show('menu');
+      try { net = await connectNet(); net.send({ t: 'hello', name: playerName(), faction: selFaction }); }
       catch { location.reload(); }
     } else location.reload();
   });

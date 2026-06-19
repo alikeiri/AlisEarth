@@ -367,51 +367,51 @@
         <button class="mbtn" id="btnReplays" title="Watch matches previously played on this server">REPLAYS</button>
       </div>
       <div id="replayList" class="hidden" style="text-align:left;background:rgba(20,28,38,0.9);border:1px solid #2c3e50;border-radius:6px;padding:8px 10px;font-size:11px;line-height:1.7;color:#9fb3c8;max-height:150px;overflow-y:auto"></div>
-      <div class="mrow">
-        <button class="mbtn" id="btnMulti" style="width:100%;background:#16323e;border-color:#2e7d8f;color:#cdeef6">🌐 MULTIPLAYER LOBBY</button>
+      <!-- Multiplayer is inline on the main page: see who's online, join an open
+           game, or CREATE one using the options above — no separate lobby page -->
+      <div style="margin-top:12px;border-top:1px solid #2c3a44;padding-top:10px">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+          <h3 style="margin:0;text-align:left;font-size:14px;color:#cdeef6;flex:1">🌐 Multiplayer</h3>
+          <span id="mpConnState" style="font-size:11px;color:#5f7384">connecting…</span>
+        </div>
+        <div style="display:flex;gap:12px;align-items:stretch;text-align:left">
+          <div style="flex:1;min-width:0">
+            <div style="font-size:11px;color:#9fb3c8;margin-bottom:3px">Players online (<span id="mpUserCount">0</span>)</div>
+            <div id="mpUsers" style="background:rgba(20,28,38,0.9);border:1px solid #2c3e50;border-radius:6px;padding:6px 8px;font-size:12px;line-height:1.7;color:#9fb3c8;height:118px;overflow-y:auto"></div>
+          </div>
+          <div style="flex:1.3;min-width:0">
+            <div style="font-size:11px;color:#9fb3c8;margin-bottom:3px">Open games — click JOIN</div>
+            <div id="mpGames" style="background:rgba(20,28,38,0.9);border:1px solid #2c3e50;border-radius:6px;padding:6px 8px;font-size:12px;line-height:1.6;color:#9fb3c8;height:118px;overflow-y:auto"></div>
+          </div>
+        </div>
+        <label for="lockstepChk" style="display:flex;align-items:center;gap:8px;color:#9fb3c8;font-size:12px;cursor:pointer;margin:6px 0 4px">
+          <input type="checkbox" id="lockstepChk" checked style="width:16px;height:16px;accent-color:#ffc940;cursor:pointer" />
+          Lockstep netcode — peer-to-peer, scales to huge unit counts (recommended)
+        </label>
+        <div class="mrow">
+          <button class="mbtn primary" id="btnMpCreate" style="background:#16323e;border-color:#2e7d8f;color:#cdeef6">🌐 CREATE ONLINE GAME</button>
+          <input class="minput" id="mpJoinCode" maxlength="4" placeholder="CODE" style="flex:0 0 90px" />
+          <button class="mbtn" id="btnMpJoinCode">JOIN</button>
+        </div>
+        <details style="text-align:left;margin-top:6px">
+          <summary style="cursor:pointer;user-select:none;list-style:none;font-size:12px;color:#9fb3c8;display:flex;align-items:center;justify-content:space-between">
+            <span><span class="caret">▸</span> Lobby chat</span>
+            <button type="button" class="lobbyNotifyToggle" title="Play a sound when a new message arrives while this tab is in the background" style="background:none;border:0;color:#78909c;font-size:11px;cursor:pointer;padding:2px 4px">🔔 Alert: on</button>
+          </summary>
+          <div class="lobbyChatLog" id="lobbyChatLog" style="background:rgba(20,28,38,0.9);border:1px solid #2c3e50;border-radius:6px;padding:6px 8px;font-size:12px;line-height:1.6;color:#cfd8dc;height:100px;overflow-y:auto;margin-top:6px"></div>
+          <div class="mrow" style="margin-top:6px">
+            <input class="minput" id="lobbyChatInput" maxlength="160" placeholder="Say something…" style="flex:1" />
+            <button class="mbtn" id="lobbyChatSend" style="flex:0 0 80px">SEND</button>
+          </div>
+        </details>
+        <div class="err" id="mpErr"></div>
       </div>
-      <div class="mrow">
+      <div class="mrow" style="margin-top:8px">
         <button class="mbtn" id="btnFeatures" style="width:100%">📝 FEATURE REQUESTS</button>
       </div>
       <div class="err" id="menuErr"></div>
       <div style="margin-top:4px;text-align:center"><a href="./unit-overview.html" style="color:#8aa0b2;font-size:12px;letter-spacing:0.04em;text-decoration:none">📊 Unit Overview — stats &amp; counter matrix</a></div>
       <div id="buildInfo" style="margin-top:6px;font-size:10px;color:#5f7384;letter-spacing:0.03em;text-align:center"></div>
-    </div>
-  </div>
-
-  <div id="mpLobby" class="screen hidden">
-    <div class="title" style="font-size:30px">MULTIPLAYER LOBBY</div>
-    <div class="menubox" style="max-width:620px">
-      <div style="display:flex;gap:14px;align-items:stretch;text-align:left">
-        <div style="flex:1;min-width:0">
-          <h3 style="margin:0 0 6px">Players online (<span id="mpUserCount">0</span>)</h3>
-          <div id="mpUsers" style="background:rgba(20,28,38,0.9);border:1px solid #2c3e50;border-radius:6px;padding:6px 8px;font-size:12px;line-height:1.8;color:#9fb3c8;height:190px;overflow-y:auto"></div>
-        </div>
-        <div style="flex:1.3;min-width:0">
-          <h3 style="margin:0 0 6px">Open games</h3>
-          <div id="mpGames" style="background:rgba(20,28,38,0.9);border:1px solid #2c3e50;border-radius:6px;padding:6px 8px;font-size:12px;line-height:1.6;color:#9fb3c8;height:190px;overflow-y:auto"></div>
-        </div>
-      </div>
-      <label for="lockstepChk" style="display:flex;align-items:center;gap:8px;color:#9fb3c8;font-size:13px;cursor:pointer;margin:2px 0">
-        <input type="checkbox" id="lockstepChk" style="width:16px;height:16px;accent-color:#ffc940;cursor:pointer" />
-        Lockstep netcode (beta) — scales to huge unit counts; best on high-latency links
-      </label>
-      <div class="mrow">
-        <button class="mbtn primary" id="btnMpCreate">CREATE GAME</button>
-        <input class="minput" id="mpJoinCode" maxlength="4" placeholder="CODE" style="flex:0 0 96px" />
-        <button class="mbtn" id="btnMpJoinCode">JOIN BY CODE</button>
-      </div>
-      <div style="display:flex;align-items:center;justify-content:space-between;margin:6px 0 4px">
-        <h3 style="margin:0;text-align:left">Lobby chat</h3>
-        <button type="button" class="lobbyNotifyToggle" title="Play a sound when a new message arrives while this tab is in the background" style="background:none;border:0;color:#78909c;font-size:12px;cursor:pointer;padding:2px 4px">🔔 Alert: on</button>
-      </div>
-      <div id="lobbyChatLog" class="lobbyChatLog" style="background:rgba(20,28,38,0.9);border:1px solid #2c3e50;border-radius:6px;padding:6px 8px;font-size:12px;line-height:1.6;color:#cfd8dc;height:120px;overflow-y:auto;text-align:left"></div>
-      <div class="mrow" style="margin-top:6px">
-        <input class="minput" id="lobbyChatInput" maxlength="160" placeholder="Say something…" style="flex:1" />
-        <button class="mbtn" id="lobbyChatSend" style="flex:0 0 90px">SEND</button>
-      </div>
-      <div class="err" id="mpErr"></div>
-      <div class="mrow"><button class="mbtn" id="btnMpBack" style="width:100%">BACK</button></div>
     </div>
   </div>
 

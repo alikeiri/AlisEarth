@@ -590,6 +590,9 @@ wss.on('connection', ws => {
         steel: !!m.steel,
         metal: !!m.metal,
         lockstep: !!m.lockstep,
+        mapType: MAP_TYPES.includes(m.mapType) ? m.mapType
+          : m.islands ? 'islands' : m.urban ? 'urban' : m.flat ? 'flat' : m.steel ? 'steel' : m.metal ? 'metal' : 'continent',
+        ai: [], teams: [0], // host starts on team 0 (FFA); host edits teams/AI via roomcfg
       };
       me.room = room;
       rooms.set(code, room);
