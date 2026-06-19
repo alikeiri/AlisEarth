@@ -615,6 +615,8 @@ class GameClient {
   private lastT = 0;
   private frame = 0;
   private lastMinimap = 0; // wall-clock ms of the last minimap redraw (throttled to 1/s)
+  private lastUiUpdate = 0; // wall-clock ms of the last sidebar/build-menu DOM update (throttled ~12/s)
+  private lastSelSig = -1;  // selection signature — when it changes the sidebar refreshes immediately
   private over = false;
   private hb: Worker | null = null;     // heartbeat worker: keeps the sim/net advancing when the tab is hidden
   private hbUrl = '';
@@ -1664,11 +1666,13 @@ class GameClient {
       const radar = !!(v.b && def?.sight) && !v.po && (v.pr ?? 1) >= 1;
       if (radar) sight = def.sight * (1 + 0.25 * ((v.lv || 1) - 1)); // +25% coverage per upgrade level
       if (!v.b && v.t === 'patriot' && v.fo) sight = 20; // fortified Patriot: bigger deployed radar
-      // high-ground vantage: standing on elevated terrain sees ~25% farther (not
-      // stacked on the Radar Dome's long-range intel sweep)
+      // high-ground vantage: sight extends with the unit's OWN absolute terrain
+      // height (a % of how high it stands), up to +30% on peaks — independent of any
+      // enemy. Not stacked on the Radar Dome's long-range intel sweep.
       if (!radar) {
         const gh = v.b ? this.game.map.cellH(v.cx, v.cz) : this.game.map.heightAt(v.x, v.z);
-        if (gh > SEA + 2.5) sight *= 1.25;
+        const frac = Math.max(0, Math.min(1, (gh - (SEA + 1.15)) / 4.0));
+        sight *= 1 + 0.30 * frac;
       }
       const cx = Math.floor(v.x), cz = Math.floor(v.z), r = Math.ceil(sight);
       for (let dz = -r; dz <= r; dz++) for (let dx = -r; dx <= r; dx++) {
@@ -2269,7 +2273,19 @@ class GameClient {
     if (this.perfOn) this.renderMs += (performance.now() - _r0 - this.renderMs) * 0.2;
 
     const players = this.game.players();
-    if (!this.guiHidden) this.ui.update(this.game.me, players, views, this.game.tickN, this.selection);
+    // The sidebar/build-menu DOM update is one of the heaviest per-frame costs but
+    // doesn't need 60 Hz — throttle it to ~12 Hz. Refresh IMMEDIATELY whenever the
+    // selection changes so clicking a unit/building still feels instant, and force
+    // one update on the very first frame. (World 3D + overlay still render every frame.)
+    if (!this.guiHidden) {
+      let selSig = this.selection.size;
+      for (const id of this.selection) selSig = (selSig * 31 + id) | 0;
+      const now = performance.now();
+      if (selSig !== this.lastSelSig || now - this.lastUiUpdate >= 80) {
+        this.ui.update(this.game.me, players, views, this.game.tickN, this.selection);
+        this.lastUiUpdate = now; this.lastSelSig = selSig;
+      }
+    }
     this.frame++;
     // minimap redraws once per second (it's a cheap-to-skip overview, not the
     // live battlefield) — pass the real elapsed time so flash-fades stay correct

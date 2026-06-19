@@ -102,8 +102,12 @@ const FORT_ATK_MUL = 1.5;   // fortified infantry hit harder
 const FORT_DEF_MUL = 0.5;   // ...and take half damage (settled)
 const FORT_DEPLOY_VULN = 1.5; // ...but take extra while deploying / packing
 const FORT_RANGE_MUL = 1.2; // ...and see/shoot 20% farther while dug in
-const HG_STEP = 1.2;        // ground-height advantage (cells) that counts as "high ground"
-const HG_RANGE_MUL = 1.2;   // high ground: +20% attack range against lower targets
+// Height advantage now scales with the attacker's OWN terrain height (a % of how
+// high it stands), independent of the target's height. Flat land = no bonus; it
+// ramps to the max at high terrain.
+const HG_BASE = SEA + 1.15;  // flat land level — no height bonus at or below this
+const HG_SPAN = 4.0;         // height above HG_BASE that earns the FULL bonus
+const HG_RANGE_MAX = 0.25;   // peak terrain: up to +25% attack range (gradient from 0)
 const INF_CLIFF_SPEED = 0.4; // infantry climb cliffs at 40% speed
 const MISSILE_CAP = 25;     // max armed missiles a single silo can stockpile
 const CARRY_VEH = 10;       // transport ship capacity: vehicles
@@ -1165,8 +1169,8 @@ export class Sim {
       if (score > bestScore) { bestScore = score; best = u; }
     };
     const aaOnly = !e.b && !!attDef?.aaOnly;        // dedicated SAM: aircraft only
-    // widen the pre-filter so high-ground targets at the extended range are seen
-    for (const u of this.nearbyUnits(e.x, e.z, range * HG_RANGE_MUL + 1)) {
+    // widen the pre-filter so high-ground shooters reaching the extended range are seen
+    for (const u of this.nearbyUnits(e.x, e.z, range * (1 + HG_RANGE_MAX) + 1)) {
       if (!this.foe(u.owner, e.owner) || u.hp <= 0 || !this.players[u.owner].alive) continue;
       const d = this.distToEnt(e.x, e.z, u);
       const tdef = UNITS[u.type];
@@ -1198,14 +1202,19 @@ export class Sim {
     return best;
   }
 
-  // high-ground advantage: a unit/building standing meaningfully higher than its
-  // target reaches ~20% farther (shooting downhill). Map-relative, so it needs no
-  // per-map tuning. Deterministic (reads the shared heightfield).
+  // high-ground advantage: a unit/building on higher terrain reaches farther,
+  // based on its OWN absolute height (a fraction of how high it stands), NOT
+  // relative to the target. The enemy's position is irrelevant — standing on a
+  // hill always extends your reach. Deterministic (reads the shared heightfield).
   private groundH(e: Entity): number {
     return e.b ? this.map.cellH(e.cx, e.cz) : this.map.heightAt(e.x, e.z);
   }
-  private hgRangeMul(att: Entity, tgt: Entity): number {
-    return this.groundH(att) - this.groundH(tgt) >= HG_STEP ? HG_RANGE_MUL : 1;
+  // 0 at flat land, 1 at peak terrain — the normalized height of where `e` stands
+  private heightFrac(e: Entity): number {
+    return Math.max(0, Math.min(1, (this.groundH(e) - HG_BASE) / HG_SPAN));
+  }
+  private hgRangeMul(att: Entity, _tgt?: Entity): number {
+    return 1 + HG_RANGE_MAX * this.heightFrac(att);
   }
 
   private dealDamage(att: Entity, tgt: Entity, base: number, force = false) {

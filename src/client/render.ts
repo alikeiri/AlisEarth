@@ -1416,21 +1416,27 @@ export class Renderer {
     // source layer pixels (procedural textures; always available synchronously)
     const grab = (k: string) => { const cv = groundTexture(k, 1).image as HTMLCanvasElement; return cv.getContext('2d')!.getImageData(0, 0, cv.width, cv.height).data; };
     const G = grab('grass'), R = grab('rock'), Sd = grab('sand'), D = grab('dirt'), TS = 256;
-    const tx = (u: number) => (((Math.floor(u * TS) % TS) + TS) % TS); // tiled texel coord
-    // hoist the per-column tiling indices + cell interpolation out of the inner loop
+    const wrap = (i: number) => (((i % TS) + TS) % TS); // wrap into the seamless source tile
+    // Sample the source layers at ~1:1 NATIVE texel density — CROP the tiled source,
+    // don't minify it. The old code advanced ~4 source texels per baked texel, which
+    // downscaled the 256² layers ~4× (blurry, with a tight visible repeat). Now each
+    // baked texel maps to roughly one source texel, so the bake keeps the source's
+    // full sharpness. The layers advance at slightly different rates so the composite
+    // shows no obvious repeat; grass/sand are a crisp 1:1 crop, rock & dirt a bit larger.
+    const SG = 1.0, SR = 0.6, SD = 0.85; // source texels advanced per baked texel, per layer
     const colGx = new Int32Array(NW), colRx = new Int32Array(NW), colDx = new Int32Array(NW);
     const colX0 = new Int32Array(NW), colX1 = new Int32Array(NW), colFx = new Float32Array(NW);
     for (let px = 0; px < NW; px++) {
-      const x = (px / NW) * W, u = x * 0.42;
-      colGx[px] = tx(u); colRx[px] = tx(u * 0.55); colDx[px] = tx(u * 0.8);
+      colGx[px] = wrap(Math.floor(px * SG)); colRx[px] = wrap(Math.floor(px * SR)); colDx[px] = wrap(Math.floor(px * SD));
+      const x = (px / NW) * W;
       const cx = Math.max(0, Math.min(W - 1.001, x - 0.5)), x0 = Math.floor(cx);
       colX0[px] = x0; colX1[px] = Math.min(W - 1, x0 + 1); colFx[px] = cx - x0;
     }
     const cv = document.createElement('canvas'); cv.width = NW; cv.height = NH;
     const img = cv.getContext('2d')!.createImageData(NW, NH), d = img.data;
     for (let py = 0; py < NH; py++) {
-      const z = (py / NH) * H, v = z * 0.42;
-      const rowG = tx(v) * TS, rowR = tx(v * 0.55) * TS, rowD = tx(v * 0.8) * TS; // sand shares grass scale
+      const z = (py / NH) * H;
+      const rowG = wrap(Math.floor(py * SG)) * TS, rowR = wrap(Math.floor(py * SR)) * TS, rowD = wrap(Math.floor(py * SD)) * TS; // sand shares grass scale
       const cz = Math.max(0, Math.min(H - 1.001, z - 0.5)), z0 = Math.floor(cz), z1 = Math.min(H - 1, z0 + 1), fz = cz - z0;
       const r0 = z0 * W, r1 = z1 * W;
       let o = py * NW * 4;
