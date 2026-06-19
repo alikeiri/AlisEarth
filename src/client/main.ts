@@ -1077,6 +1077,7 @@ class GameClient {
   }
 
   destroy() {
+    disableExitGuard();   // tearing down the match — stop trapping the Back button
     cancelAnimationFrame(this.raf);
     if (this.hb) { try { this.hb.postMessage('x'); this.hb.terminate(); } catch { /* already gone */ } this.hb = null; }
     if (this.hbUrl) { try { URL.revokeObjectURL(this.hbUrl); } catch { /* ignore */ } this.hbUrl = ''; }
@@ -3120,6 +3121,45 @@ function renderEndStats(game: GameLike) {
   draw();
 }
 
+// --- Back-button / accidental-exit guard ---------------------------------
+// A mouse "back" button (or Backspace/swipe) navigates the browser back, which
+// unloads the page and dumps the player out of a live match. While a game is
+// running we (1) trap history Back via a pushed dummy state — pressing Back fires
+// popstate instead of leaving, and we re-anchor + surface the in-game exit menu —
+// and (2) arm beforeunload so reload / tab-close / a real unload still asks first.
+// Both are active ONLY during a match, so the menu never nags.
+let exitGuardActive = false;
+function beforeUnloadGuard(e: BeforeUnloadEvent) {
+  if (!exitGuardActive) return;
+  // Browsers show their own generic wording (custom text is ignored), but a
+  // non-empty returnValue + preventDefault is the most compatible way to make the
+  // "Leave site?" prompt appear across Chrome and Firefox.
+  e.preventDefault();
+  e.returnValue = 'You are in a match — leave the game?';
+  return e.returnValue;
+}
+function popstateGuard() {
+  if (!exitGuardActive) return;
+  // Back was pressed (e.g. the mouse back button). Stay on the page by re-pushing
+  // our anchor, then show the friendly exit menu instead of silently leaving.
+  history.pushState({ feGame: true }, '', location.href);
+  const em = document.getElementById('exitMenu');
+  if (em && client) em.classList.remove('hidden');
+}
+function enableExitGuard() {
+  if (exitGuardActive) return;
+  exitGuardActive = true;
+  try { history.pushState({ feGame: true }, '', location.href); } catch { /* history blocked */ }
+  window.addEventListener('beforeunload', beforeUnloadGuard);
+  window.addEventListener('popstate', popstateGuard);
+}
+function disableExitGuard() {
+  if (!exitGuardActive) return;
+  exitGuardActive = false;
+  window.removeEventListener('beforeunload', beforeUnloadGuard);
+  window.removeEventListener('popstate', popstateGuard);
+}
+
 function startGame(game: GameLike) {
   // first game: preload all models behind the loading screen, then start (the
   // menu loads instantly; models are fetched only once a game is actually starting)
@@ -3130,6 +3170,7 @@ function startGame(game: GameLike) {
   hideAll();
   audio.init();
   client = new GameClient(game, (won, winnerName) => {
+    disableExitGuard();  // match decided — the end screen / Back should work normally
     const isSim = (game as any).isSim;
     audio.play(won || isSim ? 'win' : 'lose');
     renderEndStats(game); // battle report table + chart (skirmish/sim/replay)
@@ -3200,6 +3241,8 @@ function startGame(game: GameLike) {
   }
   // guided first game: overlay the step-by-step coach on top of the HUD
   if (game instanceof LocalGame && game.tutorial && client) tutCtl = new TutorialController(client, game);
+  // arm the Back-button / accidental-exit guard for the duration of the match
+  enableExitGuard();
 }
 
 // a fresh ridiculous callsign every game when no name is entered
