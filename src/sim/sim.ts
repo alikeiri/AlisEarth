@@ -487,11 +487,18 @@ export class Sim {
       return;
     }
     if (c.k === 'cancel') {
-      // cancel the most recently queued unit of this type, full refund
+      // cancel ONE queued unit of this type (full refund). Prefer the explicitly
+      // named builder (the factory the player has selected) so its visible queue
+      // drops; otherwise fall back to the most recently queued across all builders.
       const def = UNITS[c.type];
       if (!def) return;
       let best: Entity | null = null, bestIdx = -1;
-      for (const e of this.ents.values()) {
+      const lastOf = (e: Entity) => { for (let i = e.queue.length - 1; i >= 0; i--) if (e.queue[i].type === c.type) return i; return -1; };
+      if (c.bid != null && c.bid >= 0) {
+        const e = this.ents.get(c.bid);
+        if (e && e.b && e.owner === c.p) { const i = lastOf(e); if (i >= 0) { best = e; bestIdx = i; } }
+      }
+      if (!best) for (const e of this.ents.values()) {
         if (!e.b || e.owner !== c.p || e.type !== def.builtAt) continue;
         for (let i = e.queue.length - 1; i >= 0; i--) {
           if (e.queue[i].type === c.type && i > bestIdx) { best = e; bestIdx = i; break; }

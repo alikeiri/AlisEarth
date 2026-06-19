@@ -633,7 +633,7 @@ class GameClient {
       t => { this.ui.setPlacing(this.ui.placing === t ? null : t); audio.play('click'); },
       t => this.train(t),
       (x, z) => this.renderer.jumpCam(x, z),
-      t => { this.game.issue({ k: 'cancel', p: this.game.me, type: t }); audio.play('cancel'); },
+      t => this.cancelTrain(t),
       bid => { this.game.issue({ k: 'upg', p: this.game.me, bid }); audio.play('confirm'); },
       (bid, on) => { this.game.issue({ k: 'repeat', p: this.game.me, bid, on }); audio.play('click'); },
       t => { // chip click: narrow selection to one type
@@ -1130,6 +1130,20 @@ class GameClient {
     }
     const tgt = primary || best;
     if (tgt) { this.game.issue({ k: 'train', p: this.game.me, bid: tgt.i, type }); audio.play('click'); }
+  }
+
+  // right-click a unit button: cancel one queued unit, preferring the SELECTED
+  // production building so the queue badge the player is looking at always drops
+  private cancelTrain(type: string) {
+    const def = UNITS[type];
+    if (!def) return;
+    let bid = -1;
+    if (this.selection.size === 1) {
+      const sel = this.byId.get([...this.selection][0]);
+      if (sel && sel.b && sel.o === this.game.me && (sel.t === def.builtAt || sel.t === def.altBuiltAt) && (sel.qn || 0) > 0) bid = sel.i;
+    }
+    this.game.issue({ k: 'cancel', p: this.game.me, type, bid });
+    audio.play('cancel');
   }
 
   // finish a patrol-route draw (shared by mouse + touch)
