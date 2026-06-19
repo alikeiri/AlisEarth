@@ -464,6 +464,19 @@
       <button class="mbtn primary" id="exMenuCancel" style="width:100%">Cancel</button>
     </div>
   </div>
+  <!-- Multiplayer desync / stall pause: shown when our sim has been frozen waiting
+       on a peer's input for too long. The game is effectively paused (lockstep
+       can't advance without every player's input); we surface stats and let the
+       player keep waiting or quit, and auto-resume the moment sync recovers. -->
+  <div id="netStall" class="hidden" style="position:fixed;inset:0;z-index:55;display:flex;align-items:center;justify-content:center;background:rgba(4,8,12,0.72)">
+    <div style="background:#121a22;border:1px solid #5a3a3a;border-radius:10px;padding:22px 24px;width:340px;text-align:center;box-shadow:0 8px 40px rgba(0,0,0,0.6)">
+      <div style="font-size:17px;font-weight:700;color:#ffd27d;margin-bottom:4px">⏸ Waiting for players…</div>
+      <div style="font-size:12px;color:#8aa0b2;margin-bottom:12px;line-height:1.5">The match is paused because a player's connection has fallen behind. It resumes automatically once everyone is back in sync.</div>
+      <div id="netStallStats" style="font-size:12px;color:#cfd8dc;background:rgba(20,28,38,0.9);border:1px solid #2c3e50;border-radius:6px;padding:8px 10px;margin-bottom:14px;text-align:left;line-height:1.7;font-variant-numeric:tabular-nums"></div>
+      <button class="mbtn primary" id="netStallContinue" style="width:100%;margin-bottom:8px">Keep waiting</button>
+      <button class="mbtn" id="netStallQuit" style="width:100%;background:#3a1d1d;border-color:#7d3c3c;color:#ff9a8a">⚑ Quit match</button>
+    </div>
+  </div>
   <div id="endScreen" class="screen hidden">
     <div class="title" id="endTitle">VICTORY</div>
     <div class="subtitle" id="endSub"></div>

@@ -69,7 +69,7 @@ export interface UnitDef {
 
 export const UNITS: Record<string, UnitDef> = {
   rifle:  { name: 'Rifle Squad',  cost: 100,  hp: 90,  speed: 2.0, range: 4.0, dmg: 7,  rof: 0.8, builtAt: 'barracks', buildTime: 5,  kind: 'inf', fortify: true },
-  rocket: { name: 'Rocket Team',  cost: 300,  hp: 80,  speed: 1.8, range: 5.5, dmg: 24, rof: 0.1, builtAt: 'barracks', buildTime: 8,  kind: 'inf', fortify: true, capacity: 4, reload: 7 },
+  rocket: { name: 'Rocket Team',  cost: 300,  hp: 80,  speed: 1.8, range: 5.5, dmg: 24, rof: 2.0, builtAt: 'barracks', buildTime: 8,  kind: 'inf', fortify: true, capacity: 1, reload: 0 },
   // Melody: elite female operative. Sniper rifle one-shots infantry from afar;
   // launches a homing drone at enemy vehicles; plants demolition charges that
   // wreck buildings. 25% faster than other infantry. Unique (one at a time).
@@ -86,11 +86,11 @@ export const UNITS: Record<string, UnitDef> = {
   tews:   { name: 'TEWS',         cost: 1600, hp: 360, speed: 2.2, range: 0, dmg: 0, rof: 1, builtAt: 'factory', buildTime: 14, kind: 'veh', jam: 12, droneEmp: { range: 10, dmg: 22, cd: 1.5 }, faction: 'eu' }, // signature: electronic warfare
   recon:  { name: 'Recon Drone',  cost: 400,  hp: 70,  speed: 3.4, range: 4.0, dmg: 6,  rof: 0.6, builtAt: 'dronefac', buildTime: 7,  kind: 'air', fly: true },
   strike: { name: 'Strike Drone', cost: 1100, hp: 150, speed: 2.8, range: 5.0, dmg: 32, rof: 1.8, builtAt: 'dronefac', buildTime: 13, kind: 'air', fly: true },
-  msldrone: { name: 'Missile Drone', cost: 1500, hp: 120, speed: 2.4, range: 7.0, dmg: 45, rof: 0.1, builtAt: 'dronefac', buildTime: 15, kind: 'air', fly: true, capacity: 5, reload: 12 },
+  msldrone: { name: 'Missile Drone', cost: 1500, hp: 120, speed: 2.4, range: 7.0, dmg: 45, rof: 0.5, builtAt: 'dronefac', buildTime: 15, kind: 'air', fly: true, capacity: 5, reload: 3 },
   // Iran signature: Shahed loitering munitions — cheap one-way suicide drones built
   // (and launched) in volleys of 5. Fragile; dive into the target and detonate.
   shahed: { name: 'Shahed', cost: 650, hp: 45, speed: 4.6, range: 4.0, dmg: 130, rof: 1, builtAt: 'dronefac', buildTime: 10, kind: 'air', fly: true, alt: 2.5, kamikaze: true, faction: 'iran', volley: 5 },
-  mlrs:   { name: 'MLRS',         cost: 1600, hp: 170, speed: 1.6, range: 13.0, dmg: 66, rof: 0.1, builtAt: 'factory',  buildTime: 16, kind: 'veh', faction: 'china', capacity: 6, reload: 18 }, // signature: mass rocket artillery — salvos 6 then reloads
+  mlrs:   { name: 'MLRS',         cost: 1600, hp: 170, speed: 1.6, range: 13.0, dmg: 66, rof: 0.5, builtAt: 'factory',  buildTime: 16, kind: 'veh', faction: 'china', capacity: 6, reload: 7 }, // signature: mass rocket artillery — salvos 6 then reloads
   // ARTILLERY LINE — long range + area splash to break up massed pushes. Every
   // nation fields BOTH an infantry and a vehicle version of the mortar (anti-
   // infantry, shorter range, cheaper) and the artillery (siege, longer range).
@@ -103,10 +103,10 @@ export const UNITS: Record<string, UnitDef> = {
   // the anti-infantry vehicle: autocannon IFV — shreds infantry, loses to tanks
   ifv:    { name: 'IFV',          cost: 700,  hp: 300, speed: 3.4, range: 5.0, dmg: 24, rof: 0.8, builtAt: 'factory',  buildTime: 9,  kind: 'veh', carrier: true, carryInf: 6, carryVeh: 0 }, // Bradley: carries a 6-man dismount squad (infantry only)
   // mobile anti-air pair: missile AA hunts airplanes, flak shreds drone swarms
-  aatank: { name: 'AA Vehicle',   cost: 950,  hp: 280, speed: 3.0, range: 8.0, dmg: 42, rof: 0.1, builtAt: 'factory',  buildTime: 11, kind: 'veh', aaOnly: true, capacity: 4, reload: 5 }, // dedicated anti-air: only engages aircraft — 4-missile burst then reload
+  aatank: { name: 'AA Vehicle',   cost: 950,  hp: 280, speed: 3.0, range: 8.0, dmg: 42, rof: 0.25, builtAt: 'factory',  buildTime: 11, kind: 'veh', aaOnly: true, capacity: 12, reload: 4 }, // dedicated anti-air: only engages aircraft — 4-missile burst then reload
   flak:   { name: 'Flak Gun',     cost: 650,  hp: 240, speed: 2.6, range: 6.5, dmg: 16, rof: 0.45, builtAt: 'factory', buildTime: 9,  kind: 'veh' },
   engineer: { name: 'Engineer',   cost: 600,  hp: 200, speed: 2.2, range: 0,   dmg: 0,  rof: 1,   builtAt: 'barracks', altBuiltAt: 'factory', buildTime: 10, kind: 'veh', repair: true, road: true, lays: 'mine', mines: 4 }, // trainable from the Barracks (infantry) AND the War Factory
-  patriot:  { name: 'Patriot SAM', cost: 1100, hp: 200, speed: 2.4, range: 11, dmg: 60, rof: 0.1, builtAt: 'factory',  buildTime: 12, kind: 'veh', intercept: { range: 11, cd: 4 }, fortify: true, sight: 14, aaOnly: true, capacity: 4, reload: 9 }, // long-range SAM: only engages aircraft + intercepts silo missiles; mobile radar picket
+  patriot:  { name: 'Patriot SAM', cost: 1100, hp: 200, speed: 2.4, range: 11, dmg: 60, rof: 0.5, builtAt: 'factory',  buildTime: 12, kind: 'veh', intercept: { range: 11, cd: 4 }, fortify: true, sight: 14, aaOnly: true, capacity: 4, reload: 5 }, // long-range SAM: only engages aircraft + intercepts silo missiles; mobile radar picket
   mine:     { name: 'Land Mine',  cost: 0,    hp: 1,   speed: 0,   range: 0,   dmg: 150, rof: 1,  builtAt: '',         buildTime: 0,  kind: 'veh', internal: true, mine: true, trigger: 1.5, blastR: 2.4 },
   // Construction Vehicle: slow, defenceless; press F to deploy it into a forward
   // construction yard (enables building structures around the new spot)
@@ -132,7 +132,7 @@ export const UNITS: Record<string, UnitDef> = {
   // hard counter to submarines, but weak at everything else
   subhunter: { name: 'Sub Hunter',  cost: 800,  hp: 360, speed: 3.6, range: 5.0, dmg: 26, rof: 1.0, builtAt: 'shipyard', buildTime: 9,  kind: 'sea', move: 'sea', sonar: 11 },
   // long-range bombardment cruiser: flattens shore bases from afar, fragile hull
-  mslcruiser:{ name: 'Missile Cruiser', cost: 1600, hp: 280, speed: 2.0, range: 18.0, dmg: 55, rof: 0.1, builtAt: 'shipyard', buildTime: 16, kind: 'sea', move: 'sea', capacity: 6, reload: 13 }, // VLS salvo of 6 then reload
+  mslcruiser:{ name: 'Missile Cruiser', cost: 1600, hp: 280, speed: 2.0, range: 18.0, dmg: 55, rof: 0.5, builtAt: 'shipyard', buildTime: 16, kind: 'sea', move: 'sea', capacity: 6, reload: 8 }, // VLS salvo of 6 then reload
   // dedicated fleet air-defence: murders aircraft, useless against hulls
   flakship:  { name: 'Flak Cruiser', cost: 1200, hp: 360, speed: 2.6, range: 8.0, dmg: 30, rof: 0.7, builtAt: 'shipyard', buildTime: 13, kind: 'sea', move: 'sea' },
   navdrone:  { name: 'Naval Drone', cost: 500,  hp: 90,  speed: 3.6, range: 4.0, dmg: 18, rof: 1.0, builtAt: 'shipyard', buildTime: 7,  kind: 'sea', move: 'sea' },
@@ -161,7 +161,7 @@ export const UNITS: Record<string, UnitDef> = {
   fueltruck: { name: 'Fuel Truck',   cost: 900,  hp: 220, speed: 3.6, range: 4.0, dmg: 280, rof: 1, builtAt: 'factory', buildTime: 10, kind: 'veh', bombTruck: true },
   // ---- faction signature units: each nation's exclusive unit, no research needed ----
   apoc:        { name: 'Apocalypse Tank',  cost: 2200, hp: 1150, speed: 1.6, range: 6.5, dmg: 82, rof: 2.6, builtAt: 'factory',  buildTime: 22, kind: 'veh', faction: 'russia' },    // super-heavy twin cannon
-  brahmos:     { name: 'BrahMos Launcher', cost: 1800, hp: 200,  speed: 1.6, range: 19.0, dmg: 96, rof: 0.1, builtAt: 'factory', buildTime: 18, kind: 'veh', splash: 2.6, faction: 'india', capacity: 2, reload: 9 }, // supersonic cruise-missile siege — twin launch then reload
+  brahmos:     { name: 'BrahMos Launcher', cost: 1800, hp: 200,  speed: 1.6, range: 19.0, dmg: 96, rof: 0.5, builtAt: 'factory', buildTime: 18, kind: 'veh', splash: 2.6, faction: 'india', capacity: 2, reload: 9 }, // supersonic cruise-missile siege — twin launch then reload
   gunship:     { name: 'Mercenary Gunship', cost: 2000, hp: 320, speed: 3.4, range: 6.0, dmg: 52, rof: 1.3, builtAt: 'airforce', buildTime: 14, kind: 'air', fly: true, alt: 2.7, pad: true, faction: 'gulf' }, // premium hired attack heli
   technical:   { name: 'Technical',        cost: 350,  hp: 180,  speed: 4.0, range: 4.5, dmg: 18, rof: 0.5, builtAt: 'factory',  buildTime: 6,  kind: 'veh', faction: 'au' },        // cheap fast gun-truck swarm
   mech:        { name: 'Combat Mech',      cost: 1300, hp: 540,  speed: 2.2, range: 5.5, dmg: 50, rof: 1.6, builtAt: 'factory',  buildTime: 13, kind: 'veh', faction: 'korea' },     // bipedal assault walker

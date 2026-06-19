@@ -46,6 +46,11 @@ interface GameLike {
   issue(cmd: any): void;
   status(): { over: boolean; winner: number };
   leave(): void;
+  // lockstep only: ms of wall time we've been frozen waiting on a peer's input
+  // (0 when there are no human peers, or we're ticking normally). Drives the
+  // "connection stalled" pause popup.
+  stalledMs?(): number;
+  netStats?(): any;
 }
 
 // sim entities -> client view objects (with `a` = 0..1 interpolation between the
@@ -422,6 +427,7 @@ class NetLockstepGame implements GameLike {
   private prodAcc = 0;             // free-running wall clock (ms) driving INPUT production
   private prodTick = 0;           // ticks of real time elapsed — input is sent this far ahead
   private frac = 0;                 // interpolation 0..1 toward the latest executed tick
+  private lastAdvanceWall = 0;      // performance.now() of the last tick we actually executed
   private evQ: any[] = [];
   private chatQ: any[] = [];
   private roster: { name: string; isAI: boolean }[] = [];
@@ -474,6 +480,9 @@ class NetLockstepGame implements GameLike {
     // to 1 so units HOLD at their last position instead of oscillating (the old
     // code advanced a wall clock regardless, which made units twitch every 100ms
     // while stalled). When the backlog clears it catches up in one burst.
+    const nowWall = performance.now();
+    if (!this.lastAdvanceWall) this.lastAdvanceWall = nowWall;
+    const tickBefore = this.sim.tickN;
     this.acc += dtMs;
     // Drive INPUT PRODUCTION off a free-running wall clock, independent of whether
     // our sim is stalled. This keeps our future inputs flowing to peers even while
@@ -491,7 +500,13 @@ class NetLockstepGame implements GameLike {
     }
     if (this.acc > 1000) this.acc = 1000;    // bound a pathological backlog (peer can only lead by ~delay)
     this.frac = Math.min(1, this.acc / 100); // clamp: a stall sits at the target, never past it
+    // stall tracking for the desync pause popup: any tick executed this frame means
+    // we're in sync; otherwise the gap since the last advance is our stall duration
+    if (this.sim.tickN > tickBefore) this.lastAdvanceWall = nowWall;
   }
+  // ms we've been frozen waiting on a peer. 0 when there are no human peers
+  // (solo-vs-AI never stalls) or while we're ticking normally.
+  stalledMs(): number { return this.rtc ? performance.now() - this.lastAdvanceWall : 0; }
   views(): any[] { return simViews(this.sim, this.frac); }
   players(): any[] { return simPlayers(this.sim); }
   drainEvents() { const e = this.evQ; this.evQ = []; return e; }
@@ -2052,6 +2067,7 @@ class GameClient {
     const _u0 = this.perfOn ? performance.now() : 0;
     this.game.update(dt * 1000);
     if (this.perfOn) this.updateMs += (performance.now() - _u0 - this.updateMs) * 0.2;
+    this.checkNetStall();   // surface a pause popup if we're frozen waiting on a peer
 
     // camera: keys + edge pan + rotation
     const pan = 22 * (this.renderer.dist / 28) * dt;
@@ -2486,6 +2502,43 @@ class GameClient {
     if (this.perfOn) { this.workMs += (performance.now() - _w0 - this.workMs) * 0.2; if (this.frame % 6 === 0) this.updatePerfHud(); }
     else if (this.perfEl) { this.perfEl.style.display = 'none'; }
   };
+
+  // Multiplayer desync pause: when our lockstep sim has been frozen waiting on a
+  // peer's input for >3s, show a pause popup with live network stats. The match
+  // is already effectively paused (lockstep can't advance without every player's
+  // input); this just surfaces it instead of a silent freeze, and auto-resumes
+  // the moment sync recovers. "Keep waiting" snoozes the popup; "Quit" surrenders.
+  private stallSnoozeUntil = 0;
+  // "Keep waiting": hide the popup for a bit; it re-shows if we're still frozen.
+  snoozeStall() { this.stallSnoozeUntil = performance.now() + 15000; }
+  private checkNetStall() {
+    const el = document.getElementById('netStall');
+    if (!el) return;
+    const fn = (this.game as any).stalledMs;
+    const shown = !el.classList.contains('hidden');
+    if (this.over || typeof fn !== 'function') { if (shown) el.classList.add('hidden'); return; }
+    const ms = (this.game as any).stalledMs() as number;
+    if (shown) {
+      if (ms < 600) { el.classList.add('hidden'); return; }   // recovered → resume
+      this.renderStallStats(ms);
+    } else if (ms > 3000 && performance.now() > this.stallSnoozeUntil) {
+      this.renderStallStats(ms);
+      el.classList.remove('hidden');
+    }
+  }
+  private renderStallStats(ms: number) {
+    const stats = document.getElementById('netStallStats');
+    if (!stats) return;
+    const ns: any = (this.game as any).netStats ? (this.game as any).netStats() : null;
+    const peers = ns?.rtc ? `${ns.rtc.n}/${ns.rtc.of} connected (P2P)` : 'server relay';
+    const ping = ns && ns.ping ? `${Math.round(ns.ping)} ms` : '—';
+    stats.innerHTML =
+      `Frozen for <b style="color:#ffd27d">${(ms / 1000).toFixed(1)} s</b>`
+      + `<br>Your ping: ${ping}`
+      + `<br>Total stalls: ${ns?.stalls ?? '—'}`
+      + `<br>Peers: ${peers}`
+      + `<br>Sim tick: ${ns?.tick ?? this.game.tickN}`;
+  }
 
   // F3 perf overlay: frame rate + where each frame's time goes, plus (for a
   // multiplayer match) the snapshot stream — rate, size and arrival latency.
@@ -3304,12 +3357,26 @@ function lobbyChatLine(m: any): string {
   return `<div><span style="color:var(--accent);font-weight:600">${escapeHtml(m.name)}:</span> ${escapeHtml(m.msg)}</div>`;
 }
 // the lobby chat appears on BOTH the global lobby and the room/waiting screen —
-// render to every .lobbyChatLog so players can chat while waiting to start too
+// render to every .lobbyChatLog so players can chat while waiting to start too.
+// This re-renders on every lobby broadcast (~3s), so DON'T yank the view to the
+// bottom each time — only auto-scroll when a NEW message actually arrived, or
+// when the reader was already pinned to the bottom. Otherwise leave their scroll
+// position alone so they can read back through the history.
+let lastLobbyChatLen = 0;
 function renderLobbyChat(chat: any[]) {
-  const html = (chat || []).length
-    ? (chat as any[]).slice(-30).map(lobbyChatLine).join('')
+  const arr = (chat || []) as any[];
+  const grew = arr.length > lastLobbyChatLen;
+  lastLobbyChatLen = arr.length;
+  const html = arr.length
+    ? arr.slice(-30).map(lobbyChatLine).join('')
     : '<div style="color:#5f7384">No messages yet — say hello!</div>';
-  document.querySelectorAll('.lobbyChatLog').forEach(log => { log.innerHTML = html; log.scrollTop = log.scrollHeight; });
+  document.querySelectorAll('.lobbyChatLog').forEach(log => {
+    const atBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 24;
+    const prevTop = log.scrollTop;
+    log.innerHTML = html;
+    if (grew || atBottom) log.scrollTop = log.scrollHeight;
+    else log.scrollTop = prevTop;
+  });
 }
 function appendLobbyChat(m: any) {
   document.querySelectorAll('.lobbyChatLog').forEach(log => {
@@ -3619,6 +3686,20 @@ function initMenus() {
   $('exMenuSurrender').addEventListener('click', () => {
     closeExitMenu();
     if (client) client.surrender();
+  });
+  // Multiplayer desync pause popup: keep waiting (snooze the popup; it auto-shows
+  // again if still stalled after the snooze) or quit the match back to the menu.
+  $('netStallContinue').addEventListener('click', () => {
+    $('netStall').classList.add('hidden');
+    if (client) client.snoozeStall();
+  });
+  $('netStallQuit').addEventListener('click', () => {
+    $('netStall').classList.add('hidden');
+    if (net) { net.send({ t: 'leave' }); net.close(); net = null; }
+    simQueue = null;
+    if (tutCtl) { tutCtl.stop(); tutCtl = null; }
+    if (client) { client.destroy(); client = null; }
+    show('menu');
   });
 }
 
