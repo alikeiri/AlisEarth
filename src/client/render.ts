@@ -493,6 +493,56 @@ function unitGeoSmooth(type: string): [THREE.BufferGeometry, THREE.BufferGeometr
   return [mergeGeometries(flat(B)), mergeGeometries(flat(A))];
 }
 
+// Melody: a female twin-gun operative, built per POSE so she punches both guns
+// forward while firing and runs with a natural stride. Pose order matches the
+// posed-unit picker: 0 = rest, 1 = aim (while firing), 2/3 = run cycle.
+function melodyPoseGeo(pose: string): [THREE.BufferGeometry, THREE.BufferGeometry] {
+  const B: THREE.BufferGeometry[] = [], A: THREE.BufferGeometry[] = [];
+  const gun = 0x16181b, suit = 0x2f3447, hair = 0x6b4422, beret = 0x7a1f3d, skin = 0xc9a06b;
+  // shared body (slim build, beret + ponytail keep her identity)
+  B.push(part(new THREE.CapsuleGeometry(0.092, 0.21, 3, 8), suit, { y: 0.42 }));            // torso
+  B.push(part(new THREE.SphereGeometry(0.068, 10, 8), skin, { y: 0.63 }));                  // head
+  B.push(part(new THREE.SphereGeometry(0.084, 10, 8), beret, { y: 0.665, sy: 0.5 }));       // beret
+  B.push(part(new THREE.CapsuleGeometry(0.05, 0.13, 2, 6), hair, { rx: 0.6, y: 0.57, z: -0.085 })); // ponytail
+  A.push(part(new THREE.SphereGeometry(0.118, 10, 6), 0xffffff, { y: 0.50, sy: 0.42 }));    // team band
+  // a compact SMG centred at (hx,hy,hz) with its barrel pointing +Z (forward)
+  const addGun = (hx: number, hy: number, hz: number) => {
+    B.push(part(new THREE.BoxGeometry(0.045, 0.07, 0.12), gun, { x: hx, y: hy, z: hz }));                          // receiver
+    B.push(part(new THREE.BoxGeometry(0.03, 0.075, 0.03), gun, { x: hx, y: hy - 0.06, z: hz - 0.02 }));            // grip
+    B.push(part(new THREE.CylinderGeometry(0.013, 0.013, 0.13, 6), gun, { rx: Math.PI / 2, x: hx, y: hy + 0.004, z: hz + 0.11 })); // barrel
+  };
+  const arm = (sx: number, sy: number, sz: number, rx: number, rz: number) =>
+    B.push(part(new THREE.CapsuleGeometry(0.03, 0.16, 2, 6), suit, { rx, rz, x: sx, y: sy, z: sz }));
+  // legs: straight when standing, alternating strides while running
+  if (pose === 'run1' || pose === 'run2') {
+    const f = pose === 'run1' ? 1 : -1;
+    B.push(part(new THREE.CapsuleGeometry(0.04, 0.18, 2, 6), 0x20242f, { rx: -0.5 * f, x: -0.055, y: 0.14, z: 0.05 * f }));
+    B.push(part(new THREE.CapsuleGeometry(0.04, 0.18, 2, 6), 0x20242f, { rx: 0.5 * f, x: 0.055, y: 0.14, z: -0.05 * f }));
+  } else {
+    B.push(part(new THREE.CapsuleGeometry(0.04, 0.18, 2, 6), 0x20242f, { x: -0.055, y: 0.14 }));
+    B.push(part(new THREE.CapsuleGeometry(0.04, 0.18, 2, 6), 0x20242f, { x: 0.055, y: 0.14 }));
+  }
+  // arms + twin guns per pose
+  if (pose === 'aim') {                       // both arms punched forward, muzzles out front
+    arm(-0.1, 0.49, 0.1, Math.PI / 2, 0);
+    arm(0.1, 0.49, 0.1, Math.PI / 2, 0);
+    addGun(-0.105, 0.48, 0.28);
+    addGun(0.105, 0.48, 0.28);
+  } else if (pose === 'run1' || pose === 'run2') { // guns tucked in at the hips while sprinting
+    arm(-0.13, 0.44, 0.02, 0.3, 0.5);
+    arm(0.13, 0.44, 0.02, 0.3, -0.5);
+    addGun(-0.13, 0.40, 0.12);
+    addGun(0.13, 0.40, 0.12);
+  } else {                                    // rest: guns held ready at the chest
+    arm(-0.12, 0.46, 0.06, 0.6, 0.4);
+    arm(0.12, 0.46, 0.06, 0.6, -0.4);
+    addGun(-0.12, 0.42, 0.16);
+    addGun(0.12, 0.42, 0.16);
+  }
+  const flat = (arr: THREE.BufferGeometry[]) => arr.map(g => (g.index ? g.toNonIndexed() : g));
+  return [mergeGeometries(flat(B)), mergeGeometries(flat(A))];
+}
+
 // ---- legacy blocky models (kept for reference, unused) ----
 function unitGeo(type: string): [THREE.BufferGeometry, THREE.BufferGeometry] {
   const B: THREE.BufferGeometry[] = [], A: THREE.BufferGeometry[] = [];
@@ -1118,7 +1168,7 @@ export class Renderer {
     this.loadBuildingModel('oilrig', 'oilfield', 2.5, true);
 
     // unit instancing: procedural models first, external GLBs swap in async
-    for (const t of ['rifle', 'rocket', 'melody', 'tank', 'heavy', 'harv', 'engineer', 'recon', 'strike', 'msldrone', 'mlrs',
+    for (const t of ['rifle', 'rocket', 'tank', 'heavy', 'harv', 'engineer', 'recon', 'strike', 'msldrone', 'mlrs',
       'gunboat', 'destroyer', 'sub', 'navdrone', 'fighter', 'bomber', 'dbomber', 'heli', 'helidrone',
       'hive', 'minidrone', 'melodydrone', 'chemtrooper', 'chemtank', 'chemdrone', 'biotrooper', 'biotank', 'biodrone', 'stealthtank',
       'tews', 'transport', 'navengineer', 'mortar', 'mortartrack', 'fieldgun', 'artillery', 'artyship', 'airtransport']) {
@@ -1131,6 +1181,7 @@ export class Renderer {
       }
       this.unitParts[t] = [{ mesh: bm, mode: 0 }, { mesh: am, mode: 1 }];
     }
+    this.buildMelodyPoses(); // Melody is a posed procedural unit (aim / run / rest)
     this.loadUnitModels();
 
     // selection rings
@@ -1477,6 +1528,22 @@ export class Renderer {
   // Load external GLB unit models and swap them into the instanced pipeline.
   // Each model is baked to one merged geometry per material (keeps textures),
   // normalized to footprint size, grounded at y=0, facing +Z.
+  // build Melody's posed procedural meshes (rest / aim / run1 / run2) and register
+  // them like a baked-GLB unit so the pose picker shows the aim stance while she
+  // fires and the run cycle while she moves
+  private buildMelodyPoses() {
+    const allPoses: { mesh: THREE.InstancedMesh; mode: number }[][] = [];
+    for (const pose of ['rest', 'aim', 'run1', 'run2']) {
+      const [body, accent] = melodyPoseGeo(pose);
+      const bm = new THREE.InstancedMesh(body, new THREE.MeshStandardMaterial({ vertexColors: true, map: armorTex(), roughness: 0.72, metalness: 0.2 }), MAX_INST);
+      const am = new THREE.InstancedMesh(accent, new THREE.MeshStandardMaterial({ color: 0xffffff, map: detailTex(), roughness: 0.5, metalness: 0.25 }), MAX_INST);
+      for (const m of [bm, am]) { m.frustumCulled = false; m.castShadow = true; m.count = 0; this.scene.add(m); }
+      allPoses.push([{ mesh: bm, mode: 0 }, { mesh: am, mode: 1 }]);
+    }
+    this.unitParts['melody'] = allPoses[0];     // pose 0 = rest (fallback / instance-count base)
+    this.posedParts['melody'] = allPoses;
+  }
+
   private loadUnitModels() {
     const byFile = new Map<string, string[]>();
     for (const t in MODEL_DEFS) {
@@ -2152,6 +2219,21 @@ export class Renderer {
             });
           }
           this.spawnParts(ev.tx, y2, ev.tz, 5, false);
+        } else if (ev.w === 11) {
+          // Melody's twin guns: a bright muzzle flash + tracer from EACH nozzle,
+          // offset left/right of and forward along her aim so the shots clearly
+          // leave both gun barrels
+          const ang = Math.atan2(ev.tx - ev.x, ev.tz - ev.z);
+          const fx = Math.sin(ang), fz = Math.cos(ang);    // forward unit
+          const rxu = fz, rzu = -fx;                        // right unit (perpendicular)
+          const muzY = Math.max(this.map.heightAt(ev.x, ev.z), SEA) + 0.46;
+          for (const side of [-1, 1]) {
+            const nx = ev.x + rxu * 0.11 * side + fx * 0.4;
+            const nz = ev.z + rzu * 0.11 * side + fz * 0.4;
+            this.spawnParts(nx, muzY, nz, 5, false);        // bright orange muzzle burst
+            if (this.tracers.length < MAX_TRACER) this.tracers.push({ x1: nx, y1: muzY, z1: nz, x2: ev.tx, y2, z2: ev.tz, t: 0.1 });
+          }
+          this.spawnParts(ev.tx, y2, ev.tz, 2, false);      // impact sparks on target
         } else {
           if (this.tracers.length < MAX_TRACER) this.tracers.push({ x1: ev.x, y1, z1: ev.z, x2: ev.tx, y2, z2: ev.tz, t: 0.1 });
           this.spawnParts(ev.tx, y2, ev.tz, 2, false);

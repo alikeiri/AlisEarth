@@ -1271,9 +1271,10 @@ export class Sim {
     this.dealDamage(att, tgt, dmg, force);
     const ud = UNITS[att.type];
     if (ud?.splash) this.splashHit(att, tgt.x, tgt.z, dmg, ud.splash, tgt.id, force); // artillery AoE
-    // weapon class: 0 mg, 1 rocket, 2 cannon, 3 drone zap, 4 missile salvo
+    // weapon class: 0 mg, 1 rocket, 2 cannon, 3 drone zap, 4 missile salvo, 11 twin-gun (Melody)
     const tgtInf = !tgt.b && UNITS[tgt.type]?.kind === 'inf';
-    const w = att.type === 'rifle' || att.type === 'ifv' ? 0
+    const w = att.type === 'melody' ? 11
+      : att.type === 'rifle' || att.type === 'ifv' ? 0
       : att.type === 'sub' ? (tgt.b ? 8 : 7)                                 // sub: cruise missile vs buildings, torpedo vs ships
       : att.type === 'flak' ? 5                                              // pom-pom flak
       : att.type === 'rocket' || att.type === 'sam' || att.type === 'aatank' ? 1
