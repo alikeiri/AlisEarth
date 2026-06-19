@@ -738,6 +738,6 @@ setInterval(() => {
 }, 2000);
 
 http.listen(PORT, () => {
-  console.log(`FRACTURED EARTH server: http://localhost:${PORT} (HTTP + WebSocket)`);
+  console.log(`INFINITE GREED server: http://localhost:${PORT} (HTTP + WebSocket)`);
   console.log(`Serving client from: ${DIST}`);
 });

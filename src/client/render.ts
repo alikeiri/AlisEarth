@@ -1026,7 +1026,7 @@ export class Renderer {
       const gl = this.three.getContext();
       const dbg = gl.getExtension('WEBGL_debug_renderer_info');
       this.gpuName = dbg ? String(gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL)) : String(gl.getParameter(gl.RENDERER));
-      console.log('[Fractured Earth] GPU in use:', this.gpuName);
+      console.log('[Infinite Greed] GPU in use:', this.gpuName);
     } catch { this.gpuName = 'unknown'; }
     const q = GFX_QUALITY[gfxQuality()] || GFX_QUALITY.medium;
     this.three.setPixelRatio(Math.min(q.pr, window.devicePixelRatio));

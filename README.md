@@ -1,4 +1,4 @@
-# FRACTURED EARTH — a C&C-style RTS for the browser
+# INFINITE GREED — a C&C-style RTS for the browser
 
 A Command & Conquer–style real-time strategy game set in a procedurally
 generated version of today's world. 16 real-nation factions with equalized,

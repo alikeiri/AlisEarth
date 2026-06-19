@@ -1,4 +1,4 @@
-# Ali's Earth (a.k.a. "Fractured Earth") — Project Handoff
+# Infinite Greed (formerly Fractured Earth / Ali's Earth) — Project Handoff
 
 A self-contained brief for picking up this project in a fresh session.
 

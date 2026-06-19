@@ -1,4 +1,4 @@
-# Asset Credits — Fractured Earth
+# Asset Credits — Infinite Greed
 
 ## Terrain & material textures — Poly Haven (CC0, public domain)
 leafy_grass, cliff_side, aerial_sand, dirt_aerial_02, brushed_concrete,
