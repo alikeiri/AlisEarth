@@ -2647,9 +2647,10 @@ let urbanEnabled = false;   // map-type selector: flat urban map (roads, river, 
 let flatEnabled = false;    // map-type selector: completely flat city (roads + buildings only)
 let steelEnabled = false;   // map-type selector: bare metallic arena, all rich ore
 let metalEnabled = false;   // map-type selector: flat metallic-grey slab, no textures
-let selEnemies = 1; // 1-3 AI opponents in skirmish
-let selDiff3 = 2;   // third enemy's difficulty
-let selTeams = [1, 2, 3, 4]; // team per player slot (You, AI1, AI2, AI3); FFA by default
+// skirmish AI roster: add each AI as an enemy or partner with its own level +
+// team. You are always team 1; team 1 = ally/partner, teams 2-4 = enemy sides.
+// Max 4 players total (3 AI). Default: one Normal enemy.
+let aiList: { lvl: number; team: number }[] = [{ lvl: 1, team: 2 }];
 let client: GameClient | null = null;
 let net: Net | null = null;
 let tutCtl: TutorialController | null = null;
@@ -2759,29 +2760,43 @@ function buildOptionRow(rowId: string, opts: { label: string; v: number }[], get
   }
 }
 
-// one team chip per player slot (You + AI 1..N); click cycles team 1-4. Players
-// sharing a team number are allies — same colour tint, they won't fight.
+// team colours (team 1 = you). Players sharing a team are allies.
 const TEAM_TINT = ['#3da5ff', '#ff5043', '#57d977', '#ffc940'];
-function buildTeamRow() {
-  const row = $('teamRow');
-  row.innerHTML = '';
-  const labels = ['You', 'AI 1', 'AI 2', 'AI 3'];
-  const n = 1 + selEnemies;
-  for (let i = 0; i < n; i++) {
-    const chip = document.createElement('div');
-    chip.className = 'optbtn';
-    chip.style.cssText = 'display:flex;align-items:center;gap:6px;min-width:74px;justify-content:center';
-    const paint = () => {
-      const tint = TEAM_TINT[(selTeams[i] - 1) % 4];
-      chip.style.borderColor = tint;
-      chip.style.boxShadow = `inset 0 0 0 2px ${tint}33`;
-      chip.textContent = `${labels[i]} · T${selTeams[i]}`;
-      chip.style.color = tint;
-    };
-    paint();
-    chip.addEventListener('click', () => { selTeams[i] = (selTeams[i] % 4) + 1; paint(); });
-    row.appendChild(chip);
+const MAX_AI = 3; // 4 players total
+// render the AI roster: one row per AI with a level + team picker and a remove
+// button, plus the live add buttons. Team 1 = your side (partner); 2-4 = enemies.
+function renderAiList() {
+  const list = $('aiList');
+  if (!list) return;
+  const selStyle = 'background:#1a2430;color:#cfe0ee;border:1px solid #2c3e50;border-radius:4px;padding:4px;font-size:12px';
+  list.innerHTML = aiList.map((ai, i) => {
+    const dot = `<span style="width:10px;height:10px;border-radius:50%;flex:0 0 auto;background:${TEAM_TINT[(ai.team - 1) % 4]}"></span>`;
+    const lvl = `<select data-i="${i}" class="aiLvl" style="${selStyle};flex:1">` +
+      ['Easy', 'Normal', 'Hard', 'Brutal'].map((n, v) => `<option value="${v}" ${v === ai.lvl ? 'selected' : ''}>${n}</option>`).join('') + '</select>';
+    const team = `<select data-i="${i}" class="aiTeam" style="${selStyle};flex:1">` +
+      [1, 2, 3, 4].map(t => `<option value="${t}" ${t === ai.team ? 'selected' : ''}>${t === 1 ? '🤝 Your team' : '⚔ Enemy ' + t}</option>`).join('') + '</select>';
+    return `<div style="display:flex;gap:6px;align-items:center">${dot}` +
+      `<span style="flex:0 0 auto;font-size:12px;color:#9fb3c8;min-width:30px">AI ${i + 1}</span>${lvl}${team}` +
+      `<button type="button" data-i="${i}" class="aiDel" title="Remove" style="background:#2a1d1d;border:1px solid #5a3030;color:#ff9a8a;border-radius:4px;padding:3px 8px;cursor:pointer">✕</button></div>`;
+  }).join('') || '<div style="color:#5f7384;font-size:12px">No AI — add an enemy or partner.</div>';
+  list.querySelectorAll<HTMLSelectElement>('.aiLvl').forEach(s => s.addEventListener('change', () => { aiList[+s.dataset.i!].lvl = +s.value; }));
+  list.querySelectorAll<HTMLSelectElement>('.aiTeam').forEach(s => s.addEventListener('change', () => { aiList[+s.dataset.i!].team = +s.value; renderAiList(); }));
+  list.querySelectorAll<HTMLButtonElement>('.aiDel').forEach(b => b.addEventListener('click', () => { aiList.splice(+b.dataset.i!, 1); renderAiList(); }));
+  const full = aiList.length >= MAX_AI;
+  for (const id of ['btnAddEnemy', 'btnAddPartner']) {
+    const b = $(id) as HTMLButtonElement;
+    b.disabled = full; b.style.opacity = full ? '0.4' : '1'; b.style.cursor = full ? 'not-allowed' : 'pointer';
   }
+  const enemies = aiList.filter(a => a.team !== 1).length;
+  $('aiHint').textContent = full ? 'Maximum 4 players (you + 3 AI).'
+    : enemies === 0 ? '⚠ Add at least one enemy AI to play.' : '';
+}
+function addAI(enemy: boolean) {
+  if (aiList.length >= MAX_AI) return;
+  let team = 1;
+  if (enemy) { const used = new Set(aiList.map(a => a.team)); team = [2, 3, 4].find(t => !used.has(t)) ?? 2; }
+  aiList.push({ lvl: selDiff, team });
+  renderAiList();
 }
 
 function show(id: string) {
@@ -3418,22 +3433,10 @@ function initMenus() {
     try { ($('musStyle') as HTMLSelectElement).value = audio.musicStyle; } catch { /* menu not present */ }
     flashMus();
   });
-  buildOptionRow('diffRow',
-    [{ label: 'Easy', v: 0 }, { label: 'Normal', v: 1 }, { label: 'Hard', v: 2 }, { label: 'Brutal', v: 3 }],
-    () => selDiff, v => { selDiff = v; });
-  const LVLS = [{ label: 'Easy', v: 0 }, { label: 'Normal', v: 1 }, { label: 'Hard', v: 2 }, { label: 'Brutal', v: 3 }];
-  buildOptionRow('enemyRow',
-    [{ label: '1', v: 1 }, { label: '2', v: 2 }, { label: '3', v: 3 }],
-    () => selEnemies, v => {
-      selEnemies = v;
-      $('diffRow2Wrap').classList.toggle('hidden', v < 2);
-      $('diffRow3Wrap').classList.toggle('hidden', v < 3);
-      buildTeamRow(); // more/fewer enemies → rebuild the team chips
-    });
-  $('diffRow2Wrap').classList.toggle('hidden', selEnemies < 2);
-  buildOptionRow('diffRow2', LVLS, () => selDiff2, v => { selDiff2 = v; });
-  buildOptionRow('diffRow3', LVLS, () => selDiff3, v => { selDiff3 = v; });
-  buildTeamRow();
+  // AI roster: add enemies/partners, each with its own level + team
+  renderAiList();
+  $('btnAddEnemy').addEventListener('click', () => addAI(true));
+  $('btnAddPartner').addEventListener('click', () => addAI(false));
   // audio settings: music style + volume sliders
   const musSel = $('musStyle') as HTMLSelectElement;
   musSel.value = audio.musicStyle;
@@ -3462,8 +3465,13 @@ function initMenus() {
     flatEnabled = mt === 'flat';
     steelEnabled = mt === 'steel';
     metalEnabled = mt === 'metal';
-    const levels = [selDiff, selDiff2, selDiff3].slice(0, selEnemies);
-    const teams = selTeams.slice(0, 1 + selEnemies);
+    if (!aiList.length || !aiList.some(a => a.team !== 1)) {
+      $('menuErr').textContent = 'Add at least one enemy AI to play.';
+      return;
+    }
+    $('menuErr').textContent = '';
+    const levels = aiList.map(a => a.lvl);          // each AI's difficulty
+    const teams = [1, ...aiList.map(a => a.team)];   // you are team 1; AIs follow
     startGame(new LocalGame(playerName(), selFaction, selDiff, selSize, null, levels, teams));
   });
   $('btnTutorial').addEventListener('click', () => {
