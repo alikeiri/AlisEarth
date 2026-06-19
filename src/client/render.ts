@@ -24,7 +24,7 @@ const MODEL_DEFS: Record<string, { file: string; size: number; axis: 'l' | 'h'; 
   patriot:   { file: 'patriot',   size: 1.6,  axis: 'l', ry: 0 }, // MIM-104 Patriot launcher (Sketchfab, CC-BY)
   mine:      { file: 'drone',     size: 0.42, axis: 'l', ry: 0, tint: 0x33352f }, // small dark buried charge
   fueltruck: { file: 'harv',      size: 1.50, axis: 'l', ry: Math.PI, tint: 0xc0392b }, // red bomb truck (harv flip)
-  flak:      { file: 'engineer',  size: 1.30, axis: 'l', ry: Math.PI, tint: 0x848e97 }, // gun truck (same flip as the pickup)
+  flak:      { file: 'flak',      size: 1.6,  axis: 'l', ry: 0 }, // Type-625 AA gun/missile system (Sketchfab, CC-BY)
   mlrs:      { file: 'mlrs',      size: 1.60, axis: 'l', ry: 0 },
   artillery: { file: 'artillery', size: 1.75, axis: 'l', ry: Math.PI }, // Ha-To SP artillery (Sketchfab, CC-BY) — flipped to face forward
   // trucks: cab/bed geometry defeats the front heuristic — flip both (user-verified)
