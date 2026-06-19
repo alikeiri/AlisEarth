@@ -599,6 +599,7 @@ class GameClient {
   private raf = 0;
   private lastT = 0;
   private frame = 0;
+  private lastMinimap = 0; // wall-clock ms of the last minimap redraw (throttled to 1/s)
   private over = false;
   private hb: Worker | null = null;     // heartbeat worker: keeps the sim/net advancing when the tab is hidden
   private hbUrl = '';
@@ -2248,11 +2249,17 @@ class GameClient {
 
     const players = this.game.players();
     if (!this.guiHidden) this.ui.update(this.game.me, players, views, this.game.tickN, this.selection);
-    if (this.frame++ % 3 === 0 && !this.guiHidden) {
+    this.frame++;
+    // minimap redraws once per second (it's a cheap-to-skip overview, not the
+    // live battlefield) — pass the real elapsed time so flash-fades stay correct
+    const nowMs = performance.now();
+    if (!this.guiHidden && nowMs - this.lastMinimap >= 1000) {
+      const elapsed = (nowMs - this.lastMinimap) / 1000;
+      this.lastMinimap = nowMs;
       const fogFn = (!(this.game as any).isSim && fogEnabled && this.fog) ? (cx: number, cz: number) => this.renderer.fogValue(cx, cz) : undefined;
       // radar-detected threats show on the minimap even through fog
       const mmViews = this.radarBlips.length ? views.concat(this.radarBlips) : views;
-      this.ui.minimap(this.game.map, mmViews, this.camQuad(), dt * 3, fogFn);
+      this.ui.minimap(this.game.map, mmViews, this.camQuad(), elapsed, fogFn);
     }
     // no selection box while drawing a patrol route or drag-placing a structure
     // line (walls / tank barriers) — those drags aren't a selection
