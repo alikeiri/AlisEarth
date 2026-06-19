@@ -275,6 +275,15 @@ export class UI {
     ctx.drawImage(s.cv, Math.round(dx - 2), Math.round(y - s.h / 2));
     return s.w;
   }
+  // public: an owner-name tag centred at screen (sx,sy) with a dark backing for
+  // readability — used to label who owns enemy/neutral units & buildings
+  worldLabel(ctx: CanvasRenderingContext2D, text: string, color: string, sx: number, sy: number) {
+    const font = '600 11px system-ui,sans-serif';
+    const s = this.textSprite(text, font, color);
+    ctx.fillStyle = 'rgba(8,12,16,0.72)';
+    ctx.fillRect(Math.round(sx - s.w / 2 - 3), Math.round(sy - s.h / 2), s.w + 6, s.h);
+    this.drawText(ctx, text, font, color, sx, sy, 'center');
+  }
 
   constructor(
     private onBuild: (t: string) => void,

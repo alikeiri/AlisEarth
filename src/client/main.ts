@@ -1992,10 +1992,13 @@ class GameClient {
     const def: any = UNITS[v.t] || BUILDINGS[v.t];
     const name = def?.name || v.t;
     const hp = Math.max(0, Math.round(v.h)), max = Math.round(v.m);
-    const mine = v.o === this.game.me, ally = this.allies.has(v.o);
-    const who = mine ? '' : ally ? ' (ally)' : ' (enemy)';
-    const col = mine ? '#7ee787' : ally ? '#79c0ff' : '#ff7b72';
-    let label = `<span style="color:${col}">${name}${who}</span> · ${hp}/${max} HP`;
+    const mine = v.o === this.game.me, ally = this.allies.has(v.o), neutral = v.ne === 1;
+    const owner = this.game.players()[v.o]?.n || '';
+    const col = mine ? '#7ee787' : neutral ? '#9fe3b0' : ally ? '#79c0ff' : '#ff7b72';
+    // identify the owner: "Neutral (garrison)" for capturable city buildings, the
+    // player's name + ally/enemy tag otherwise
+    const who = mine ? '' : neutral ? ` · Neutral${v.gar ? ' (garrison)' : ''}` : ` · ${owner} (${ally ? 'ally' : 'enemy'})`;
+    let label = `<span style="color:${col}">${name}</span>${who} · ${hp}/${max} HP`;
     if (v.b && v.pr < 1) label += ` · ${Math.round(v.pr * 100)}% built`;
     this.tipEl.innerHTML = label;
     this.tipEl.style.left = (this.mouse.x + 14) + 'px';
@@ -2386,6 +2389,29 @@ class GameClient {
 
     if (!this.guiHidden)
       this.ui.overlay(this.overlayCtx, this.renderer.project.bind(this.renderer), views, this.game.me, this.selection, dragRect, hover, circles, this.cmdFx);
+
+    // owner-name tags — so you can tell who owns what. Neutral garrison buildings
+    // are ALWAYS tagged "Neutral" (they're capturable, not enemy); other players'
+    // units/buildings are tagged with the owner's name when 3+ players make
+    // ownership ambiguous (in a 1v1 the team colour already says it all).
+    if (!this.guiHidden) {
+      const players = this.game.players();
+      const realPlayers = players.filter((p: any) => p && p.tm !== -99).length;
+      const multi = realPlayers > 2;
+      const ctxL = this.overlayCtx;
+      let drawn = 0;
+      for (const v of views) {
+        if (v.o === this.game.me || drawn > 80) continue;
+        const neutralBldg = !!v.b && v.ne === 1;
+        if (!neutralBldg && !multi) continue;
+        const p = this.renderer.project(v.x, v.z, v.b ? 3.0 : 1.95);
+        if (!p.ok) continue;
+        const name = neutralBldg ? 'Neutral' : (players[v.o]?.n || '?');
+        const col = neutralBldg ? '#9fe3b0' : this.allies.has(v.o) ? '#79c0ff' : '#ff9b92';
+        this.ui.worldLabel(ctxL, name, col, p.x, p.y);
+        drawn++;
+      }
+    }
 
     // wall/barrier drag-line preview (drawn over the overlay)
     if (this.lineStart && this.lineCells.length) {
