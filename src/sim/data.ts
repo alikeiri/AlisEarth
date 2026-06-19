@@ -101,7 +101,7 @@ export const UNITS: Record<string, UnitDef> = {
   artillery:   { name: 'Artillery',      cost: 1500, hp: 200, speed: 1.4, range: 14.5, dmg: 78, rof: 4.2, builtAt: 'factory',  buildTime: 16, kind: 'veh', splash: 2.8 }, // self-propelled siege gun
   artyship: { name: 'Artillery Cruiser', cost: 1900, hp: 620, speed: 2.1, range: 15.5, dmg: 92, rof: 4.6, builtAt: 'shipyard', buildTime: 17, kind: 'sea', move: 'sea', splash: 3.0, faction: 'australia' }, // signature: naval siege
   // the anti-infantry vehicle: autocannon IFV — shreds infantry, loses to tanks
-  ifv:    { name: 'IFV',          cost: 700,  hp: 300, speed: 3.4, range: 5.0, dmg: 24, rof: 0.8, builtAt: 'factory',  buildTime: 9,  kind: 'veh' },
+  ifv:    { name: 'IFV',          cost: 700,  hp: 300, speed: 3.4, range: 5.0, dmg: 24, rof: 0.8, builtAt: 'factory',  buildTime: 9,  kind: 'veh', carrier: true, carryInf: 6, carryVeh: 0 }, // Bradley: carries a 6-man dismount squad (infantry only)
   // mobile anti-air pair: missile AA hunts airplanes, flak shreds drone swarms
   aatank: { name: 'AA Vehicle',   cost: 950,  hp: 280, speed: 3.0, range: 8.0, dmg: 42, rof: 0.1, builtAt: 'factory',  buildTime: 11, kind: 'veh', aaOnly: true, capacity: 4, reload: 5 }, // dedicated anti-air: only engages aircraft — 4-missile burst then reload
   flak:   { name: 'Flak Gun',     cost: 650,  hp: 240, speed: 2.6, range: 6.5, dmg: 16, rof: 0.45, builtAt: 'factory', buildTime: 9,  kind: 'veh' },

@@ -724,6 +724,33 @@ class GameClient {
           if (v && v.b === 1 && v.gar && v.o === this.game.me && (v.cu || 0) > 0) { this.game.issue({ k: 'evac', p: this.game.me, bid: id }); audio.play('confirm'); }
         }
       }
+      // L: load selected ground units into the nearest friendly carrier that can
+      // take them (transport ship or IFV) — the keyboard twin of right-clicking it
+      if (e.code === 'KeyL') {
+        const ground = this.myUnitIds().filter(id => { const k = UNITS[this.byId.get(id)?.t]?.kind; return k === 'inf' || k === 'veh'; });
+        if (ground.length) {
+          let cx = 0, cz = 0;
+          for (const id of ground) { const v = this.byId.get(id); cx += v.x; cz += v.z; }
+          cx /= ground.length; cz /= ground.length;
+          const me2 = this.game.me;
+          let best: any = null, bd = Infinity;
+          for (const v of this.lastViews) {
+            if (v.b || v.o !== me2 || !UNITS[v.t]?.carrier || ground.includes(v.i)) continue;
+            const cInf = UNITS[v.t].carryInf ?? 30, cVeh = UNITS[v.t].carryVeh ?? 10;
+            const takes = ground.some(id => { const k = UNITS[this.byId.get(id)?.t]?.kind; return (k === 'inf' && cInf > 0) || (k === 'veh' && cVeh > 0); });
+            if (!takes) continue;
+            const d = (v.x - cx) ** 2 + (v.z - cz) ** 2;
+            if (d < bd) { bd = d; best = v; }
+          }
+          if (best) {
+            const cInf = UNITS[best.t].carryInf ?? 30, cVeh = UNITS[best.t].carryVeh ?? 10;
+            const loadable = ground.filter(id => { const k = UNITS[this.byId.get(id)?.t]?.kind; return (k === 'inf' && cInf > 0) || (k === 'veh' && cVeh > 0); });
+            this.game.issue({ k: 'load', p: me2, ids: loadable, tgt: best.i });
+            audio.play('confirm'); audio.ack(this.dominantType(loadable), 'move');
+            this.markCmd(loadable, best.x, best.z, false);
+          }
+        }
+      }
       // H: weapons-hold toggle (don't fire even when attacked)
       if (e.code === 'KeyH') {
         const ids = this.myUnitIds();
@@ -1807,10 +1834,13 @@ class GameClient {
         return;
       }
     }
-    // right-click MY transport ship with ground units selected → load them aboard
+    // right-click MY carrier (transport ship OR IFV) with loadable units selected →
+    // load them aboard. Only the kinds the carrier can hold (an IFV takes infantry
+    // only) so right-clicking with tanks selected still falls through to attack-move.
     const carrier = this.pickView(sx, sy, v => v.o === me && v.b !== 1 && UNITS[v.t]?.carrier);
     if (carrier) {
-      const ground = ids.filter(id => { const k = UNITS[this.byId.get(id)?.t]?.kind; return k === 'inf' || k === 'veh'; });
+      const cInf = UNITS[carrier.t].carryInf ?? 30, cVeh = UNITS[carrier.t].carryVeh ?? 10;
+      const ground = ids.filter(id => { const k = UNITS[this.byId.get(id)?.t]?.kind; return (k === 'inf' && cInf > 0) || (k === 'veh' && cVeh > 0); });
       if (ground.length) {
         this.game.issue({ k: 'load', p: me, ids: ground, tgt: carrier.i });
         audio.play('confirm'); audio.ack(this.dominantType(ground), 'move');
@@ -2236,10 +2266,13 @@ class GameClient {
         if (p.ok) hover = { x: p.x, y: p.y };
       }
       this.lastHover = hover;
-      // hovering MY transport with ground units selected → show the loading cursor
+      // hovering MY carrier (transport ship or IFV) with loadable units selected →
+      // show the loading cursor (only if the carrier can actually take their kind)
       const me = this.game.me;
-      const hasGround = this.myUnitIds().some(id => { const k = UNITS[this.byId.get(id)?.t]?.kind; return k === 'inf' || k === 'veh'; });
-      const carrier = hasGround ? this.pickView(this.mouse.x, this.mouse.y, v => v.o === me && v.b !== 1 && UNITS[v.t]?.carrier) : null;
+      const selInf = this.myUnitIds().some(id => UNITS[this.byId.get(id)?.t]?.kind === 'inf');
+      const selVeh = this.myUnitIds().some(id => UNITS[this.byId.get(id)?.t]?.kind === 'veh');
+      const carrier = (selInf || selVeh) ? this.pickView(this.mouse.x, this.mouse.y, v => v.o === me && v.b !== 1 && UNITS[v.t]?.carrier
+        && ((selInf && (UNITS[v.t].carryInf ?? 30) > 0) || (selVeh && (UNITS[v.t].carryVeh ?? 10) > 0))) : null;
       this.loadHover = !!carrier;
       // hovering a garrisonable building (neutral or ours, with room) while infantry
       // are selected → show the enter cursor; suppress the attack reticle on it

@@ -470,6 +470,16 @@ function unitGeoSmooth(type: string): [THREE.BufferGeometry, THREE.BufferGeometr
       B.push(part(new THREE.CylinderGeometry(0.035, 0.035, 0.3, 5), gun, { rx: Math.PI / 2, x: sx2 * 1.6, y: 0.16, z: 0.1 }));        // weapon pods
     }
     A.push(part(new THREE.SphereGeometry(0.12 * s, 10, 8), 0xffffff, { y: 0.26 * s, z: 0.18 * s, sy: 0.6, sz: 1.2 }));                // canopy
+  } else if (type === 'shahed') {
+    // Iranian loitering munition: a simple flat delta-wing triangle drone
+    const body = 0x3a3d32;                       // drab olive airframe
+    const tri = new THREE.Shape();
+    tri.moveTo(0, 0.42); tri.lineTo(-0.3, -0.26); tri.lineTo(0.3, -0.26); tri.closePath();
+    const wing = new THREE.ExtrudeGeometry(tri, { depth: 0.07, bevelEnabled: false });
+    B.push(part(wing, body, { rx: Math.PI / 2, y: 0.2 }));                                   // delta wing (nose +z)
+    B.push(part(new THREE.BoxGeometry(0.05, 0.06, 0.34), body, { y: 0.24, z: -0.02 }));      // fuselage spine
+    B.push(part(new THREE.BoxGeometry(0.03, 0.11, 0.1), 0x26281f, { y: 0.3, z: -0.2 }));     // tail fin
+    A.push(part(new THREE.ConeGeometry(0.06, 0.16, 3), 0xffffff, { rx: Math.PI / 2, y: 0.26, z: 0.06 })); // team nose marker
   } else { // drones: recon / strike / msldrone
     const s = type === 'msldrone' ? 1.6 : type === 'strike' ? 1.35 : 1.0;
     B.push(part(new THREE.SphereGeometry(0.17 * s, 14, 10), dark, { y: 0.17 * s, sy: 0.6, sz: 1.3 })); // airframe
@@ -913,7 +923,7 @@ function buildingGroup(type: string, teamColor: number): THREE.Group {
 
 interface FxTracer { x1: number; y1: number; z1: number; x2: number; y2: number; z2: number; t: number }
 interface FxPart { x: number; y: number; z: number; vx: number; vy: number; vz: number; life: number; max: number; s: number }
-interface FxRocket { x0: number; y0: number; z0: number; x1: number; y1: number; z1: number; t: number; delay: number; dur: number; arc: number }
+interface FxRocket { x0: number; y0: number; z0: number; x1: number; y1: number; z1: number; t: number; delay: number; dur: number; arc: number; noSmoke?: boolean; scale?: number }
 
 // graphics quality presets. Everything renders at NATIVE resolution (pr 1.0) so
 // the world is always crisp — earlier sub-native scaling looked blurry. The
@@ -1170,7 +1180,7 @@ export class Renderer {
     // unit instancing: procedural models first, external GLBs swap in async
     for (const t of ['rifle', 'rocket', 'tank', 'heavy', 'harv', 'engineer', 'recon', 'strike', 'msldrone', 'mlrs',
       'gunboat', 'destroyer', 'sub', 'navdrone', 'fighter', 'bomber', 'dbomber', 'heli', 'helidrone',
-      'hive', 'minidrone', 'melodydrone', 'chemtrooper', 'chemtank', 'chemdrone', 'biotrooper', 'biotank', 'biodrone', 'stealthtank',
+      'hive', 'minidrone', 'melodydrone', 'shahed', 'chemtrooper', 'chemtank', 'chemdrone', 'biotrooper', 'biotank', 'biodrone', 'stealthtank',
       'tews', 'transport', 'navengineer', 'mortar', 'mortartrack', 'fieldgun', 'artillery', 'artyship', 'airtransport']) {
       const [body, accent] = unitGeoSmooth(t);
       const bm = new THREE.InstancedMesh(body, new THREE.MeshStandardMaterial({ vertexColors: true, map: armorTex(), roughness: 0.72, metalness: 0.2 }), MAX_INST);
@@ -2220,20 +2230,23 @@ export class Renderer {
           }
           this.spawnParts(ev.tx, y2, ev.tz, 5, false);
         } else if (ev.w === 11) {
-          // Melody's twin guns: a bright muzzle flash + tracer from EACH nozzle,
-          // offset left/right of and forward along her aim so the shots clearly
-          // leave both gun barrels
+          // Melody's twin guns: a muzzle flash AND a visible projectile leaving EACH
+          // nozzle (offset left/right of and forward along her aim) so two distinct
+          // shots fly to the target
           const ang = Math.atan2(ev.tx - ev.x, ev.tz - ev.z);
           const fx = Math.sin(ang), fz = Math.cos(ang);    // forward unit
           const rxu = fz, rzu = -fx;                        // right unit (perpendicular)
           const muzY = Math.max(this.map.heightAt(ev.x, ev.z), SEA) + 0.46;
+          const dist = Math.hypot(ev.tx - ev.x, ev.tz - ev.z);
           for (const side of [-1, 1]) {
             const nx = ev.x + rxu * 0.11 * side + fx * 0.4;
             const nz = ev.z + rzu * 0.11 * side + fz * 0.4;
             this.spawnParts(nx, muzY, nz, 5, false);        // bright orange muzzle burst
-            if (this.tracers.length < MAX_TRACER) this.tracers.push({ x1: nx, y1: muzY, z1: nz, x2: ev.tx, y2, z2: ev.tz, t: 0.1 });
+            if (this.rockets.length < 64) this.rockets.push({   // a fast flat tracer-round
+              x0: nx, y0: muzY, z0: nz, x1: ev.tx, y1: y2, z1: ev.tz,
+              t: 0, delay: 0, dur: Math.max(0.07, dist * 0.012), arc: 0.05, noSmoke: true, scale: 0.55,
+            });
           }
-          this.spawnParts(ev.tx, y2, ev.tz, 2, false);      // impact sparks on target
         } else {
           if (this.tracers.length < MAX_TRACER) this.tracers.push({ x1: ev.x, y1, z1: ev.z, x2: ev.tx, y2, z2: ev.tz, t: 0.1 });
           this.spawnParts(ev.tx, y2, ev.tz, 2, false);
@@ -2695,10 +2708,10 @@ export class Renderer {
       const pos = at(p), ahead = at(Math.min(1, p + 0.04));
       this.dummy.position.set(pos.x, pos.y, pos.z);
       this.dummy.lookAt(ahead.x, ahead.y, ahead.z);
-      this.dummy.scale.setScalar(1);
+      this.dummy.scale.setScalar(r.scale ?? 1);
       this.dummy.updateMatrix();
       if (rn < 64) this.rocketMesh.setMatrixAt(rn++, this.dummy.matrix);
-      if (this.smokeParts.length < 400) {
+      if (!r.noSmoke && this.smokeParts.length < 400) {
         this.smokeParts.push({
           x: pos.x, y: pos.y, z: pos.z,
           vx: (Math.random() - 0.5) * 0.3, vy: 0.4, vz: (Math.random() - 0.5) * 0.3,
