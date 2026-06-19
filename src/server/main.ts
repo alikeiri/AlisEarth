@@ -239,6 +239,10 @@ interface Room {
   lastReport?: any; replaySaved?: boolean;
 }
 const rooms = new Map<string, Room>();
+// valid map types (mirrors the client's Map Type dropdown). The client actually
+// sends per-type booleans (islands/urban/flat/steel/metal); mapType is accepted
+// too for forward-compat, validated against this list.
+const MAP_TYPES = ['continent', 'islands', 'urban', 'flat', 'steel', 'metal'];
 // every connected client that has entered the multiplayer lobby (whether idle in
 // the lobby or inside a room) — drives the shared presence + open-games browser
 const online = new Set<Client>();
@@ -261,10 +265,17 @@ function openGames() {
     .filter(r => !r.started && r.clients.length < 4)
     .map(r => ({ code: r.code, host: r.clients[0]?.name || '?', players: r.clients.length, max: 4, size: r.size, diff: r.diff }));
 }
+// drop any presence whose socket is no longer open. The 'close' handler normally
+// removes a client, but a half-open / proxied socket can linger; without this the
+// lobby "keeps adding names" that aren't actually online. Returns the live list.
+function pruneOnline(): Client[] {
+  for (const c of [...online]) if (c.ws.readyState !== WebSocket.OPEN) online.delete(c);
+  return [...online];
+}
 function lobbyState() {
   return {
     t: 'lobby',
-    users: [...online].map(c => ({ name: c.name, faction: c.faction, inGame: !!c.room, ping: c.ping ?? null })),
+    users: pruneOnline().map(c => ({ name: c.name, faction: c.faction, inGame: !!(c.room && c.room.started), ping: c.ping ?? null })),
     games: openGames(),
     chat: lobbyChat,
   };
