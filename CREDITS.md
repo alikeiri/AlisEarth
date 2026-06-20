@@ -1,8 +1,9 @@
 # Asset Credits — Infinite Greed
 
-## Terrain & material textures — Poly Haven (CC0, public domain)
-leafy_grass, cliff_side, aerial_sand, dirt_aerial_02, brushed_concrete,
-metal_plate_02 — https://polyhaven.com
+## Terrain & material textures
+- Ground splat layers (cc0-textures.com / ambientCG + Texture Haven, all CC0): Grass 001,
+  Rock 028, and Forest Ground 04 (dirt) — resized to 1024². https://cc0-textures.com
+- Other material textures (sand, concrete, metal) — Poly Haven (CC0). https://polyhaven.com
 
 ## 3D unit models — via poly.pizza
 
