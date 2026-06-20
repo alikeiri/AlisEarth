@@ -3539,7 +3539,14 @@ function initMenus() {
   const muteBtn = $('muteBtn');
   const muteIcon = () => { muteBtn.textContent = audio.muted ? '\u{1F507}' : '\u{1F50A}'; };
   muteIcon();
-  muteBtn.addEventListener('click', () => { audio.init(); audio.setMuted(!audio.muted); muteIcon(); });
+  muteBtn.addEventListener('click', () => { audio.init(); audio.setMuted(!audio.muted); muteIcon(); syncVol(); });
+  // in-game master volume slider (top bar) — drives the overall volume live
+  const volSlider = $('volSlider') as HTMLInputElement | null;
+  const syncVol = () => { if (volSlider) volSlider.value = String(Math.round((audio.muted ? 0 : audio.masterVol) * 100)); };
+  if (volSlider) {
+    syncVol();
+    volSlider.addEventListener('input', () => { audio.init(); audio.setMasterVol((+volSlider.value) / 100); muteIcon(); });
+  }
   // in-game music swap: cycle the track on click and flash the name
   const musBtn = $('musBtn'), musLabel = $('musLabel');
   const MUS_STYLES = ['iron', 'golden', 'frozen', 'enemies', 'playlist', 'off']; // in-game 🎵 cycle

@@ -2598,7 +2598,11 @@ export class Sim {
         // a garrison building destroyed with troops inside: the occupants die with it
         if (e.cargoUnits?.length) { for (const c of e.cargoUnits) if (!UNITS[c.type]?.internal) this.stats.lostU[c.owner]++; e.cargoUnits = []; }
       } else {
-        this.events.push({ e: 'boom', x: e.x, z: e.z, big: false });
+        // ephemeral mini-drones (Hive minidrones, Melody's strike drones) fizzle out
+        // silently when their lifetime ends — only their kamikaze IMPACT booms (that
+        // explosion is emitted at the target in the kamikaze path). Avoids a constant
+        // pop of death-explosions as swarms expire on their own.
+        if (!UNITS[e.type]?.ephemeral) this.events.push({ e: 'boom', x: e.x, z: e.z, big: false });
         if (!UNITS[e.type]?.internal) this.stats.lostU[e.owner]++;
         // a transport sunk with troops aboard: they go down with the ship
         if (e.cargoUnits?.length) { for (const c of e.cargoUnits) if (!UNITS[c.type]?.internal) this.stats.lostU[c.owner]++; e.cargoUnits = []; }

@@ -37,8 +37,10 @@ class AudioMan {
   private sfxBuf: Record<string, AudioBuffer> = {};
   private sfxLoading = new Set<string>();
   muted = false;
+  masterVol = 1.0;  // 0..1, overall volume (in-game slider); scales the master bus
   musicVol = 0.4;   // 0..1, music bus
   sfxVol = 1.0;     // 0..1, sound effects + unit voices
+  private masterGain() { return this.muted ? 0 : 0.6 * this.masterVol; }
   // Only the Iron Directive mp3 plays for now — the synth tracks (battle,
   // hellmarch, march, ambient) and the cycling playlist are temporarily disabled
   // (see ENABLED). Default = the mp3 on loop.
@@ -55,6 +57,7 @@ class AudioMan {
   constructor() {
     try {
       this.muted = safeLS.getItem('fe_mute') === '1';
+      const av = safeLS.getItem('fe_mastervol'); if (av !== null) this.masterVol = +av;
       const mv = safeLS.getItem('fe_musvol'); if (mv !== null) this.musicVol = +mv;
       const sv = safeLS.getItem('fe_sfxvol'); if (sv !== null) this.sfxVol = +sv;
       const ms = safeLS.getItem('fe_musstyle'); if (ms) this.musicStyle = ms;
@@ -74,7 +77,7 @@ class AudioMan {
     if (!AC) return;
     this.ctx = new AC() as AudioContext;
     this.master = this.ctx.createGain();
-    this.master.gain.value = this.muted ? 0 : 0.6;
+    this.master.gain.value = this.masterGain();
     this.master.connect(this.ctx.destination);
     this.sfxG = this.ctx.createGain();
     this.sfxG.gain.value = this.sfxVol;
@@ -125,7 +128,14 @@ class AudioMan {
   setMuted(m: boolean) {
     this.muted = m;
     try { safeLS.setItem('fe_mute', m ? '1' : '0'); } catch {}
-    if (this.master && this.ctx) this.master.gain.setTargetAtTime(m ? 0 : 0.6, this.ctx.currentTime, 0.05);
+    if (this.master && this.ctx) this.master.gain.setTargetAtTime(this.masterGain(), this.ctx.currentTime, 0.05);
+  }
+  // overall volume (in-game slider). Unmutes if dragged above zero.
+  setMasterVol(v: number) {
+    this.masterVol = Math.max(0, Math.min(1, v));
+    try { safeLS.setItem('fe_mastervol', String(this.masterVol)); } catch { /* no storage */ }
+    if (this.masterVol > 0 && this.muted) this.muted = false;
+    if (this.master && this.ctx) this.master.gain.setTargetAtTime(this.masterGain(), this.ctx.currentTime, 0.05);
   }
   setMusicVol(v: number) {
     this.musicVol = Math.max(0, Math.min(1, v));
