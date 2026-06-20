@@ -296,6 +296,9 @@
       linear-gradient(180deg, #0a1820 0%, #0c1c26 38%, #122026 62%, #1c1410 86%, #2a160c 100%);
   }
   .lgBg.hasImg { background-size: cover; background-position: center; }
+  /* darkening scrim over a photo hero so the title/CTAs stay legible */
+  .lgBg.hasImg::after { content: ''; position: absolute; inset: 0;
+    background: linear-gradient(180deg, rgba(4,8,12,0.55) 0%, rgba(4,8,12,0.20) 38%, rgba(4,8,12,0.55) 72%, rgba(4,8,12,0.88) 100%); }
   /* layered ridge/skyline silhouettes for depth */
   .lgRidge { position: absolute; left: 0; right: 0; bottom: 0; z-index: 1; height: 46%;
     background: linear-gradient(180deg, rgba(4,8,11,0) 0%, rgba(4,8,11,0.0) 40%, rgba(4,8,11,0.85) 100%); }
