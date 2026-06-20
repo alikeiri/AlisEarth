@@ -34,9 +34,6 @@ class AudioMan {
   };
   // per-sample loudness trim so recordings sit at sane relative levels
   private sfxGain: Record<string, number> = { mg: 0.55, cn: 0.85, hcannon: 1.0, rkt: 0.7, salvo: 0.85, flakgun: 0.5, boomS: 0.8, boomB: 1.0 };
-  // cap playback length (s) for samples with long reverb tails so rapid combat
-  // doesn't pile up an 8s explosion on every shot/death (a short fade hides the cut)
-  private sfxMax: Record<string, number> = { mg: 0.6, flakgun: 0.5, cn: 1.4, hcannon: 2.2, rkt: 1.6, salvo: 1.6, boomS: 1.5, boomB: 2.4 };
   private sfxBuf: Record<string, AudioBuffer> = {};
   private sfxLoading = new Set<string>();
   muted = false;
@@ -115,22 +112,14 @@ class AudioMan {
     }
   }
 
-  // one-shot playback of a decoded sample through the SFX bus, optionally capped to
-  // `maxSec` (with a short fade-out so the cut doesn't click) for long-tailed samples
-  private playBuffer(buf: AudioBuffer, vol: number, maxSec?: number) {
+  // one-shot playback of a decoded sample through the SFX bus. The combat samples
+  // are pre-cut to length (see public/audio/sfx), so no runtime trimming is needed.
+  private playBuffer(buf: AudioBuffer, vol: number) {
     if (!this.ctx) return;
-    const t = this.ctx.currentTime;
-    const dur = maxSec ? Math.min(buf.duration, maxSec) : buf.duration;
     const s = this.ctx.createBufferSource(); s.buffer = buf;
-    const g = this.ctx.createGain();
-    const gv = Math.max(0, Math.min(1, vol));
-    g.gain.setValueAtTime(gv, t);
-    if (maxSec && buf.duration > maxSec) {        // trimmed: fade the last 0.15s
-      g.gain.setValueAtTime(gv, t + Math.max(0, dur - 0.15));
-      g.gain.linearRampToValueAtTime(0.0001, t + dur);
-    }
+    const g = this.ctx.createGain(); g.gain.value = Math.max(0, Math.min(1, vol));
     s.connect(g); g.connect(this.sfxG);
-    s.start(t, 0, dur);
+    s.start();
   }
 
   setMuted(m: boolean) {
@@ -209,7 +198,7 @@ class AudioMan {
     const v = Math.min(1, vol);
     // realistic recorded SFX take priority once loaded; otherwise fall through to
     // the procedural synth below (covers load lag + keys with no sample)
-    if (this.sfxBuf[name]) { this.playBuffer(this.sfxBuf[name], v * (this.sfxGain[name] ?? 1), this.sfxMax[name]); return; }
+    if (this.sfxBuf[name]) { this.playBuffer(this.sfxBuf[name], v * (this.sfxGain[name] ?? 1)); return; }
     switch (name) {
       case 'mg':
         // rifle/autocannon: a snappy supersonic crack + body thwack + casing tick
