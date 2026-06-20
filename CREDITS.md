@@ -30,7 +30,7 @@ CC-BY 3.0 / 4.0 (attribution required — used under these terms):
 - Airfield ("Command and Conquer style building") — AwooSlayer (Sketchfab, CC-BY 4.0)
 - Patriot SAM ("MIM-104 Patriot Air Defense System") — Muhamad Mirza Arrafi (Sketchfab, CC-BY 4.0)
 - Flak Gun ("Type-625 Anti Aircraft Gun Missile System") — Muhamad Mirza Arrafi (Sketchfab, CC-BY 4.0)
-- Power Plant ("Factory" low-poly) — ZONK44 (CGTrader, Royalty Free License)
+- Power Plant ("Coal Power Station") — MRowa (Sketchfab, CC BY-SA 4.0); scaled/normalised for in-game use — this derivative is likewise CC BY-SA 4.0
 - Oil Field ("Oil pump") — Poly by Google
 - War Factory ("Factory") — Poly by Google
 
