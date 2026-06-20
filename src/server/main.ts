@@ -150,8 +150,12 @@ function handleFeatures(req: any, res: any) {
   req.on('end', () => {
     try {
       const j = JSON.parse(raw);
+      // feature requests require a logged-in account (anti-spam): the name is the
+      // account's callsign, not arbitrary text, so nobody can impersonate others
+      const acc = verifyToken(j.token);
+      if (!acc) { res.writeHead(401, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: 'Log in to submit a feature request' })); return; }
       const text = String(j.text || '').trim().slice(0, 600);
-      const name = (String(j.name || '').trim().slice(0, 40)) || 'Anonymous';
+      const name = String(acc.callsign || 'Player').slice(0, 40);
       if (!text) { res.writeHead(400); res.end(); return; }
       featLast.set(ip, now);
       const list = readFeatures();
@@ -247,9 +251,12 @@ async function handleAuth(req: any, res: any, kind: 'register' | 'login' | 'me')
   const users = readUsers();
   if (kind === 'register') {
     if (users[email]) return json(409, { error: 'An account with that email already exists' });
+    // anti-flood: cap how many accounts one IP can create (stops mass signup spam)
+    const ipCount = Object.values(users).filter((u: any) => u.ip === ip).length;
+    if (ip && ipCount >= 6) return json(429, { error: 'Too many accounts from this network' });
     const callsign = cleanCallsign(b.callsign) || email.split('@')[0].slice(0, 18);
     const salt = randomBytes(16).toString('hex');
-    users[email] = { salt, hash: hashPw(pw, salt), callsign, created: now };
+    users[email] = { salt, hash: hashPw(pw, salt), callsign, created: now, ip };
     writeUsers(users);
     return json(200, { token: signToken({ email, callsign, exp: now + TOKEN_TTL }), callsign, email });
   }

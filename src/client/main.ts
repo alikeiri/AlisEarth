@@ -601,7 +601,7 @@ class GameClient {
   // perf overlay (toggle F3): smoothed FPS + per-frame work/render/sim timing
   private perfOn = false;
   private perfEl: HTMLDivElement | null = null;
-  private fps = 60; private renderMs = 0; private updateMs = 0; private workMs = 0;
+  private fps = 60; private fpsAccN = 0; private fpsAccT = 0; private renderMs = 0; private updateMs = 0; private workMs = 0;
   private perfRx = { bytes: 0, t: 0 };
   // "clean screen" toggle (V): hides the whole GUI AND skips its per-frame draw
   // (HUD, minimap, 2D overlay) so the GUI's render cost can be measured. While
@@ -2057,7 +2057,11 @@ class GameClient {
     const dt = Math.min(0.1, (t - this.lastT) / 1000 || 0.016);
     this.lastT = t;
     const _w0 = this.perfOn ? performance.now() : 0;
-    this.fps += (1 / Math.max(dt, 1e-3) - this.fps) * 0.1; // smoothed frame rate
+    // TRUE frame rate: count frames over a wall-clock window and divide, refreshed
+    // ~3x/sec. (The old per-frame 1/dt EMA jumped around with rAF timestamp jitter
+    // even when the actual frame work was steady — the FPS number looked unstable.)
+    this.fpsAccN++; this.fpsAccT += dt;
+    if (this.fpsAccT >= 0.33) { this.fps = this.fpsAccN / this.fpsAccT; this.fpsAccN = 0; this.fpsAccT = 0; }
     // while the GUI is hidden, log the true average FPS to the console every 10s
     if (this.guiHidden) {
       this.fpsLogT += dt; this.fpsLogFrames++;
@@ -2424,25 +2428,18 @@ class GameClient {
     if (!this.guiHidden)
       this.ui.overlay(this.overlayCtx, this.renderer.project.bind(this.renderer), views, this.game.me, this.selection, dragRect, hover, circles, this.cmdFx);
 
-    // owner-name tags — so you can tell who owns what. Neutral garrison buildings
-    // are ALWAYS tagged "Neutral" (they're capturable, not enemy); other players'
-    // units/buildings are tagged with the owner's name when 3+ players make
-    // ownership ambiguous (in a 1v1 the team colour already says it all).
+    // Neutral garrison buildings are permanently tagged "Neutral" so you can see
+    // they're capturable. Owner names for OTHER players' units/buildings are NOT
+    // drawn permanently (that cluttered the screen in 3+ player games) — they show
+    // on mouseover via the entity tooltip instead.
     if (!this.guiHidden) {
-      const players = this.game.players();
-      const realPlayers = players.filter((p: any) => p && p.tm !== -99).length;
-      const multi = realPlayers > 2;
       const ctxL = this.overlayCtx;
       let drawn = 0;
       for (const v of views) {
-        if (v.o === this.game.me || drawn > 80) continue;
-        const neutralBldg = !!v.b && v.ne === 1;
-        if (!neutralBldg && !multi) continue;
-        const p = this.renderer.project(v.x, v.z, v.b ? 3.0 : 1.95);
+        if (!(v.b && v.ne === 1) || drawn > 40) continue; // neutral capturable buildings only
+        const p = this.renderer.project(v.x, v.z, 3.0);
         if (!p.ok) continue;
-        const name = neutralBldg ? 'Neutral' : (players[v.o]?.n || '?');
-        const col = neutralBldg ? '#9fe3b0' : this.allies.has(v.o) ? '#79c0ff' : '#ff9b92';
-        this.ui.worldLabel(ctxL, name, col, p.x, p.y);
+        this.ui.worldLabel(ctxL, 'Neutral', '#9fe3b0', p.x, p.y);
         drawn++;
       }
     }
@@ -2690,6 +2687,21 @@ class GameClient {
       html += `  <span style="color:${pCol}">${ping} ms</span>`;
     }
     el.innerHTML = html;
+    // hover the top-bar faction name → full player list (faction · team · human/AI,
+    // plus your own ping). Native title tooltip; refreshed here with the live state.
+    const fn = document.getElementById('facName');
+    if (fn) {
+      const myPing = ns ? Math.round(ns.ping || 0) : null;
+      const lines = this.game.players().map((p: any, i: number) => {
+        if (!p || p.tm === -99) return null; // skip the neutral player
+        const fac = FACTIONS[p.f]?.name || p.f;
+        const kind = i === this.game.me ? 'You' : (p.ai ? 'AI' : 'Human');
+        const ping = i === this.game.me && myPing != null ? ` · ${myPing}ms` : '';
+        const dead = p.a === false ? ' · defeated' : '';
+        return `${p.n} — ${fac} · Team ${p.tm} · ${kind}${ping}${dead}`;
+      }).filter(Boolean);
+      fn.setAttribute('title', 'Players:\n' + lines.join('\n'));
+    }
   }
 }
 
@@ -3736,17 +3748,25 @@ function initMenus() {
         : '<span style="color:#5f7384">No requests yet — be the first!</span>';
     } catch { list.innerHTML = '<span style="color:#5f7384">Feature requests live on the game server — open the deployed site.</span>'; }
   };
-  $('btnFeatures').addEventListener('click', () => { $('frErr').textContent = ''; show('features'); loadFeatures(); });
+  const frWhoNote = () => {
+    const cs = safeLS.getItem('fe_callsign');
+    const who = $('frWho');
+    if (who) who.innerHTML = cs
+      ? `Posting as <b style="color:#cdeef6">${escapeHtml(cs)}</b>`
+      : `<span style="color:#ffc940">Log in to submit a request.</span>`;
+  };
+  $('btnFeatures').addEventListener('click', () => { $('frErr').textContent = ''; frWhoNote(); show('features'); loadFeatures(); });
   $('frBack').addEventListener('click', () => show('menu'));
   $('frSubmit').addEventListener('click', async () => {
     const text = ($('frText') as HTMLTextAreaElement).value.trim();
-    const name = ($('frName') as HTMLInputElement).value.trim();
     const err = $('frErr');
     if (!text) { err.textContent = 'Type a request first.'; return; }
+    const token = safeLS.getItem('fe_token');
+    if (!token) { err.textContent = 'Please log in to submit a feature request.'; document.getElementById('lgAuthWrap')?.classList.remove('hidden'); return; }
     err.textContent = '';
     try {
-      const res = await fetch('/features', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text, name }) });
-      if (!res.ok) { err.textContent = res.status === 429 ? 'Slow down a moment, then try again.' : 'Could not submit — try again.'; return; }
+      const res = await fetch('/features', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text, token }) });
+      if (!res.ok) { err.textContent = res.status === 401 ? 'Please log in to submit.' : res.status === 429 ? 'Slow down a moment, then try again.' : 'Could not submit — try again.'; return; }
       ($('frText') as HTMLTextAreaElement).value = '';
       err.textContent = '✓ Thanks! Your request was saved.';
       loadFeatures();
@@ -3786,6 +3806,12 @@ function initMenus() {
   $('btnLeave').addEventListener('click', () => {
     if (net) net.send({ t: 'leaveRoom' });
     show('menu');
+  });
+  // leave the room and return to the landing/home page
+  $('btnLobbyHome').addEventListener('click', () => {
+    if (net) net.send({ t: 'leaveRoom' });
+    show('menu');
+    document.getElementById('landing')?.classList.remove('hidden');
   });
   // after a match: multiplayer players return to the lobby (reconnect for a clean
   // socket + fresh handlers); single-player/replay just reloads to the menu
@@ -3881,7 +3907,15 @@ function initLanding() {
     const label = '◉ ' + callsign;
     const a = document.getElementById('lgNavAuth'); if (a) a.textContent = label;
     const b = document.getElementById('lgShowAuth'); if (b) b.textContent = label;
+    el('lgLogout').classList.remove('hidden'); // offer logout once signed in
   };
+  const setLoggedOut = () => {
+    try { safeLS.removeItem('fe_token'); safeLS.removeItem('fe_callsign'); } catch { /* no storage */ }
+    const a = document.getElementById('lgNavAuth'); if (a) a.textContent = 'Log in';
+    const b = document.getElementById('lgShowAuth'); if (b) b.textContent = 'Log in / Sign up';
+    el('lgLogout').classList.add('hidden');
+  };
+  el('lgLogout').addEventListener('click', () => { setLoggedOut(); errEl.textContent = ''; msgEl.textContent = 'Logged out.'; msgEl.classList.remove('hidden'); });
 
   const doSubmit = async () => {
     const email = (el('lgEmail') as HTMLInputElement).value.trim();

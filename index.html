@@ -437,6 +437,7 @@
       <div class="lgAuthMsg hidden" id="lgAuthMsg"></div>
       <button class="lgAuthBtn" id="lgAuthSubmit">Log in</button>
       <button class="lgGuest" id="lgGuest">Skip — play as guest</button>
+      <button class="lgGuest hidden" id="lgLogout" style="color:#ff9a8a">Log out</button>
     </div>
   </div>
 
@@ -606,6 +607,7 @@
       <div class="mrow">
         <button class="mbtn primary hidden" id="btnStart">START GAME</button>
         <button class="mbtn" id="btnLeave">LEAVE</button>
+        <button class="mbtn" id="btnLobbyHome" title="Leave and return to the home page">🏠 Home</button>
       </div>
       <div style="color:#78909c;font-size:13px;text-align:center">Share the code. Starting solo adds an AI opponent.</div>
       <div style="display:flex;align-items:center;justify-content:space-between;margin:8px 0 4px">
@@ -671,8 +673,7 @@
     <div class="title" style="font-size:30px">FEATURE REQUESTS</div>
     <div class="menubox" style="max-width:640px;text-align:left">
       <p style="margin:0 0 10px;color:#9fb3c8;font-size:13px">Got an idea for the game? Drop it below — every suggestion is saved and reviewed.</p>
-      <input id="frName" placeholder="Your name (optional)" maxlength="40"
-        style="width:100%;box-sizing:border-box;margin-bottom:8px;padding:8px 10px;background:#10171f;border:1px solid #2c3e50;border-radius:6px;color:#e6eef5;font-size:13px">
+      <div id="frWho" style="margin-bottom:8px;font-size:12px;color:#8aa0b2"></div>
       <textarea id="frText" placeholder="Describe your feature request… (one per submission)" maxlength="600" rows="4"
         style="width:100%;box-sizing:border-box;padding:8px 10px;background:#10171f;border:1px solid #2c3e50;border-radius:6px;color:#e6eef5;font-size:13px;resize:vertical"></textarea>
       <div class="mrow" style="margin-top:8px">
