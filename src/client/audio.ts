@@ -19,6 +19,26 @@ class AudioMan {
   private trackBuf: Record<string, AudioBuffer> = {};
   private trackNode: AudioBufferSourceNode | null = null;
   private trackLoading = '';
+  // realistic recorded weapon/explosion SFX (royalty-free: Pixabay + Mixkit licenses).
+  // When a sample is loaded for a key, play() uses it INSTEAD of the synth; until
+  // it loads (or for keys with no sample, e.g. zap/crush), the synth still plays.
+  private sfxSrc: Record<string, string> = {
+    mg:      './audio/sfx/mg.mp3',       // rifle / autocannon / MG burst
+    cn:      './audio/sfx/cannon.mp3',   // tank cannon
+    hcannon: './audio/sfx/hcannon.mp3',  // heavy / naval gun
+    rkt:     './audio/sfx/rocket.mp3',   // rocket / missile launch
+    salvo:   './audio/sfx/rocket.mp3',   // MLRS salvo (reuses the rocket whoosh)
+    flakgun: './audio/sfx/mg.mp3',       // flak autocannon (reuses the MG)
+    boomS:   './audio/sfx/boom_s.mp3',   // small explosion
+    boomB:   './audio/sfx/boom_b.mp3',   // big explosion
+  };
+  // per-sample loudness trim so recordings sit at sane relative levels
+  private sfxGain: Record<string, number> = { mg: 0.55, cn: 0.85, hcannon: 1.0, rkt: 0.7, salvo: 0.85, flakgun: 0.5, boomS: 0.8, boomB: 1.0 };
+  // cap playback length (s) for samples with long reverb tails so rapid combat
+  // doesn't pile up an 8s explosion on every shot/death (a short fade hides the cut)
+  private sfxMax: Record<string, number> = { mg: 0.6, flakgun: 0.5, cn: 1.4, hcannon: 2.2, rkt: 1.6, salvo: 1.6, boomS: 1.5, boomB: 2.4 };
+  private sfxBuf: Record<string, AudioBuffer> = {};
+  private sfxLoading = new Set<string>();
   muted = false;
   musicVol = 0.4;   // 0..1, music bus
   sfxVol = 1.0;     // 0..1, sound effects + unit voices
@@ -76,7 +96,41 @@ class AudioMan {
     const d = n.getChannelData(0);
     for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
     this.noiseBuf = n;
+    this.loadSfx();
     if (this.musicStyle !== 'off') this.startMusic();
+  }
+
+  // fetch + decode the recorded weapon SFX once (deduped by URL since several keys
+  // share a file). Failures are silent — the synth fallback in play() covers them.
+  private loadSfx() {
+    if (!this.ctx) return;
+    const urls = [...new Set(Object.values(this.sfxSrc))];
+    for (const url of urls) {
+      if (this.sfxLoading.has(url)) continue;
+      this.sfxLoading.add(url);
+      fetch(url).then(r => r.ok ? r.arrayBuffer() : Promise.reject(new Error('http')))
+        .then(a => this.ctx!.decodeAudioData(a))
+        .then(buf => { for (const k in this.sfxSrc) if (this.sfxSrc[k] === url) this.sfxBuf[k] = buf; })
+        .catch(() => { /* keep the synth fallback for this key */ });
+    }
+  }
+
+  // one-shot playback of a decoded sample through the SFX bus, optionally capped to
+  // `maxSec` (with a short fade-out so the cut doesn't click) for long-tailed samples
+  private playBuffer(buf: AudioBuffer, vol: number, maxSec?: number) {
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+    const dur = maxSec ? Math.min(buf.duration, maxSec) : buf.duration;
+    const s = this.ctx.createBufferSource(); s.buffer = buf;
+    const g = this.ctx.createGain();
+    const gv = Math.max(0, Math.min(1, vol));
+    g.gain.setValueAtTime(gv, t);
+    if (maxSec && buf.duration > maxSec) {        // trimmed: fade the last 0.15s
+      g.gain.setValueAtTime(gv, t + Math.max(0, dur - 0.15));
+      g.gain.linearRampToValueAtTime(0.0001, t + dur);
+    }
+    s.connect(g); g.connect(this.sfxG);
+    s.start(t, 0, dur);
   }
 
   setMuted(m: boolean) {
@@ -153,6 +207,9 @@ class AudioMan {
     if (gap[name] && now - (this.last[name] || 0) < gap[name]) return;
     this.last[name] = now;
     const v = Math.min(1, vol);
+    // realistic recorded SFX take priority once loaded; otherwise fall through to
+    // the procedural synth below (covers load lag + keys with no sample)
+    if (this.sfxBuf[name]) { this.playBuffer(this.sfxBuf[name], v * (this.sfxGain[name] ?? 1), this.sfxMax[name]); return; }
     switch (name) {
       case 'mg':
         // rifle/autocannon: a snappy supersonic crack + body thwack + casing tick

@@ -36,3 +36,9 @@ CC-BY 3.0 / 4.0 (attribution required — used under these terms):
 
 Models sourced from https://poly.pizza (CC0 + CC-BY catalog).
 Buildings and effects are procedurally generated.
+
+## Weapon / explosion sound effects (royalty-free)
+- Machine gun ("Clean Machine Gun Burst") — freesound_community via Pixabay (Pixabay Content License)
+- Tank cannon ("Powerful Cannon Shot") — Universfield via Pixabay (Pixabay Content License)
+- Heavy/naval gun ("War field explosion"), rocket ("Fast rocket whoosh"), small & big explosions ("Explosion hit", "Massive explosion in battle") — Mixkit (Mixkit Free Sound Effects License)
+- All other SFX and unit voices remain procedurally synthesized (WebAudio).
