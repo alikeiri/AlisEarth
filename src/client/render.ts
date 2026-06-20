@@ -977,7 +977,7 @@ export class Renderer {
   private satLaunches: { g: THREE.Group; t: number; x: number; z: number; y0: number }[] = [];
   private terrain: THREE.Mesh;
   private terraPrev!: THREE.Mesh;
-  private waterMat: THREE.MeshPhongMaterial;
+  private waterMat: THREE.ShaderMaterial;
   private rallyFlag!: THREE.Group;
   private rallyPennant!: THREE.Mesh;
   private rallyLine!: THREE.Line;
@@ -1096,12 +1096,57 @@ export class Renderer {
     this.buildCity();
     this.buildFog();
 
-    // water: animated normal-mapped surface
-    this.waterMat = new THREE.MeshPhongMaterial({
-      color: 0x1e4d6b, specular: 0x9db8cc, shininess: 90,
-      transparent: true, opacity: 0.92,
-      normalMap: waterNormalTexture(maxAniso),
-      normalScale: new THREE.Vector2(0.32, 0.32),
+    // water: a live GLSL surface — layered directional ripples drive an analytic
+    // normal that feeds a fresnel sky-reflection blend (deep teal looking straight
+    // down, lighter/sky toward grazing angles) plus animated sun specular glints.
+    this.waterMat = new THREE.ShaderMaterial({
+      transparent: true,
+      uniforms: {
+        uTime: { value: 0 },
+        uDeep: { value: new THREE.Color(0x0c3346) },
+        uShallow: { value: new THREE.Color(0x2f80a2) },
+        uSky: { value: new THREE.Color(0xa6cae4) },
+        uSunDir: { value: new THREE.Vector3(40, 85, -25).normalize() },
+        uSunCol: { value: new THREE.Color(0xfff1d8) },
+        uOpacity: { value: 0.9 },
+      },
+      vertexShader: `
+        varying vec3 vWorld;
+        void main() {
+          vec4 wp = modelMatrix * vec4(position, 1.0);
+          vWorld = wp.xyz;
+          gl_Position = projectionMatrix * viewMatrix * wp;
+        }
+      `,
+      fragmentShader: `
+        precision highp float;
+        varying vec3 vWorld;
+        uniform float uTime, uOpacity;
+        uniform vec3 uDeep, uShallow, uSky, uSunDir, uSunCol;
+        void main() {
+          vec2 p = vWorld.xz;
+          // sum a few moving directional waves; accumulate the analytic gradient so
+          // the surface normal ripples without displacing any geometry
+          vec2 g = vec2(0.0);
+          #define WAVE(dx,dy,fr,sp,am) { vec2 d = vec2(dx,dy); float ph = dot(p,d)*fr + uTime*sp; g += (am)*cos(ph)*(fr)*d; }
+          WAVE( 0.85,  0.52, 0.55, 1.3, 0.10)
+          WAVE(-0.45,  0.89, 1.10, 0.9, 0.06)
+          WAVE( 0.30, -0.95, 1.90, 1.7, 0.035)
+          WAVE(-0.92, -0.38, 3.10, 2.3, 0.018)
+          vec3 N = normalize(vec3(-g.x, 1.0, -g.y));
+          vec3 V = normalize(cameraPosition - vWorld);
+          vec3 L = normalize(uSunDir);
+          float ndv = clamp(dot(N, V), 0.0, 1.0);
+          float fres = pow(1.0 - ndv, 3.0);
+          vec3 water = mix(uDeep, uShallow, ndv);          // deeper looking straight down
+          vec3 col = mix(water, uSky, fres * 0.7);          // sky reflection at grazing angles
+          vec3 Hh = normalize(L + V);
+          float spec = pow(max(dot(N, Hh), 0.0), 120.0);    // crisp sun glints
+          col += uSunCol * spec * 0.9;
+          gl_FragColor = vec4(col, mix(uOpacity, 1.0, fres));
+        }
+      `,
+      fog: false,
     });
     const water = new THREE.Mesh(new THREE.PlaneGeometry(W * 3, H * 3), this.waterMat);
     water.rotation.x = -Math.PI / 2;
@@ -2728,10 +2773,8 @@ export class Renderer {
 
   render(dt: number) {
     this.time += dt;
-    // water ripple animation
-    const wm = this.waterMat.normalMap as THREE.Texture;
-    wm.offset.x += dt * 0.013;
-    wm.offset.y += dt * 0.009;
+    // water ripple animation: advance the shader clock
+    this.waterMat.uniforms.uTime.value = this.time;
 
     // tracers
     let tn = 0;
