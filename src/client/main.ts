@@ -437,7 +437,7 @@ class NetLockstepGame implements GameLike {
     setMapSize(m.size || 112);
     this.me = m.you;
     this.roster = m.players || [];
-    const specs = (m.players || []).map((p: any) => ({ name: p.name, faction: p.faction, isAI: !!p.isAI }));
+    const specs = (m.players || []).map((p: any, i: number) => ({ name: p.name, faction: p.faction, isAI: !!p.isAI, team: p.team ?? (i + 1) }));
     this.sim = new Sim(m.seed, specs);
     this.map = this.sim.map;
     // input delay is chosen by the server from the worst player's ping (6..18),
@@ -3472,28 +3472,92 @@ function pingBadge(ping: number | null | undefined): string {
   return `<span style="color:${col};font-size:11px;font-variant-numeric:tabular-nums">${ping}ms</span>`;
 }
 
+// ---- multiplayer lobby (waiting room): player list with host team pickers, plus
+// host-only game setup (map size/type, fog, AI fill). Edits go to the server via
+// roomcfg; the server echoes the authoritative room state back to everyone. ----
+let lobbyIsHost = false;
+let lastRoomSig = '';
+const lobbyCfg: { size: number; mapType: string; fog: boolean; ai: { lvl: number; team: number }[]; teams: number[] } =
+  { size: 96, mapType: 'continent', fog: true, ai: [], teams: [] };
+const LOBBY_SIZES: [number, string][] = [[72, 'Small'], [96, 'Medium'], [128, 'Large']];
+const LOBBY_MAPS: [string, string][] = [['continent', 'Continent'], ['islands', 'Islands'], ['urban', 'Urban'], ['flat', 'Flat City'], ['steel', 'Steel Arena'], ['metal', 'Metal Plain']];
+function sendRoomCfg() {
+  if (net && lobbyIsHost) net.send({ t: 'roomcfg', size: lobbyCfg.size, mapType: lobbyCfg.mapType, fog: lobbyCfg.fog, ai: lobbyCfg.ai, teams: lobbyCfg.teams });
+}
+function renderRoom(m: any) {
+  // skip ping-only refreshes (the server rebroadcasts every ~3s) so an open
+  // dropdown the host is using isn't reset out from under them
+  const sig = JSON.stringify([m.code, m.you, m.size, m.mapType, m.fog, m.ai, m.players.map((p: any) => [p.name, p.faction, p.team])]);
+  if (sig === lastRoomSig) return;
+  lastRoomSig = sig;
+  $('roomCode').textContent = m.code;
+  lobbyIsHost = m.you === 0;
+  lobbyCfg.size = m.size || 96; lobbyCfg.mapType = m.mapType || 'continent'; lobbyCfg.fog = m.fog !== false;
+  lobbyCfg.ai = (m.ai || []).map((a: any) => ({ lvl: a.lvl | 0, team: a.team | 0 }));
+  lobbyCfg.teams = m.players.map((p: any, i: number) => p.team ?? (i + 1));
+  const selStyle = 'background:#1a2430;color:#cfe0ee;border:1px solid #2c3e50;border-radius:4px;padding:3px;font-size:11px';
+  const list = $('lobbyPlayers'); list.innerHTML = '';
+  m.players.forEach((p: any, i: number) => {
+    const team = p.team ?? (i + 1);
+    const teamCtl = lobbyIsHost
+      ? `<select class="lpTeam" data-i="${i}" style="${selStyle}">${[1, 2, 3, 4].map(t => `<option value="${t}" ${t === team ? 'selected' : ''}>Team ${t}</option>`).join('')}</select>`
+      : `<span style="font-size:11px;color:${TEAM_TINT[(team - 1) % 4]}">Team ${team}</span>`;
+    const row = document.createElement('div'); row.className = 'lpRow';
+    row.innerHTML = `<div class="lpDot" style="background:${TEAM_TINT[(team - 1) % 4]}"></div>` +
+      `<span style="flex:1">${twemojify(FACTIONS[p.faction]?.flag || '')} ${escapeHtml(p.name)}</span>` +
+      `${pingBadge(p.ping)} ${teamCtl}` +
+      `<span style="color:#78909c;font-size:12px;margin-left:6px">${i === 0 ? 'HOST' : ''}</span>`;
+    list.appendChild(row);
+  });
+  if (lobbyIsHost) list.querySelectorAll<HTMLSelectElement>('.lpTeam').forEach(s =>
+    s.addEventListener('change', () => { lobbyCfg.teams[+s.dataset.i!] = +s.value; sendRoomCfg(); }));
+  $('btnStart').classList.toggle('hidden', !lobbyIsHost);
+  renderLobbyCfg();
+}
+function renderLobbyCfg() {
+  const cfg = $('lobbyCfg'); if (!cfg) return;
+  const sel = 'background:#1a2430;color:#cfe0ee;border:1px solid #2c3e50;border-radius:4px;padding:5px;font-size:12px';
+  if (!lobbyIsHost) {
+    const mapL = (LOBBY_MAPS.find(x => x[0] === lobbyCfg.mapType) || ['', lobbyCfg.mapType])[1];
+    const sizeL = (LOBBY_SIZES.find(x => x[0] === lobbyCfg.size) || [0, String(lobbyCfg.size)])[1];
+    cfg.innerHTML = `<div style="font-size:12px;color:#9fb3c8;background:rgba(20,28,38,0.7);border:1px solid #2c3a44;border-radius:6px;padding:8px 10px">Map: <b>${mapL}</b> · ${sizeL} · Fog ${lobbyCfg.fog ? 'on' : 'off'} · ${lobbyCfg.ai.length} AI — <span style="color:#5f7384">set by host</span></div>`;
+    return;
+  }
+  cfg.innerHTML =
+    `<div style="font-size:11px;color:#9fb3c8;letter-spacing:0.06em;margin-bottom:4px">GAME SETUP</div>` +
+    `<div class="optrow"><span class="optlabel">Map Size</span><select id="lcSize" style="${sel};flex:1">${LOBBY_SIZES.map(([v, l]) => `<option value="${v}" ${v === lobbyCfg.size ? 'selected' : ''}>${l}</option>`).join('')}</select></div>` +
+    `<div class="optrow"><span class="optlabel">Map Type</span><select id="lcMap" style="${sel};flex:1">${LOBBY_MAPS.map(([v, l]) => `<option value="${v}" ${v === lobbyCfg.mapType ? 'selected' : ''}>${l}</option>`).join('')}</select></div>` +
+    `<label class="optrow" style="cursor:pointer"><span class="optlabel">Fog of War</span><span style="flex:1;display:flex;align-items:center;gap:8px;color:#9fb3c8;font-size:13px"><input type="checkbox" id="lcFog" ${lobbyCfg.fog ? 'checked' : ''} style="width:16px;height:16px;accent-color:#ffc940">Hide unexplored</span></label>` +
+    `<div class="optrow" style="align-items:flex-start"><span class="optlabel">AI Players</span><div style="flex:1"><div id="lcAi"></div>` +
+    `<div style="display:flex;gap:8px;margin-top:6px"><button type="button" class="mbtn" id="lcAddEnemy" style="flex:1;font-size:12px;padding:6px 4px">⚔ Add Enemy AI</button><button type="button" class="mbtn" id="lcAddPartner" style="flex:1;font-size:12px;padding:6px 4px">🤝 Add Partner AI</button></div></div></div>`;
+  ($('lcSize') as HTMLSelectElement).onchange = e => { lobbyCfg.size = +(e.target as HTMLSelectElement).value; sendRoomCfg(); };
+  ($('lcMap') as HTMLSelectElement).onchange = e => { lobbyCfg.mapType = (e.target as HTMLSelectElement).value; sendRoomCfg(); };
+  ($('lcFog') as HTMLInputElement).onchange = e => { lobbyCfg.fog = (e.target as HTMLInputElement).checked; sendRoomCfg(); };
+  ($('lcAddEnemy') as HTMLButtonElement).onclick = () => { if (lobbyCfg.ai.length < 3) { const used = new Set([...lobbyCfg.teams, ...lobbyCfg.ai.map(a => a.team)]); const t = [2, 3, 4, 5, 6].find(x => !used.has(x)) ?? 2; lobbyCfg.ai.push({ lvl: 1, team: t }); sendRoomCfg(); } };
+  ($('lcAddPartner') as HTMLButtonElement).onclick = () => { if (lobbyCfg.ai.length < 3) { lobbyCfg.ai.push({ lvl: 1, team: lobbyCfg.teams[0] || 1 }); sendRoomCfg(); } };
+  renderLcAi();
+}
+function renderLcAi() {
+  const el = $('lcAi'); if (!el) return;
+  const sel = 'background:#1a2430;color:#cfe0ee;border:1px solid #2c3e50;border-radius:4px;padding:4px;font-size:12px';
+  el.innerHTML = lobbyCfg.ai.map((a, i) => {
+    const dot = `<span style="width:10px;height:10px;border-radius:50%;flex:0 0 auto;background:${TEAM_TINT[(a.team - 1) % 4]}"></span>`;
+    const lvl = `<select data-i="${i}" class="lcLvl" style="${sel};flex:1">${['Easy', 'Normal', 'Hard', 'Brutal'].map((n, v) => `<option value="${v}" ${v === a.lvl ? 'selected' : ''}>${n}</option>`).join('')}</select>`;
+    const team = `<select data-i="${i}" class="lcTeam" style="${sel};flex:1">${[1, 2, 3, 4, 5, 6].map(t => `<option value="${t}" ${t === a.team ? 'selected' : ''}>Team ${t}</option>`).join('')}</select>`;
+    return `<div style="display:flex;gap:6px;align-items:center;margin-bottom:4px">${dot}<span style="flex:0 0 auto;font-size:12px;color:#9fb3c8;min-width:30px">AI ${i + 1}</span>${lvl}${team}<button type="button" data-i="${i}" class="lcDel" title="Remove" style="background:#2a1d1d;border:1px solid #5a3030;color:#ff9a8a;border-radius:4px;padding:3px 8px;cursor:pointer">✕</button></div>`;
+  }).join('') || '<div style="color:#5f7384;font-size:12px">No AI — one enemy is added if you start solo.</div>';
+  el.querySelectorAll<HTMLSelectElement>('.lcLvl').forEach(s => s.onchange = () => { lobbyCfg.ai[+s.dataset.i!].lvl = +s.value; sendRoomCfg(); });
+  el.querySelectorAll<HTMLSelectElement>('.lcTeam').forEach(s => s.onchange = () => { lobbyCfg.ai[+s.dataset.i!].team = +s.value; sendRoomCfg(); });
+  el.querySelectorAll<HTMLButtonElement>('.lcDel').forEach(b => b.onclick = () => { lobbyCfg.ai.splice(+b.dataset.i!, 1); sendRoomCfg(); });
+}
+
 async function connectNet(): Promise<Net> {
   const n = new Net();
   await n.connect();
-  n.on('room', (m: any) => {
-    $('roomCode').textContent = m.code;
-    const list = $('lobbyPlayers');
-    list.innerHTML = '';
-    m.players.forEach((p: any, i: number) => {
-      const colors = ['#3da5ff', '#ff5043', '#57d977', '#ffc940'];
-      const row = document.createElement('div');
-      row.className = 'lpRow';
-      row.innerHTML = `<div class="lpDot" style="background:${colors[i]}"></div>
-        <span style="flex:1">${twemojify(FACTIONS[p.faction]?.flag || '')} ${escapeHtml(p.name)}</span>
-        ${pingBadge(p.ping)}
-        <span style="color:#78909c;font-size:12px;margin-left:6px">${i === 0 ? 'HOST' : ''}</span>`;
-      list.appendChild(row);
-    });
-    $('btnStart').classList.toggle('hidden', m.you !== 0);
-    show('lobby');
-  });
+  n.on('room', (m: any) => { renderRoom(m); show('lobby'); });
   n.on('start', (m: any) => {
     setMapSize(m.size || 96);
+    if (typeof m.fog === 'boolean') fogEnabled = m.fog; // host's lobby fog choice applies to all
     // lockstep rooms run a local deterministic sim driven by relayed inputs;
     // snapshot rooms render server-authoritative snapshots
     const g = m.lockstep ? new NetLockstepGame(n, m) : new NetGame(n, m.seed, m.players.length, m.you, m.players);

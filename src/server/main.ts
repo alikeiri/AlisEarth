@@ -318,6 +318,9 @@ interface Room {
   code: string; clients: Client[]; started: boolean;
   sim: Sim | null; timer: ReturnType<typeof setInterval> | null; cmdQ: any[];
   aiSlots: number[]; size: number; diff: number; islands?: boolean; urban?: boolean; flat?: boolean; steel?: boolean; metal?: boolean; lockstep?: boolean;
+  mapType?: string; fog?: boolean;
+  ai?: { lvl: number; team: number; faction?: string }[]; // host-configured AI fill (lobby)
+  teams?: number[];                                       // human slot -> team number (lobby)
   dropVote?: { player: number; votes: Map<number, number> }; // lockstep: drop-tick consensus
   rec?: { seed: number; size: number; players: any[]; cmds: { k: number; c: any[] }[] };
   lastReport?: any; replaySaved?: boolean;
@@ -489,8 +492,24 @@ function broadcast(room: Room, obj: any) {
   const s = JSON.stringify(obj);
   for (const c of room.clients) if (c.ws.readyState === WebSocket.OPEN) c.ws.send(s);
 }
+// smallest team number not already used by a human or AI (FFA default for joiners)
+function freeTeam(r: Room): number {
+  const used = new Set<number>([...(r.teams || []), ...((r.ai || []).map(a => a.team))]);
+  for (let t = 1; t <= 8; t++) if (!used.has(t)) return t;
+  return 1;
+}
+// map flags -> the single mapType string the lobby UI shows
+function roomMapType(room: Room): string {
+  return room.mapType || (room.islands ? 'islands' : room.urban ? 'urban' : room.flat ? 'flat' : room.steel ? 'steel' : room.metal ? 'metal' : 'continent');
+}
 function roomState(room: Room) {
-  return { t: 'room', code: room.code, players: room.clients.map(c => ({ name: c.name, faction: c.faction, ping: c.ping ?? null })) };
+  return {
+    t: 'room', code: room.code,
+    players: room.clients.map((c, i) => ({ name: c.name, faction: c.faction, ping: c.ping ?? null, team: (room.teams && room.teams[i]) || (i + 1) })),
+    // lobby game setup (host edits via roomcfg; everyone sees it)
+    size: room.size, mapType: roomMapType(room), fog: room.fog !== false,
+    ai: room.ai || [], lockstep: !!room.lockstep,
+  };
 }
 function sendRoom(room: Room) {
   room.clients.forEach((c, i) => send(c.ws, { ...roomState(room), you: i }));
@@ -521,15 +540,28 @@ function departMidGame(room: Room, leaverSlot: number) {
 function startRoom(room: Room) {
   if (room.started || !room.clients.length) return;
   room.started = true;
-  const specs: { name: string; faction: string; isAI?: boolean; aiLvl?: number }[] =
-    room.clients.map(c => ({ name: c.name, faction: c.faction }));
+  // humans first (carry their lobby-assigned team; FFA default = slot+1)
+  const specs: { name: string; faction: string; isAI?: boolean; aiLvl?: number; team: number }[] =
+    room.clients.map((c, i) => ({ name: c.name, faction: c.faction, team: (room.teams && room.teams[i]) || (i + 1) }));
   room.aiSlots = [];
-  if (specs.length < 2) {
-    const facs = Object.keys(FACTIONS);
-    const f = facs[(Math.random() * facs.length) | 0];
-    const lvlName = ['Easy', 'Normal', 'Hard', 'Brutal'][room.diff] || 'Normal';
+  const facs = Object.keys(FACTIONS);
+  const lvlName = (lv: number) => ['Easy', 'Normal', 'Hard', 'Brutal'][lv] || 'Normal';
+  const usedFac = new Set(specs.map(s => s.faction));
+  // host-configured AI fill (lobby)
+  for (const a of (room.ai || []).slice(0, 3)) {
+    let f = a.faction && FACTIONS[a.faction] ? a.faction : facs[(Math.random() * facs.length) | 0];
+    let guard = 0; while (usedFac.has(f) && guard++ < 16) f = facs[(Math.random() * facs.length) | 0];
+    usedFac.add(f);
+    const lv = Math.max(0, Math.min(3, a.lvl | 0));
     room.aiSlots.push(specs.length);
-    specs.push({ name: `AI ${FACTIONS[f].name} (${lvlName})`, faction: f, isAI: true, aiLvl: room.diff });
+    specs.push({ name: `AI ${FACTIONS[f].name} (${lvlName(lv)})`, faction: f, isAI: true, aiLvl: lv, team: Math.min(8, Math.max(1, a.team | 0)) || 2 });
+  }
+  // solo with no configured AI → still drop in one enemy so there's an opponent
+  if (specs.length < 2) {
+    const f = facs[(Math.random() * facs.length) | 0];
+    const enemyTeam = Math.max(0, ...specs.map(s => s.team || 1)) + 1;
+    room.aiSlots.push(specs.length);
+    specs.push({ name: `AI ${FACTIONS[f].name} (${lvlName(room.diff)})`, faction: f, isAI: true, aiLvl: room.diff, team: enemyTeam });
   }
   // map type rides in seed bits: islands 0x40000000, urban 0x20000000, flatCity 0x10000000, steel 0x08000000, metal 0x04000000
   let seed = ((Math.random() * 0x7fffffff) | 0) & ~0x7c000000;
@@ -550,8 +582,8 @@ function startRoom(room: Room) {
     const maxPing = Math.max(0, ...room.clients.map(c => c.ping || 0));
     const lsDelay = Math.max(6, Math.min(18, Math.round(maxPing / 30)));
     room.clients.forEach((c, i) => send(c.ws, {
-      t: 'start', lockstep: true, seed, size: room.size, you: i, aiSlots: room.aiSlots, delay: lsDelay,
-      players: specs.map(s => ({ name: s.name, faction: s.faction, isAI: !!s.isAI })),
+      t: 'start', lockstep: true, seed, size: room.size, fog: room.fog !== false, you: i, aiSlots: room.aiSlots, delay: lsDelay,
+      players: specs.map(s => ({ name: s.name, faction: s.faction, isAI: !!s.isAI, team: s.team })),
     }));
     return;
   }
@@ -561,7 +593,7 @@ function startRoom(room: Room) {
   room.rec = { seed, size: room.size, players: specs.map(s => ({ ...s })), cmds: [] };
   try { room.sim.aiProfile = JSON.parse(readFileSync(AI_PROFILE_FILE, 'utf8')); } catch { /* fresh AI */ }
   room.clients.forEach((c, i) =>
-    send(c.ws, { t: 'start', seed, size: room.size, you: i, players: specs.map(s => ({ name: s.name, faction: s.faction, isAI: !!s.isAI })) }));
+    send(c.ws, { t: 'start', seed, size: room.size, fog: room.fog !== false, you: i, players: specs.map(s => ({ name: s.name, faction: s.faction, isAI: !!s.isAI, team: s.team })) }));
 
   let tickErrs = 0;
   // --- performance monitoring: time each tick's work and watch for the loop
@@ -687,7 +719,8 @@ wss.on('connection', ws => {
         lockstep: !!m.lockstep,
         mapType: MAP_TYPES.includes(m.mapType) ? m.mapType
           : m.islands ? 'islands' : m.urban ? 'urban' : m.flat ? 'flat' : m.steel ? 'steel' : m.metal ? 'metal' : 'continent',
-        ai: [], teams: [0], // host starts on team 0 (FFA); host edits teams/AI via roomcfg
+        fog: m.fog !== false,
+        ai: [], teams: [1], // host on team 1; host edits teams/AI/map via roomcfg in the lobby
       };
       me.room = room;
       rooms.set(code, room);
@@ -702,6 +735,8 @@ wss.on('connection', ws => {
       me.slot = r.clients.length; me.name = String(m.name || me.name).slice(0, 14); me.faction = String(m.faction || me.faction);
       online.add(me);
       r.clients.push(me);
+      r.teams = r.teams || [];
+      r.teams[r.clients.length - 1] = freeTeam(r); // new human joins on a free (FFA) team by default
       room = r; me.room = r;
       sendRoom(r);
       broadcastLobby();
@@ -709,13 +744,27 @@ wss.on('connection', ws => {
       // back out of a room lobby to the global lobby (only before the game starts)
       if (room && me && !room.started) {
         const idx = room.clients.indexOf(me);
-        if (idx >= 0) room.clients.splice(idx, 1);
+        if (idx >= 0) { room.clients.splice(idx, 1); if (room.teams) room.teams.splice(idx, 1); }
         if (!room.clients.length) { if (room.timer) clearInterval(room.timer); rooms.delete(room.code); }
         else { room.clients.forEach((c, i) => { c.slot = i; }); sendRoom(room); }
         me.room = null; room = null;
         send(ws, lobbyState());
         broadcastLobby();
       }
+    } else if (m.t === 'roomcfg') {
+      // host configures the match in the lobby: map, fog, AI fill, teams
+      if (!room || !me || me.slot !== 0 || room.started) return;
+      if ([72, 96, 128].includes(m.size)) room.size = m.size;
+      if (MAP_TYPES.includes(m.mapType)) {
+        room.mapType = m.mapType;
+        room.islands = m.mapType === 'islands'; room.urban = m.mapType === 'urban';
+        room.flat = m.mapType === 'flat'; room.steel = m.mapType === 'steel'; room.metal = m.mapType === 'metal';
+      }
+      if (typeof m.fog === 'boolean') room.fog = m.fog;
+      if (Array.isArray(m.ai)) room.ai = m.ai.slice(0, 3).map((a: any) => ({ lvl: Math.max(0, Math.min(3, a.lvl | 0)), team: Math.min(8, Math.max(1, a.team | 0)) || 2 }));
+      if (Array.isArray(m.teams)) room.teams = m.teams.slice(0, room.clients.length).map((t: any) => Math.min(8, Math.max(1, t | 0)) || 1);
+      sendRoom(room);
+      broadcastLobby();
     } else if (m.t === 'start') {
       if (room && me && me.slot === 0) { startRoom(room); broadcastLobby(); }
     } else if (m.t === 'chat') {
