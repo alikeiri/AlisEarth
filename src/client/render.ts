@@ -1419,31 +1419,35 @@ export class Renderer {
 
   // Texture-splatting material: a MeshLambert base (keeps Three's lighting / shadows
   // / fog) with the map sample replaced by a 4-layer tiled blend in onBeforeCompile.
+  // Uses the HIGH-RES photo textures (./textures/*.jpg) when loaded — the procedural
+  // canvas textures are just the instant placeholder; loadTerrainTextures() swaps the
+  // jpgs into this.terrainShader's uniforms (tGrass/tRock/tSand/tDirt) once they load.
   private splatMaterial(maxAniso: number): THREE.Material {
     const layer = (k: string) => {
-      const t = groundTexture(k, maxAniso);
-      t.wrapS = t.wrapT = THREE.RepeatWrapping; t.colorSpace = THREE.SRGBColorSpace;
+      const t = this.extTex[k] || groundTexture(k, maxAniso); // prefer the loaded photo
+      t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = maxAniso; t.colorSpace = THREE.SRGBColorSpace;
       return t;
     };
-    const gMap = layer('grass'), rMap = layer('rock'), sMap = layer('sand'), dMap = layer('dirt');
+    const tGrass = layer('grass'), tRock = layer('rock'), tSand = layer('sand'), tDirt = layer('dirt');
     const wMap = this.splatWeightTex();
     const tileRep = Math.max(2, Math.round(W / 2.4)); // ~2.4 world cells per tile = native-crisp
-    const mat = new THREE.MeshLambertMaterial({ map: gMap }); // map set → vMapUv varying exists
+    const mat = new THREE.MeshLambertMaterial({ map: tGrass }); // map set → vMapUv varying exists
     mat.onBeforeCompile = sh => {
-      sh.uniforms.gMap = { value: gMap }; sh.uniforms.rMap = { value: rMap };
-      sh.uniforms.sMap = { value: sMap }; sh.uniforms.dMap = { value: dMap };
+      sh.uniforms.tGrass = { value: tGrass }; sh.uniforms.tRock = { value: tRock };
+      sh.uniforms.tSand = { value: tSand }; sh.uniforms.tDirt = { value: tDirt };
       sh.uniforms.wMap = { value: wMap }; sh.uniforms.tileRep = { value: tileRep };
-      sh.fragmentShader = 'uniform sampler2D gMap, rMap, sMap, dMap, wMap; uniform float tileRep;\n' +
+      sh.fragmentShader = 'uniform sampler2D tGrass, tRock, tSand, tDirt, wMap; uniform float tileRep;\n' +
         sh.fragmentShader.replace('#include <map_fragment>', `
           vec4 wv = texture2D( wMap, vMapUv );
           float ws = wv.r + wv.g + wv.b + wv.a; if (ws < 1e-3) ws = 1.0;
           vec2 tuv = vMapUv * tileRep;
-          vec3 splat = ( texture2D(gMap, tuv).rgb * wv.r
-                       + texture2D(rMap, tuv * 0.6).rgb * wv.g
-                       + texture2D(sMap, tuv).rgb * wv.b
-                       + texture2D(dMap, tuv * 0.85).rgb * wv.a ) / ws;
+          vec3 splat = ( texture2D(tGrass, tuv).rgb * wv.r
+                       + texture2D(tRock, tuv * 0.6).rgb * wv.g
+                       + texture2D(tSand, tuv).rgb * wv.b
+                       + texture2D(tDirt, tuv * 0.85).rgb * wv.a ) / ws;
           diffuseColor.rgb *= splat;
         `);
+      this.terrainShader = sh; // loadTerrainTextures swaps the hi-res jpgs into these uniforms
     };
     return mat;
   }
@@ -1576,10 +1580,11 @@ export class Renderer {
       loader.load('./textures/' + name + '.jpg', t => {
         t.wrapS = t.wrapT = THREE.RepeatWrapping;
         t.anisotropy = maxAniso;
+        t.colorSpace = THREE.SRGBColorSpace; // color texture — decode to linear on sample
         this.extTex[name] = t;
         if (this.terrainShader) {
           const key = 't' + name[0].toUpperCase() + name.slice(1);
-          this.terrainShader.uniforms[key].value = t;
+          if (this.terrainShader.uniforms[key]) this.terrainShader.uniforms[key].value = t;
         }
       }, undefined, () => { /* file missing — keep procedural texture */ });
     }
