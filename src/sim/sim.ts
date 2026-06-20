@@ -1090,6 +1090,21 @@ export class Sim {
     return a !== b && this.players[a]?.team !== this.players[b]?.team;
   }
 
+  // AI helper: is an enemy silo warhead currently inbound on this player's base?
+  // (Iron Dome / Patriot can shoot these down, so the AI should rush them.)
+  missileInbound(player: number): boolean {
+    if (!this.pendingBlasts.length) return false;
+    for (const bl of this.pendingBlasts) {
+      if (!this.foe(bl.owner, player)) continue;
+      for (const e of this.ents.values()) {
+        if (e.owner !== player || !e.b) continue;
+        const dx = e.x - bl.x, dz = e.z - bl.z;
+        if (dx * dx + dz * dz < 16 * 16) return true;
+      }
+    }
+    return false;
+  }
+
   // garrison capacity scales with the building footprint (2x2 -> 4, 3x3 -> 9)
   garrisonCap(b: Entity): number { return Math.max(2, b.size * b.size); }
   private canGarrison(b: Entity): boolean { return (b.cargoUnits?.length || 0) < this.garrisonCap(b); }

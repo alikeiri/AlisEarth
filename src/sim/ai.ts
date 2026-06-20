@@ -23,6 +23,7 @@ interface AiMem {
   enemyCombat?: number; // live count of enemy fighting units
   enemyBuildings?: number; // live count of enemy structures (walls excluded)
   lastHurtT?: number; // last tick a building of ours took damage (posture)
+  missileThreatT?: number; // last tick an enemy silo existed / a warhead was inbound on us
   defenders?: number[]; // infantry designated to the fortified defense line
   harvDefCd?: number; // cooldown between harvester-rescue reactions
 }
@@ -227,6 +228,10 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
   // --- dynamic posture: turtle when poor or pressured, press when rich/safe ---
   const underAttack = sim.tickN - (mem.lastHurtT ?? -1e9) < 15 * TICKS_PER_SEC;
   if (underAttack) turrets += 1;                                  // shore up the line under fire
+  // missile threat: an enemy missile silo stands, or a warhead is inbound on us —
+  // rush anti-missile cover (Iron Dome + Patriot). Sticky for 40s after last seen.
+  if (enemyHasSilo(sim, p) || sim.missileInbound(p)) mem.missileThreatT = sim.tickN;
+  const missileThreat = sim.tickN - (mem.missileThreatT ?? -1e9) < 40 * TICKS_PER_SEC;
   if (pl.credits > 6000) { cap = Math.min(90, cap + 8); waveEvery = Math.max(18, waveEvery - 6); } // flush: attack
   if (pl.credits < 1200 && underAttack) mem.nextWave = Math.max(mem.nextWave, sim.tickN + 10 * TICKS_PER_SEC); // hold
 
@@ -246,6 +251,10 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
   // committing to a deep army (the tester's AI stalled on one refinery)
   else if (nB('refinery') < 2 && pl.credits > 1500) want = 'refinery';
   else if (!nB('factory') && pl.credits > cost('factory') * 1.1) want = 'factory';
+  // UNDER MISSILE ATTACK: rush anti-missile cover ahead of normal defense — a Radar
+  // Dome first (Iron Dome needs it), then the Iron Dome itself. Any difficulty.
+  else if (missileThreat && nB('factory') && !nB('radar') && pl.credits > 1300) want = 'radar';
+  else if (missileThreat && nB('radar') && !nB('irondome') && pl.credits > 1700) want = 'irondome';
   // a couple of turrets for safety, then SPREAD: refineries toward the ore
   // frontier take priority over deep defense (tester: "AI not spreading out")
   else if (nB('turret') < Math.min(2, turrets) && nB('barracks')) want = 'turret';
@@ -352,6 +361,11 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
     // so an air assault always gets answered (user: "if air seen, build AA/flak")
     else if (airSeen >= 1 && nU('aatank') + nU('flak') < aaTarget && pl.credits > 700) {
       cmds.push({ k: 'train', p, bid: fac.id, type: sim.aiRngP[p].next() < 0.5 ? 'aatank' : 'flak' });
+    }
+    // under missile attack: field Patriot SAMs — mobile interceptors that shoot
+    // down incoming silo missiles (a fast answer while the Iron Dome builds)
+    else if (missileThreat && nU('patriot') < 2 && pl.credits > 1200) {
+      cmds.push({ k: 'train', p, bid: fac.id, type: 'patriot' });
     }
     else if (armyCount < cap && pl.credits > (ecoShort ? 2200 : 1000)) {
       // islanders keep only a small home guard of vehicles

@@ -11,6 +11,10 @@ class AudioMan {
   private delay!: DelayNode;
   private noiseBuf: AudioBuffer | null = null;
   private last: Record<string, number> = {};
+  // rapid-fire weapon thinning: in any short window only a few of a swarm's shots
+  // actually sound, so 10 rifles firing don't stack into a wall of identical cracks
+  private rapidWin = 0;
+  private rapidCount: Record<string, number> = {};
   private musicTimer: ReturnType<typeof setInterval> | null = null;
   private eighth = 0;
   private nextT = 0;
@@ -204,6 +208,17 @@ class AudioMan {
     const now = performance.now();
     const gap: Record<string, number> = { mg: 45, cn: 80, rkt: 90, zap: 60, salvo: 200, flakgun: 55, hcannon: 110, boomS: 70, boomB: 140, cash: 120, crush: 90 };
     if (gap[name] && now - (this.last[name] || 0) < gap[name]) return;
+    // thin out high-rate-of-fire weapons: only ~N of a burst sound per ~200ms
+    // window (e.g. 10 infantry firing → ~3 cracks), so mass fire doesn't turn into
+    // a loud stack of identical samples. Bigger/slower weapons aren't capped here.
+    const RAPID_CAP: Record<string, number> = { mg: 3, flakgun: 3, zap: 3 };
+    const cap = RAPID_CAP[name];
+    if (cap) {
+      if (now - this.rapidWin > 200) { this.rapidWin = now; this.rapidCount = {}; }
+      const c = this.rapidCount[name] || 0;
+      if (c >= cap) return;
+      this.rapidCount[name] = c + 1;
+    }
     this.last[name] = now;
     const v = Math.min(1, vol);
     // realistic recorded SFX take priority once loaded; otherwise fall through to
