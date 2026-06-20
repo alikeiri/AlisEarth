@@ -1349,8 +1349,11 @@ export class Renderer {
     // Steel Arena) have edge-to-edge constant height with no river or mountains,
     // so a quarter-resolution mesh is indistinguishable and far cheaper.
     const flatPath = this.map.noTerrainDetail;
-    const segX = flatPath ? Math.max(8, W >> 2) : W;
-    const segZ = flatPath ? Math.max(8, H >> 2) : H;
+    // mesh density: 2x sim grid on Medium/High (smoother terrain — the original
+    // value), 1x on Low for performance. Flat maps stay quarter-res either way.
+    const hiMesh = gfxQuality() !== 'low';
+    const segX = flatPath ? Math.max(8, W >> 2) : (hiMesh ? W * 2 : W);
+    const segZ = flatPath ? Math.max(8, H >> 2) : (hiMesh ? H * 2 : H);
     const geo = new THREE.PlaneGeometry(W, H, segX, segZ);
     geo.rotateX(-Math.PI / 2);
     geo.translate(W / 2, 0, H / 2);
@@ -1379,14 +1382,70 @@ export class Renderer {
       return mesh;
     }
 
-    // Pre-baked ground: the four splat layers are composited into ONE map texture
-    // at load (see bakeGround), so the terrain renders with a plain material —
-    // one texture fetch, no per-frame splat blend. (Sampled at uv 0..1, so it also
-    // avoids the large-tiled-UV mip bug that blanked terrain on some Adreno GPUs.)
-    const mat = new THREE.MeshLambertMaterial({ map: this.bakeGround() });
+    // Ground texture: real TEXTURE SPLATTING (tiled native-res layers blended
+    // per-cell) on Medium/High for crisp detail at any zoom; the pre-baked single
+    // texture on Low — which is also the compatibility fallback for the tiled-mip
+    // bug that blanked terrain on some Adreno GPUs.
+    const mat = gfxQuality() === 'low'
+      ? new THREE.MeshLambertMaterial({ map: this.bakeGround() })
+      : this.splatMaterial(maxAniso);
     const mesh = new THREE.Mesh(geo, mat);
     mesh.receiveShadow = true;
     return mesh;
+  }
+
+  // per-cell splat weights (grass/rock/sand/dirt) as a small RGBA texture sampled
+  // by world-uv; smoothly interpolated between cells. Same formula as the bake.
+  private splatWeightTex(): THREE.DataTexture {
+    const d = new Uint8Array(W * H * 4);
+    for (let cz = 0; cz < H; cz++) for (let cx = 0; cx < W; cx++) {
+      const x = cx + 0.5, z = cz + 0.5, h = this.map.heightAt(x, z), e = 0.5;
+      const gx = this.map.heightAt(x + e, z) - this.map.heightAt(x - e, z);
+      const gz = this.map.heightAt(x, z + e) - this.map.heightAt(x, z - e);
+      const slope = Math.hypot(gx, gz);
+      const sand = 1 - sstep(SEA + 0.12, SEA + 0.55, h);
+      const rock = Math.min(1, sstep(0.85, 1.5, slope) + sstep(6.6, 7.8, h));
+      const dirt = sstep(0.56, 0.70, fbm(12345, x * 0.09, z * 0.09)) * 0.85 * (1 - sand) * (1 - rock);
+      const grass = Math.max(0, 1 - sand - rock - dirt);
+      const s = (sand + rock + dirt + grass) || 1, o = (cz * W + cx) * 4;
+      d[o] = grass / s * 255; d[o + 1] = rock / s * 255; d[o + 2] = sand / s * 255; d[o + 3] = dirt / s * 255;
+    }
+    const tex = new THREE.DataTexture(d, W, H, THREE.RGBAFormat);
+    tex.minFilter = THREE.LinearFilter; tex.magFilter = THREE.LinearFilter; // smooth blend across cells
+    tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
+    tex.needsUpdate = true;
+    return tex;
+  }
+
+  // Texture-splatting material: a MeshLambert base (keeps Three's lighting / shadows
+  // / fog) with the map sample replaced by a 4-layer tiled blend in onBeforeCompile.
+  private splatMaterial(maxAniso: number): THREE.Material {
+    const layer = (k: string) => {
+      const t = groundTexture(k, maxAniso);
+      t.wrapS = t.wrapT = THREE.RepeatWrapping; t.colorSpace = THREE.SRGBColorSpace;
+      return t;
+    };
+    const gMap = layer('grass'), rMap = layer('rock'), sMap = layer('sand'), dMap = layer('dirt');
+    const wMap = this.splatWeightTex();
+    const tileRep = Math.max(2, Math.round(W / 2.4)); // ~2.4 world cells per tile = native-crisp
+    const mat = new THREE.MeshLambertMaterial({ map: gMap }); // map set → vMapUv varying exists
+    mat.onBeforeCompile = sh => {
+      sh.uniforms.gMap = { value: gMap }; sh.uniforms.rMap = { value: rMap };
+      sh.uniforms.sMap = { value: sMap }; sh.uniforms.dMap = { value: dMap };
+      sh.uniforms.wMap = { value: wMap }; sh.uniforms.tileRep = { value: tileRep };
+      sh.fragmentShader = 'uniform sampler2D gMap, rMap, sMap, dMap, wMap; uniform float tileRep;\n' +
+        sh.fragmentShader.replace('#include <map_fragment>', `
+          vec4 wv = texture2D( wMap, vMapUv );
+          float ws = wv.r + wv.g + wv.b + wv.a; if (ws < 1e-3) ws = 1.0;
+          vec2 tuv = vMapUv * tileRep;
+          vec3 splat = ( texture2D(gMap, tuv).rgb * wv.r
+                       + texture2D(rMap, tuv * 0.6).rgb * wv.g
+                       + texture2D(sMap, tuv).rgb * wv.b
+                       + texture2D(dMap, tuv * 0.85).rgb * wv.a ) / ws;
+          diffuseColor.rgb *= splat;
+        `);
+    };
+    return mat;
   }
 
   // Bake the grass/rock/sand/dirt layers into a single map texture, blended by the
