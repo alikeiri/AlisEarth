@@ -2439,6 +2439,7 @@ export class Renderer {
           const rf = poses.length - 2;
           pi = 2 + ((Math.floor(this.time * 9) + v.i) % rf);
         }
+        if (!(pi >= 0 && pi < poses.length)) pi = 0; // NaN / out-of-range safety → rest pose
         parts = poses[pi];
         idx = this.poseCounts[v.t][pi];
         if (idx >= MAX_INST) continue;
@@ -2490,6 +2491,7 @@ export class Renderer {
       this.dummy.rotation.set(0, f.a, rollZ);
       this.dummy.scale.setScalar(1);
       this.dummy.updateMatrix();
+      if (!parts) continue; // never iterate undefined parts (defensive — keeps the render loop alive)
       const teamHex = PLAYER_COLORS[v.o] ?? 0xffffff;
       for (const part of parts) {
         part.mesh.setMatrixAt(idx, this.dummy.matrix);
