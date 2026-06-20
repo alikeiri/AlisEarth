@@ -7,6 +7,7 @@ import { readFile } from 'fs/promises';
 import { readFileSync, writeFileSync, mkdirSync, unlinkSync } from 'fs';
 import { extname, join, normalize } from 'path';
 import { fileURLToPath } from 'url';
+import { randomBytes, scryptSync, createHmac, timingSafeEqual } from 'crypto';
 import { WebSocketServer, WebSocket } from 'ws';
 import { performance } from 'perf_hooks';
 import { Sim } from '../sim/sim';
@@ -183,9 +184,92 @@ function handleFeatureComplete(req: any, res: any) {
   });
 }
 
+// ---- player accounts: email + password (scrypt-hashed) so a player's chosen
+// callsign follows them across devices. Stored as JSON on the mounted volume
+// (/app) so accounts survive redeploys. Passwords are NEVER stored in plaintext;
+// sessions are stateless HMAC-signed tokens. ----
+const USERS_FILE = join(fileURLToPath(new URL('.', import.meta.url)), 'users.json');
+function readUsers(): Record<string, any> { try { return JSON.parse(readFileSync(USERS_FILE, 'utf8')); } catch { return {}; } }
+function writeUsers(u: Record<string, any>) { try { writeFileSync(USERS_FILE, JSON.stringify(u)); } catch (e) { logErr('writeUsers', e); } }
+// token-signing secret, persisted so sessions survive restarts (seeded from the
+// advisor key + random bytes); kept out of git on the volume
+const SECRET_FILE = join(fileURLToPath(new URL('.', import.meta.url)), 'auth-secret');
+function authSecret(): string {
+  try { const s = readFileSync(SECRET_FILE, 'utf8'); if (s) return s; } catch { /* generate below */ }
+  const s = (process.env.ADVISOR_KEY || 'fe') + ':' + randomBytes(24).toString('hex');
+  try { writeFileSync(SECRET_FILE, s); } catch (e) { logErr('authSecret', e); }
+  return s;
+}
+const AUTH_SECRET = authSecret();
+function signToken(payload: any): string {
+  const body = Buffer.from(JSON.stringify(payload)).toString('base64url');
+  const sig = createHmac('sha256', AUTH_SECRET).update(body).digest('base64url');
+  return body + '.' + sig;
+}
+function verifyToken(tok: any): any | null {
+  if (typeof tok !== 'string' || !tok.includes('.')) return null;
+  const [body, sig] = tok.split('.');
+  const exp = createHmac('sha256', AUTH_SECRET).update(body).digest('base64url');
+  try { if (sig.length !== exp.length || !timingSafeEqual(Buffer.from(sig), Buffer.from(exp))) return null; } catch { return null; }
+  let p: any; try { p = JSON.parse(Buffer.from(body, 'base64url').toString()); } catch { return null; }
+  if (!p || (p.exp && Date.now() > p.exp)) return null;
+  return p;
+}
+const hashPw = (pw: string, salt: string) => scryptSync(pw, salt, 32).toString('hex');
+const validEmail = (e: any) => typeof e === 'string' && e.length <= 120 && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e);
+const cleanCallsign = (c: any) => String(c || '').trim().replace(/[<>]/g, '').slice(0, 18);
+const authLast = new Map<string, number>();
+function readJsonBody(req: any): Promise<any> {
+  return new Promise(resolve => {
+    let raw = ''; req.on('data', (c: Buffer) => { raw += c; if (raw.length > 4096) req.destroy(); });
+    req.on('end', () => { try { resolve(JSON.parse(raw)); } catch { resolve(null); } });
+  });
+}
+const TOKEN_TTL = 1000 * 60 * 60 * 24 * 180; // 180 days
+async function handleAuth(req: any, res: any, kind: 'register' | 'login' | 'me') {
+  const json = (code: number, obj: any) => { res.writeHead(code, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(obj)); };
+  const ip = (req.socket?.remoteAddress || '') as string;
+  const now = Date.now();
+  if (kind !== 'me') {
+    if (now - (authLast.get(ip) || 0) < 800) return json(429, { error: 'Too many attempts — slow down' });
+    authLast.set(ip, now);
+  }
+  const b = await readJsonBody(req);
+  if (!b) return json(400, { error: 'Bad request' });
+  if (kind === 'me') {
+    const p = verifyToken(b.token);
+    return p ? json(200, { email: p.email, callsign: p.callsign }) : json(401, { error: 'Invalid session' });
+  }
+  const email = String(b.email || '').trim().toLowerCase();
+  const pw = String(b.password || '');
+  if (!validEmail(email)) return json(400, { error: 'Enter a valid email address' });
+  if (pw.length < 6) return json(400, { error: 'Password must be at least 6 characters' });
+  const users = readUsers();
+  if (kind === 'register') {
+    if (users[email]) return json(409, { error: 'An account with that email already exists' });
+    const callsign = cleanCallsign(b.callsign) || email.split('@')[0].slice(0, 18);
+    const salt = randomBytes(16).toString('hex');
+    users[email] = { salt, hash: hashPw(pw, salt), callsign, created: now };
+    writeUsers(users);
+    return json(200, { token: signToken({ email, callsign, exp: now + TOKEN_TTL }), callsign, email });
+  }
+  // login
+  const u = users[email];
+  if (!u) return json(401, { error: 'No account found for that email' });
+  let ok = false;
+  try { ok = timingSafeEqual(Buffer.from(hashPw(pw, u.salt), 'hex'), Buffer.from(u.hash, 'hex')); } catch { ok = false; }
+  if (!ok) return json(401, { error: 'Incorrect password' });
+  const cs = cleanCallsign(b.callsign);
+  if (cs && cs !== u.callsign) { u.callsign = cs; writeUsers(users); } // let the player update their callsign on login
+  return json(200, { token: signToken({ email, callsign: u.callsign, exp: now + TOKEN_TTL }), callsign: u.callsign, email });
+}
+
 const http = createServer(async (req, res) => {
   try {
     let p = (req.url || '/').split('?')[0];
+    if (req.method === 'POST' && p === '/auth/register') { handleAuth(req, res, 'register'); return; }
+    if (req.method === 'POST' && p === '/auth/login') { handleAuth(req, res, 'login'); return; }
+    if (req.method === 'POST' && p === '/auth/me') { handleAuth(req, res, 'me'); return; }
     if (req.method === 'POST' && p === '/advisor') { handleAdvisor(req, res); return; }
     if (p === '/intel') { handleIntel(req, res); return; }
     if (req.method === 'POST' && p === '/features/complete') { handleFeatureComplete(req, res); return; }

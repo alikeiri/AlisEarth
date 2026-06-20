@@ -3762,6 +3762,95 @@ function initMenus() {
   });
 }
 
+// ---- Landing page: hero CTA + email/password accounts so a chosen callsign
+// follows the player across devices. The landing covers the menu on first load;
+// PLAY reveals the game. Accounts hit /auth/* on the game server (hashed). ----
+function initLanding() {
+  const landing = document.getElementById('landing');
+  if (!landing) return;
+  const el = (id: string) => document.getElementById(id)!;
+  // swap the CSS-art hero for /hero.jpg the moment that image exists (404 = keep art)
+  const bg = el('lgBg');
+  const probe = new Image();
+  probe.onload = () => { bg.style.backgroundImage = 'url(/hero.jpg)'; bg.classList.add('hasImg'); };
+  probe.src = '/hero.jpg';
+  // PLAY → reveal the game menu underneath
+  el('lgPlay').addEventListener('click', () => { audio.init(); landing.classList.add('hidden'); });
+
+  const wrap = el('lgAuthWrap');
+  const openAuth = (e?: Event) => { e?.preventDefault(); wrap.classList.remove('hidden'); (el('lgEmail') as HTMLInputElement).focus(); };
+  const closeAuth = () => wrap.classList.add('hidden');
+  el('lgShowAuth').addEventListener('click', openAuth);
+  el('lgNavAuth').addEventListener('click', openAuth);
+  el('lgAuthClose').addEventListener('click', closeAuth);
+  el('lgGuest').addEventListener('click', closeAuth);
+  wrap.addEventListener('click', e => { if (e.target === wrap) closeAuth(); });
+
+  let mode: 'login' | 'register' = 'login';
+  const tabL = el('lgTabLogin'), tabR = el('lgTabRegister'), cs = el('lgCallsign') as HTMLInputElement;
+  const submit = el('lgAuthSubmit') as HTMLButtonElement, errEl = el('lgAuthErr'), msgEl = el('lgAuthMsg');
+  const setMode = (m: 'login' | 'register') => {
+    mode = m;
+    tabL.classList.toggle('on', m === 'login'); tabR.classList.toggle('on', m === 'register');
+    cs.classList.toggle('hidden', m !== 'register');
+    submit.textContent = m === 'login' ? 'Log in' : 'Create account';
+    (el('lgPassword') as HTMLInputElement).autocomplete = m === 'login' ? 'current-password' : 'new-password';
+    errEl.textContent = ''; msgEl.classList.add('hidden');
+  };
+  tabL.addEventListener('click', () => setMode('login'));
+  tabR.addEventListener('click', () => setMode('register'));
+  // seed the register callsign from whatever's in the name box
+  cs.value = ((document.getElementById('nameInput') as HTMLInputElement)?.value || '').trim();
+
+  const setLoggedIn = (callsign: string) => {
+    if (!callsign) return;
+    try { safeLS.setItem('fe_callsign', callsign); safeLS.setItem('fe_name', callsign.slice(0, 18)); } catch { /* no storage */ }
+    const nm = document.getElementById('nameInput') as HTMLInputElement | null;
+    if (nm) nm.value = callsign;
+    const label = '◉ ' + callsign;
+    const a = document.getElementById('lgNavAuth'); if (a) a.textContent = label;
+    const b = document.getElementById('lgShowAuth'); if (b) b.textContent = label;
+  };
+
+  const doSubmit = async () => {
+    const email = (el('lgEmail') as HTMLInputElement).value.trim();
+    const password = (el('lgPassword') as HTMLInputElement).value;
+    const callsign = cs.value.trim();
+    errEl.textContent = ''; msgEl.classList.add('hidden');
+    submit.disabled = true;
+    try {
+      const r = await fetch('/auth/' + mode, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ email, password, callsign }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) { errEl.textContent = j.error || 'Something went wrong'; return; }
+      try { safeLS.setItem('fe_token', j.token); } catch { /* no storage */ }
+      setLoggedIn(j.callsign);
+      msgEl.textContent = mode === 'register' ? 'Account created — you’re logged in!' : 'Welcome back, ' + j.callsign + '!';
+      msgEl.classList.remove('hidden');
+      setTimeout(closeAuth, 800);
+    } catch { errEl.textContent = 'Server unreachable — you can still play as guest.'; }
+    finally { submit.disabled = false; submit.textContent = mode === 'login' ? 'Log in' : 'Create account'; }
+  };
+  submit.addEventListener('click', doSubmit);
+  el('lgEmail').addEventListener('keydown', e => { if ((e as KeyboardEvent).key === 'Enter') doSubmit(); });
+  el('lgPassword').addEventListener('keydown', e => { if ((e as KeyboardEvent).key === 'Enter') doSubmit(); });
+  cs.addEventListener('keydown', e => { if ((e as KeyboardEvent).key === 'Enter') doSubmit(); });
+
+  // restore a saved session: prefill instantly from the cached callsign, then
+  // confirm the token is still valid against the server
+  try {
+    const savedCs = safeLS.getItem('fe_callsign');
+    if (savedCs) setLoggedIn(savedCs);
+    const tok = safeLS.getItem('fe_token');
+    if (tok) {
+      fetch('/auth/me', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token: tok }) })
+        .then(r => r.ok ? r.json() : null).then(j => { if (j && j.callsign) setLoggedIn(j.callsign); }).catch(() => { /* offline */ });
+    }
+  } catch { /* no storage */ }
+}
+
 // WebGL2 support gate (all modern browsers: Chrome/Edge 56+, Firefox 51+, Safari 15+)
 // suppress the browser's right-click menu everywhere — right-click is a game
 // control, and the Chrome dropdown sometimes popped up over the minimap/HUD.
@@ -3795,6 +3884,7 @@ if (!glOk) {
     });
   } catch { /* no input */ }
   try { ($('claudeKey') as HTMLInputElement).value = safeLS.getItem('ae_claude_key') || ''; } catch { /* no storage */ }
+  initLanding();   // hero + accounts; restores a saved session and prefills the callsign
   // tell the startup-diagnostic in index.html that the app booted cleanly (so it
   // won't show the "code did not start" banner)
   (window as any).__feBooted = true;

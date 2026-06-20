@@ -7,6 +7,8 @@ batch-progress.txt
 batch-results.json
 ai-profile.json
 feature-requests.json
+users.json
+auth-secret
 replays/
 *.log
 .DS_Store

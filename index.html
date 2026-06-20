@@ -12,7 +12,30 @@
 
   gtag('config', 'G-B3LZH7Q9WW');
 </script>
-<title>Infinite Greed — RTS</title>
+<title>Infinite Greed — Free Browser Real-Time Strategy Game (RTS)</title>
+<!-- SEO -->
+<meta name="description" content="Infinite Greed is a free, browser-based real-time strategy game. Command tanks, drones, navies and air forces across 16 balanced real-world factions — build your base, harvest resources, and crush rivals in fast online multiplayer or skirmish vs AI. No download." />
+<meta name="keywords" content="RTS, real-time strategy game, browser game, free strategy game, online multiplayer RTS, command and conquer style, base building, tank game, web game, Infinite Greed" />
+<meta name="author" content="Infinite Greed" />
+<meta name="theme-color" content="#0b1117" />
+<link rel="canonical" href="https://infinitegreed.com/" />
+<meta name="robots" content="index, follow" />
+<!-- Open Graph -->
+<meta property="og:type" content="website" />
+<meta property="og:site_name" content="Infinite Greed" />
+<meta property="og:title" content="Infinite Greed — Free Browser RTS" />
+<meta property="og:description" content="Command armies in real time. 16 balanced factions, base-building, and fast online multiplayer — free in your browser, no download." />
+<meta property="og:url" content="https://infinitegreed.com/" />
+<meta property="og:image" content="https://infinitegreed.com/hero.jpg" />
+<!-- Twitter -->
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Infinite Greed — Free Browser RTS" />
+<meta name="twitter:description" content="Command armies in real time. 16 balanced factions, base-building, and fast online multiplayer — free in your browser." />
+<meta name="twitter:image" content="https://infinitegreed.com/hero.jpg" />
+<!-- Structured data: VideoGame -->
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"VideoGame","name":"Infinite Greed","url":"https://infinitegreed.com/","description":"A free browser-based real-time strategy game with 16 balanced real-world factions, base-building, resource harvesting, and online multiplayer.","genre":["Real-time strategy","Strategy"],"gamePlatform":["Web browser"],"applicationCategory":"Game","operatingSystem":"Any (WebGL2 browser)","offers":{"@type":"Offer","price":"0","priceCurrency":"USD"},"playMode":["SinglePlayer","MultiPlayer"]}
+</script>
 <!-- Startup diagnostic: a classic (non-module) script so it runs even if the
      main module fails to load/parse. Surfaces the real error on-screen (some
      browsers — e.g. hardened Firefox — broke init silently with no visible
@@ -259,6 +282,83 @@
   #tutBtns button.primary { background: #1f6d80; border-color: #38a0b8; color: #eafaff; font-weight: 700; }
   #tutBtns button.primary:hover { background: #25859c; }
   #tutProgress { flex: 1; text-align: center; font-size: 11px; color: #6f8497; letter-spacing: 0.04em; }
+
+  /* ===== Landing page ===== */
+  #landing { position: fixed; inset: 0; z-index: 8000; overflow-y: auto; color: #e8eef3;
+    font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    background: #06090d; display: flex; flex-direction: column; }
+  #landing.hidden { display: none; }
+  /* hero backdrop: cinematic CSS battlefield (swapped for /hero.jpg when present) */
+  .lgBg { position: absolute; inset: 0; z-index: 0;
+    background:
+      radial-gradient(110% 80% at 50% 120%, rgba(255,138,40,0.55) 0%, rgba(255,90,30,0.18) 28%, rgba(0,0,0,0) 55%),
+      radial-gradient(80% 60% at 78% 8%, rgba(60,180,200,0.18) 0%, rgba(0,0,0,0) 60%),
+      linear-gradient(180deg, #0a1820 0%, #0c1c26 38%, #122026 62%, #1c1410 86%, #2a160c 100%);
+  }
+  .lgBg.hasImg { background-size: cover; background-position: center; }
+  /* layered ridge/skyline silhouettes for depth */
+  .lgRidge { position: absolute; left: 0; right: 0; bottom: 0; z-index: 1; height: 46%;
+    background: linear-gradient(180deg, rgba(4,8,11,0) 0%, rgba(4,8,11,0.0) 40%, rgba(4,8,11,0.85) 100%); }
+  .lgRidge svg { position: absolute; bottom: 0; width: 100%; height: 100%; }
+  .lgScan { position: absolute; inset: 0; z-index: 2; pointer-events: none; opacity: 0.06;
+    background-image: repeating-linear-gradient(0deg, #fff 0, #fff 1px, transparent 1px, transparent 3px); }
+  .lgGlow { position: absolute; left: 50%; bottom: -10%; width: 80%; height: 50%; z-index: 1; transform: translateX(-50%);
+    background: radial-gradient(50% 60% at 50% 100%, rgba(255,150,50,0.35), rgba(0,0,0,0)); filter: blur(20px);
+    animation: lgPulse 6s ease-in-out infinite; }
+  @keyframes lgPulse { 0%,100% { opacity: 0.7; } 50% { opacity: 1; } }
+  .lgTopbar { position: relative; z-index: 5; display: flex; align-items: center; justify-content: space-between;
+    padding: 18px 28px; }
+  .lgBrand { font-weight: 900; letter-spacing: 3px; font-size: 19px; color: #f3f6f8; }
+  .lgBrand span { color: #ffb02e; }
+  .lgNav a { color: #aebecb; text-decoration: none; font-size: 13px; margin-left: 22px; letter-spacing: 0.04em; }
+  .lgNav a:hover { color: #fff; }
+  .lgHero { position: relative; z-index: 5; flex: 1; display: flex; flex-direction: column; align-items: center;
+    justify-content: center; text-align: center; padding: 40px 20px 60px; }
+  .lgKicker { font-size: 13px; letter-spacing: 5px; color: #5fd0e0; text-transform: uppercase; margin-bottom: 14px;
+    text-shadow: 0 0 18px rgba(95,208,224,0.5); }
+  .lgTitle { font-size: clamp(46px, 9vw, 116px); font-weight: 900; letter-spacing: 4px; line-height: 0.95; margin: 0;
+    background: linear-gradient(180deg, #ffffff 0%, #ffd79a 55%, #ff9a3c 100%); -webkit-background-clip: text;
+    background-clip: text; color: transparent; text-shadow: 0 8px 50px rgba(255,140,40,0.25); }
+  .lgSlogan { font-size: clamp(17px, 2.6vw, 27px); font-weight: 600; color: #dfe9f0; margin: 22px 0 8px; max-width: 760px;
+    text-shadow: 0 2px 14px rgba(0,0,0,0.8); }
+  .lgSub { font-size: 14px; color: #9fb3c2; max-width: 620px; margin: 0 auto; }
+  .lgCtas { display: flex; gap: 14px; flex-wrap: wrap; justify-content: center; margin: 34px 0 16px; }
+  .lgBtn { cursor: pointer; border-radius: 8px; padding: 15px 30px; font-size: 16px; font-weight: 700; letter-spacing: 0.04em;
+    border: 1px solid #33454f; background: rgba(18,28,36,0.8); color: #dbe7ef; transition: transform .08s, background .15s, box-shadow .15s; }
+  .lgBtn:hover { background: rgba(30,44,54,0.9); transform: translateY(-1px); }
+  .lgBtn.primary { background: linear-gradient(180deg, #ffb44a, #ff7a1e); border-color: #ffcd7a; color: #2a1402;
+    box-shadow: 0 8px 30px rgba(255,130,40,0.4); }
+  .lgBtn.primary:hover { box-shadow: 0 10px 38px rgba(255,130,40,0.6); }
+  .lgFeatures { display: flex; gap: 26px; flex-wrap: wrap; justify-content: center; margin-top: 26px; max-width: 880px; }
+  .lgFeat { flex: 1 1 220px; max-width: 260px; background: rgba(10,18,24,0.66); border: 1px solid #20303a; border-radius: 10px;
+    padding: 16px 18px; text-align: left; }
+  .lgFeat h3 { margin: 0 0 6px; font-size: 15px; color: #ffd79a; }
+  .lgFeat p { margin: 0; font-size: 13px; line-height: 1.5; color: #aebecb; }
+  .lgFoot { position: relative; z-index: 5; text-align: center; padding: 26px 20px 30px; color: #6f8497; font-size: 12px;
+    background: linear-gradient(180deg, rgba(0,0,0,0) 0%, rgba(2,5,8,0.9) 100%); }
+  .lgFoot p { max-width: 760px; margin: 0 auto 10px; line-height: 1.6; color: #8aa0b0; }
+  /* account modal */
+  .lgAuthWrap { position: fixed; inset: 0; z-index: 8200; display: flex; align-items: center; justify-content: center;
+    background: rgba(4,8,12,0.72); padding: 16px; }
+  .lgAuthWrap.hidden { display: none; }
+  .lgAuthCard { width: 360px; max-width: 100%; background: #101a22; border: 1px solid #2c3e50; border-radius: 12px;
+    padding: 22px 24px; box-shadow: 0 16px 60px rgba(0,0,0,0.7); }
+  .lgAuthTabs { display: flex; gap: 6px; margin-bottom: 16px; }
+  .lgTab { flex: 1; padding: 9px; text-align: center; border-radius: 7px; cursor: pointer; font-size: 14px; font-weight: 600;
+    background: #18242e; border: 1px solid #243240; color: #9fb3c2; }
+  .lgTab.on { background: #1f6d80; border-color: #38a0b8; color: #eafaff; }
+  .lgField { display: block; width: 100%; box-sizing: border-box; margin-bottom: 11px; padding: 11px 12px; border-radius: 7px;
+    background: #0c151c; border: 1px solid #2c3e50; color: #e8eef3; font-size: 14px; }
+  .lgField:focus { outline: none; border-color: #38a0b8; }
+  .lgAuthBtn { width: 100%; padding: 13px; border-radius: 8px; border: 0; cursor: pointer; font-size: 15px; font-weight: 700;
+    background: linear-gradient(180deg, #ffb44a, #ff7a1e); color: #2a1402; }
+  .lgAuthBtn:disabled { opacity: 0.6; cursor: default; }
+  .lgAuthErr { color: #ff8a7a; font-size: 13px; min-height: 18px; margin: 4px 0 8px; }
+  .lgAuthMsg { color: #7be08a; font-size: 13px; min-height: 18px; margin: 4px 0 8px; }
+  .lgAuthClose { float: right; cursor: pointer; color: #78909c; font-size: 18px; line-height: 1; }
+  .lgGuest { display: block; width: 100%; margin-top: 10px; background: none; border: 0; color: #8aa0b2; cursor: pointer;
+    font-size: 13px; text-decoration: underline; }
+  .lgWho { position: relative; z-index: 5; }
 </style>
 </head>
 <body>
@@ -273,6 +373,68 @@
       <div id="preloadBar" style="height:100%;width:0%;background:#ffb02e;transition:width .2s"></div>
     </div>
     <div id="preloadTxt" style="font-size:12px;color:#78909c;letter-spacing:1px">Loading models…</div>
+  </div>
+
+  <!-- ===== Landing page: cinematic hero + accounts; shown first, "PLAY" reveals
+       the game menu. The .lgBg backdrop is CSS art and is swapped for /hero.jpg
+       automatically when that image exists (see main.ts). ===== -->
+  <div id="landing">
+    <div class="lgBg" id="lgBg"></div>
+    <div class="lgGlow"></div>
+    <div class="lgRidge"><svg viewBox="0 0 1200 300" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">
+      <path d="M0,300 L0,210 L70,210 L80,160 L120,160 L130,210 L210,210 L230,120 L250,120 L255,90 L268,90 L273,120 L300,120 L320,180 L420,180 L440,140 L470,140 L478,100 L490,100 L498,140 L560,140 L580,200 L760,200 L780,150 L820,150 L828,110 L840,110 L848,150 L900,150 L930,190 L1050,190 L1070,150 L1110,150 L1120,200 L1200,200 L1200,300 Z" fill="#05090c"/>
+    </svg></div>
+    <div class="lgScan"></div>
+
+    <header class="lgTopbar">
+      <div class="lgBrand">⚡ INFINITE <span>GREED</span></div>
+      <div class="lgWho">
+        <nav class="lgNav" id="lgNav">
+          <a href="#lgFeatures">Features</a>
+          <a href="./unit-overview.html">Units</a>
+          <a href="#" id="lgNavAuth">Log in</a>
+        </nav>
+      </div>
+    </header>
+
+    <main class="lgHero">
+      <div class="lgKicker">Real-time strategy · play free in your browser</div>
+      <h1 class="lgTitle">INFINITE<br>GREED</h1>
+      <p class="lgSlogan">Outbuild. Outgun. Outlast.</p>
+      <p class="lgSub">Command tanks, drones, navies and air power across 16 balanced world factions. Harvest, build your base, and crush rivals in fast online multiplayer — or skirmish against the AI.</p>
+      <div class="lgCtas">
+        <button class="lgBtn primary" id="lgPlay">▶ PLAY FREE</button>
+        <button class="lgBtn" id="lgShowAuth">Log in / Sign up</button>
+      </div>
+      <div class="lgFeatures" id="lgFeatures">
+        <div class="lgFeat"><h3>⚔ 16 balanced factions</h3><p>Real-world powers tuned so small nations stand a chance — every faction is viable.</p></div>
+        <div class="lgFeat"><h3>🌐 Online multiplayer</h3><p>Peer-to-peer lockstep netcode scales to huge unit counts. Create a game or join who's online.</p></div>
+        <div class="lgFeat"><h3>🏗 Base building & economy</h3><p>Mine ore and oil, raise power, research tech, and field land, sea and air armies.</p></div>
+      </div>
+    </main>
+
+    <footer class="lgFoot">
+      <p><strong>Infinite Greed</strong> is a free, browser-based real-time strategy game — no install required. Build a base, harvest resources, research upgrades, and out-maneuver opponents with combined-arms tactics across land, sea and air. Play solo skirmishes versus adaptive AI commanders or jump into real-time online multiplayer battles.</p>
+      <div>© Infinite Greed · <a href="./unit-overview.html" style="color:#8aa0b2">Unit overview</a></div>
+    </footer>
+  </div>
+
+  <!-- account modal (login / register) -->
+  <div id="lgAuthWrap" class="lgAuthWrap hidden">
+    <div class="lgAuthCard">
+      <span class="lgAuthClose" id="lgAuthClose">✕</span>
+      <div class="lgAuthTabs">
+        <div class="lgTab on" id="lgTabLogin">Log in</div>
+        <div class="lgTab" id="lgTabRegister">Sign up</div>
+      </div>
+      <input class="lgField" id="lgEmail" type="email" autocomplete="email" placeholder="Email" maxlength="120" />
+      <input class="lgField" id="lgPassword" type="password" autocomplete="current-password" placeholder="Password (min 6 characters)" maxlength="200" />
+      <input class="lgField hidden" id="lgCallsign" type="text" autocomplete="nickname" placeholder="Your callsign (in-game name)" maxlength="18" />
+      <div class="lgAuthErr" id="lgAuthErr"></div>
+      <div class="lgAuthMsg hidden" id="lgAuthMsg"></div>
+      <button class="lgAuthBtn" id="lgAuthSubmit">Log in</button>
+      <button class="lgGuest" id="lgGuest">Skip — play as guest</button>
+    </div>
   </div>
 
   <div id="hud" class="hidden">
