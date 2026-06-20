@@ -176,6 +176,27 @@
     #minimap { width: 158px; height: 158px; }
     .bbtn { padding: 8px 4px; font-size: 11px; }
   }
+  /* phones: reclaim screen space — compact top bar, narrower 2-col build menu
+     (starts collapsed via JS), smaller minimap, bigger touch buttons */
+  @media (max-width: 600px) {
+    #topbar { height: 34px; padding: 0 6px; gap: 7px; font-size: 12px; }
+    #topbar .label { display: none; }              /* keep the values, drop the words */
+    #perfStat, #musLabel, #gameClock { display: none; }
+    #volSlider { width: 44px; }
+    #powerbarWrap { width: 56px !important; }
+    #sidebar { top: 34px; width: 156px; bottom: 128px; }
+    #sidebarToggle { top: 38px; right: 156px; width: 34px; height: 50px; font-size: 18px; }
+    #sidebarToggle.collapsed { right: 0; }
+    .bgrid { grid-template-columns: 1fr 1fr; gap: 6px; }  /* fewer, bigger tap targets */
+    .bbtn { font-size: 11px; padding: 10px 3px 7px; }
+    .bbtn .ico { font-size: 19px; }
+    #minimapWrap { width: 122px !important; height: 122px !important; }
+    #minimap { width: 112px; height: 112px; }
+    .tbtn { width: 48px; height: 48px; font-size: 20px; }
+    #selPanel { max-width: 72vw; bottom: 62px; }
+    #cmdHints { display: none; }                    /* keyboard hints are useless on touch */
+    .menubox { gap: 9px; }                           /* tighten setup/landing menus too */
+  }
   #cmdHints { position: absolute; left: 50%; transform: translateX(-50%); bottom: 34px;
     background: var(--hud-bg); border: 1px solid var(--hud-border); border-radius: 6px;
     padding: 6px 14px; font-size: 12px; color: #b0bec5; z-index: 6; white-space: nowrap; }

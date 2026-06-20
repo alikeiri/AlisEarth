@@ -949,6 +949,10 @@ class GameClient {
         tog.textContent = col ? '☰' : '⮜'; // ☰ when collapsed, ⮜ when open
       };
       on(tog, 'click', toggle);
+      // on phones the build menu eats half the screen — start it COLLAPSED so the
+      // map is clear; the ☰ toggle opens it on demand
+      const phone = window.matchMedia('(pointer: coarse)').matches || window.innerWidth <= 600;
+      if (phone) { sb.classList.add('collapsed'); tog.classList.add('collapsed'); tog.textContent = '☰'; }
     }
     const bar = document.getElementById('touchBar');
     if (!bar) return;
