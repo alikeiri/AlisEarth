@@ -11,6 +11,7 @@ import { twemojify, twemojiParse } from './twemoji';
 import { safeLS } from './store';
 import { Net } from './net';
 import { RtcMesh } from './rtc';
+import { prof } from './prof';
 import { audio } from './audio';
 import { runDeterminismProbe, mathCanary, detMathCanary } from '../sim/determinism';
 import { runNetlessLockstep, LockstepEngine } from '../sim/lockstep';
@@ -715,8 +716,16 @@ class GameClient {
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
       if (e.code === 'Enter' && this.game.isNet) { this.openChat(); e.preventDefault(); return; }
-      // perf overlay toggle — backquote/tilde (F-keys collide with browser shortcuts)
-      if (e.code === 'Backquote') { this.togglePerf(); e.preventDefault(); return; }
+      // perf overlay toggle — backquote/tilde (F-keys collide with browser shortcuts).
+      // Shift+backquote also toggles the deep profiler (per-section timing breakdown).
+      if (e.code === 'Backquote') {
+        if (e.shiftKey) {
+          prof.enabled = !prof.enabled;
+          if (prof.enabled) { prof.reset(); this.perfOn = true; } // profiler needs the perf HUD visible
+          console.log('[prof] profiler ' + (prof.enabled ? 'ON — Shift+` to stop · __prof.table() in console' : 'off'));
+        } else this.togglePerf();
+        e.preventDefault(); return;
+      }
       // clean-screen toggle (V): hide the whole GUI to gauge its render cost
       if (e.code === 'KeyV') { this.toggleGui(); e.preventDefault(); return; }
       this.keys.add(e.code);
@@ -2089,7 +2098,7 @@ class GameClient {
     if (this.frame % 30 === 0 && !this.guiHidden) this.updateTopStat();
 
     const _u0 = this.perfOn ? performance.now() : 0;
-    this.game.update(dt * 1000);
+    prof.begin('sim.update'); this.game.update(dt * 1000); prof.end('sim.update');
     if (this.perfOn) this.updateMs += (performance.now() - _u0 - this.updateMs) * 0.2;
     this.checkNetStall();   // surface a pause popup if we're frozen waiting on a peer
 
@@ -2204,7 +2213,7 @@ class GameClient {
     let views = allViews;
     if (!(this.game as any).isSim && fogEnabled && !this.over) {
       if (!this.fog) this.fog = new Uint8Array(W * H);
-      if (this.frame % 3 === 0) this.updateFog(allViews);
+      if (this.frame % 3 === 0) { prof.begin('fog'); this.updateFog(allViews); prof.end('fog'); }
       // Spy Satellite: full-map visibility — but only while it's online (powered
       // and a Research Lab still stands); if it goes dark, fog returns
       if (plList[this.game.me]?.satOk) this.fog.fill(2);
@@ -2230,7 +2239,7 @@ class GameClient {
       this.renderer.refreshTerrain();
       this.game.map.heightDirty = false;
     }
-    this.renderer.updateViews(views, this.selection, dt);
+    prof.begin('render.scene'); this.renderer.updateViews(views, this.selection, dt); prof.end('render.scene');
     const evs = this.game.drainEvents();
     this.renderer.addEvents(evs);
     for (const ev of evs) {
@@ -2252,7 +2261,7 @@ class GameClient {
       }
       audio.event(ev, this.renderer.camX, this.renderer.camZ, this.game.me);
     }
-    this.updateAudioCues(views);
+    prof.begin('audioCues'); this.updateAudioCues(views); prof.end('audioCues');
     // chat messages + expiry
     for (const m of (this.game.drainChat?.() || [])) { this.appendChat(m); audio.play('click'); }
     // collapse the expanded chat back to 2 lines, 3s after it was opened
@@ -2288,7 +2297,7 @@ class GameClient {
     }
 
     const _r0 = this.perfOn ? performance.now() : 0;
-    this.renderer.render(dt);
+    prof.begin('render.3d'); this.renderer.render(dt); prof.end('render.3d');
     if (this.perfOn) this.renderMs += (performance.now() - _r0 - this.renderMs) * 0.2;
 
     const players = this.game.players();
@@ -2301,7 +2310,7 @@ class GameClient {
       for (const id of this.selection) selSig = (selSig * 31 + id) | 0;
       const now = performance.now();
       if (selSig !== this.lastSelSig || now - this.lastUiUpdate >= 80) {
-        this.ui.update(this.game.me, players, views, this.game.tickN, this.selection);
+        prof.begin('ui.update'); this.ui.update(this.game.me, players, views, this.game.tickN, this.selection); prof.end('ui.update');
         this.lastUiUpdate = now; this.lastSelSig = selSig;
       }
     }
@@ -2315,7 +2324,7 @@ class GameClient {
       const fogFn = (!(this.game as any).isSim && fogEnabled && this.fog) ? (cx: number, cz: number) => this.renderer.fogValue(cx, cz) : undefined;
       // radar-detected threats show on the minimap even through fog
       const mmViews = this.radarBlips.length ? views.concat(this.radarBlips) : views;
-      this.ui.minimap(this.game.map, mmViews, this.camQuad(), elapsed, fogFn);
+      prof.begin('minimap'); this.ui.minimap(this.game.map, mmViews, this.camQuad(), elapsed, fogFn); prof.end('minimap');
     }
     // no selection box while drawing a patrol route or drag-placing a structure
     // line (walls / tank barriers) — those drags aren't a selection
@@ -2440,8 +2449,11 @@ class GameClient {
     for (const f of this.cmdFx) f.t -= dt;
     this.cmdFx = this.cmdFx.filter(f => f.t > 0);
 
-    if (!this.guiHidden)
+    if (!this.guiHidden) {
+      prof.begin('overlay.2d');
       this.ui.overlay(this.overlayCtx, this.renderer.project.bind(this.renderer), views, this.game.me, this.selection, dragRect, hover, circles, this.cmdFx);
+      prof.end('overlay.2d');
+    }
 
     // Neutral garrison buildings are permanently tagged "Neutral" so you can see
     // they're capturable. Owner names for OTHER players' units/buildings are NOT
@@ -2540,6 +2552,7 @@ class GameClient {
       }
     }
 
+    prof.frame(); // fold this frame's profiler zones into the smoothed averages
     if (this.perfOn) { this.workMs += (performance.now() - _w0 - this.workMs) * 0.2; if (this.frame % 6 === 0) this.updatePerfHud(); }
     else if (this.perfEl) { this.perfEl.style.display = 'none'; }
   };
@@ -2680,6 +2693,17 @@ class GameClient {
           }).filter(Boolean);
           if (parts.length) s += `\n<span style="color:#8aa0b2">lead</span> ${parts.join('  ')}`;
         }
+      }
+    }
+    // deep profiler breakdown: per-section avg ms/frame (sorted), %, calls/frame
+    if (prof.enabled) {
+      const rows = prof.table();
+      const total = rows.reduce((a, r) => a + r.ms, 0) || 1;
+      s += `\n<span style="color:#c8b6ff">— profiler (Shift+\`) —</span>`;
+      for (const r of rows) {
+        const pct = (r.ms / total) * 100;
+        const col = r.ms > 4 ? '#ff6b5e' : r.ms > 1.5 ? '#ffc940' : '#9fb3c8';
+        s += `\n<span style="color:${col}">${r.ms.toFixed(2)}ms</span> ${pct.toFixed(0).padStart(2)}%  ${r.label}${r.n > 1.5 ? '  ×' + r.n : ''}`;
       }
     }
     this.perfEl.innerHTML = s;
@@ -4048,6 +4072,7 @@ if (!glOk) {
   } catch { /* no input */ }
   try { ($('claudeKey') as HTMLInputElement).value = safeLS.getItem('ae_claude_key') || ''; } catch { /* no storage */ }
   initLanding();   // hero + accounts; restores a saved session and prefills the callsign
+  (window as any).__prof = prof;   // console access: __prof.table(), __prof.enabled = true
   // tell the startup-diagnostic in index.html that the app booted cleanly (so it
   // won't show the "code did not start" banner)
   (window as any).__feBooted = true;

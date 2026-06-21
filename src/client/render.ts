@@ -4,6 +4,7 @@
 
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { prof } from './prof';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { safeLS } from './store';
@@ -2899,6 +2900,6 @@ export class Renderer {
     this.healMesh.instanceMatrix.needsUpdate = true;
 
     this.updateCamera();
-    this.three.render(this.scene, this.camera);
+    prof.begin('render.gpu'); this.three.render(this.scene, this.camera); prof.end('render.gpu');
   }
 }
