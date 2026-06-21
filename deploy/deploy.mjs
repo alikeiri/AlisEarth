@@ -1,5 +1,12 @@
 // Deploy FRACTURED EARTH to the Vultr box as a Docker container.
-// Touches ONLY: /opt/fractured-earth, a 'fractured-earth' container, one ufw rule.
+//
+//   node deploy/deploy.mjs           -> PROD: /opt/fractured-earth, container
+//                                       'fractured-earth', :8085 (infinitegreed.com)
+//   node deploy/deploy.mjs test      -> TEST: /opt/fractured-earth-test, container
+//                                       'fractured-earth-test', :8086 (test.infinitegreed.com)
+//
+// Each target is fully isolated (own dir, container, port, ufw rule); deploying
+// one never touches the other. Touches ONLY its own /opt dir, container + ufw rule.
 import { Client } from 'ssh2';
 import { readdirSync, statSync, readFileSync, existsSync } from 'fs';
 import { join, posix } from 'path';
@@ -17,12 +24,17 @@ const PASS = process.env.DEPLOY_PASS || local.DEPLOY_PASS;
 const ADVISOR_KEY = process.env.ADVISOR_KEY || local.ADVISOR_KEY;
 if (!HOST || !PASS) { console.error('Set DEPLOY_HOST / DEPLOY_PASS (env or deploy/secrets.local.json)'); process.exit(1); }
 
+// target: 'test' (staging) or 'prod' (default). Selects an isolated container set.
+const TARGET = process.argv.slice(2).some(a => a === 'test' || a === '--test') ? 'test' : 'prod';
+const NAME = TARGET === 'test' ? 'fractured-earth-test' : 'fractured-earth';
 const LOCAL = process.cwd();
-const REMOTE = '/opt/fractured-earth';
-const PORT = 8085;
+const REMOTE = '/opt/' + NAME;
+const PORT = TARGET === 'test' ? 8086 : 8085;
+const MEM = TARGET === 'test' ? '256m' : '300m';
+console.log(`>>> deploy target: ${TARGET.toUpperCase()}  (container ${NAME}, port ${PORT})`);
 
 const MINI_PKG = JSON.stringify({
-  name: 'fractured-earth', private: true, type: 'module',
+  name: NAME, private: true, type: 'module',
   dependencies: { ws: '^8.17.0' },
 }, null, 2);
 
@@ -79,17 +91,17 @@ conn.on('ready', async () => {
     console.log('wrote package.json');
 
     console.log('starting container...');
-    await exec('docker rm -f fractured-earth 2>/dev/null || true');
+    await exec(`docker rm -f ${NAME} 2>/dev/null || true`);
     // optional Claude strategist key: lives only in the container env, never in files
     const advisorEnv = ADVISOR_KEY ? `-e ADVISOR_KEY='${ADVISOR_KEY}' ` : '';
     const run = await exec(
-      `docker run -d --name fractured-earth --restart unless-stopped ` +
-      `-p ${PORT}:8080 -v ${REMOTE}:/app -w /app -m 300m ${advisorEnv}node:20-alpine ` +
+      `docker run -d --name ${NAME} --restart unless-stopped ` +
+      `-p ${PORT}:8080 -v ${REMOTE}:/app -w /app -m ${MEM} ${advisorEnv}node:20-alpine ` +
       `sh -c "[ -d node_modules ] || npm install --omit=dev --no-audit --no-fund; exec node server.mjs"`
     );
     console.log('docker run:', run.out, '(exit', run.code + ')');
 
-    const ufw = await exec(`ufw allow ${PORT}/tcp comment 'fractured-earth game' && ufw status | grep ${PORT}`);
+    const ufw = await exec(`ufw allow ${PORT}/tcp comment '${NAME} game' && ufw status | grep ${PORT}`);
     console.log('ufw:', ufw.out);
 
     // wait for npm install inside the container, then health-check
@@ -100,7 +112,7 @@ conn.on('ready', async () => {
       console.log(`health check ${i + 1}: HTTP ${h.out}`);
       if (h.out === '200') { ok = true; break; }
     }
-    const logs = await exec('docker logs --tail 10 fractured-earth 2>&1');
+    const logs = await exec(`docker logs --tail 10 ${NAME} 2>&1`);
     console.log('container logs:\n' + logs.out);
     console.log(ok ? 'DEPLOY OK' : 'DEPLOY FAILED - not serving 200');
   } catch (e) {
