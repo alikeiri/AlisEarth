@@ -393,6 +393,26 @@
 </style>
 </head>
 <body>
+  <!-- staging banner: shown only when served from the TEST environment
+       (test.infinitegreed.com or the :8086 container). pointer-events:none so it
+       never blocks clicks. Toggled by the inline script just below. -->
+  <div id="envBanner" style="display:none;position:fixed;top:0;left:50%;transform:translateX(-50%);z-index:99999;pointer-events:none;
+       padding:3px 14px 4px;border-radius:0 0 8px 8px;font:700 12px/1.2 'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
+       letter-spacing:1.5px;color:#1a1206;background:linear-gradient(180deg,#ffd24a,#ff9e1b);
+       box-shadow:0 2px 8px rgba(0,0,0,.45);border:1px solid #b56b00;border-top:0;text-transform:uppercase">
+    ⚠ Test Environment
+  </div>
+  <script>
+    (function () {
+      var h = location.hostname, p = location.port;
+      if (h === 'test.infinitegreed.com' || h.indexOf('test.') === 0 || p === '8086') {
+        var b = document.getElementById('envBanner');
+        if (b) b.style.display = 'block';
+        document.title = '[TEST] ' + document.title;
+      }
+    })();
+  </script>
+
   <canvas id="three"></canvas>
   <canvas id="overlay"></canvas>
 
