@@ -12,6 +12,7 @@ CC0 (public domain, no attribution required):
 - Heavy Tank ("Tank") — KolosStudios
 - Engineer ("Pickup Truck") — Quaternius
 - Rocket Team ("SWAT") — Quaternius
+- Power Plant ("Turbine") — Kay Lousberg (poly.pizza)
 
 CC-BY 3.0 / 4.0 (attribution required — used under these terms):
 - Rifle Squad ("Soldier") — KolosStudios
@@ -31,7 +32,6 @@ CC-BY 3.0 / 4.0 (attribution required — used under these terms):
 - Airfield ("Command and Conquer style building") — AwooSlayer (Sketchfab, CC-BY 4.0)
 - Patriot SAM ("MIM-104 Patriot Air Defense System") — Muhamad Mirza Arrafi (Sketchfab, CC-BY 4.0)
 - Flak Gun ("Type-625 Anti Aircraft Gun Missile System") — Muhamad Mirza Arrafi (Sketchfab, CC-BY 4.0)
-- Power Plant ("Coal Power Station") — MRowa (Sketchfab, CC BY-SA 4.0); scaled/normalised for in-game use — this derivative is likewise CC BY-SA 4.0
 - Oil Field ("Oil pump") — Poly by Google
 - War Factory ("Factory") — Poly by Google
 
@@ -48,10 +48,8 @@ NOTE: the Pixabay Content License and Mixkit Free License are royalty-free but *
 
 ## Music
 - `iron_directive.mp3`, `golden_dreams.mp3`, `frozen_flower.mp3`, `love_for_enemies.mp3`
-  — **ORIGIN / LICENSE TO BE CONFIRMED.** These looping tracks ship in `public/audio/`
-  but their source is not recorded here. If self-composed/synthesized, mark as original
-  work (rights reserved by the project). If sourced externally, record author + license
-  before relying on them. Do not assume CC0.
+  — **original works composed for Infinite Greed; all rights reserved by the project.**
+  No third-party samples or licenses involved.
 
 ## UI icons
 - Emoji glyphs (`public/twemoji/`, 83 SVGs) are **Twemoji** by Twitter, licensed
@@ -63,9 +61,7 @@ NOTE: the Pixabay Content License and Mixkit Free License are royalty-free but *
 
 ## License status summary
 Not every asset is CC0/public domain. Tiers in use:
-- **CC0** — terrain/material textures; the 4 CC0 models (Tank, Heavy Tank, Engineer, Rocket Team); all procedural buildings/effects/synth SFX.
+- **CC0** — terrain/material textures; the 5 CC0 models (Tank, Heavy Tank, Engineer, Rocket Team, Power Plant turbine); all procedural buildings/effects/synth SFX.
 - **CC-BY** (attribution, satisfied above) — ~20 unit/building models; Twemoji icons.
-- **CC-BY-SA** (copyleft) — `coalpower.glb` (Power Plant) only. ShareAlike is the most
-  restrictive license here; replace with a CC0/CC-BY model if a fully permissive set is wanted.
 - **Royalty-free, non-CC0** — the 6 recorded weapon/explosion SFX (Pixabay/Mixkit).
-- **Unverified** — the 4 music tracks (see Music). Resolve before treating as cleared.
+- **Original work (project-owned)** — the 4 music tracks (see Music).
