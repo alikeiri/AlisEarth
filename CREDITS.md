@@ -43,3 +43,29 @@ Buildings and effects are procedurally generated.
 - Tank cannon ("Powerful Cannon Shot") — Universfield via Pixabay (Pixabay Content License)
 - Heavy/naval gun ("War field explosion"), rocket ("Fast rocket whoosh"), small & big explosions ("Explosion hit", "Massive explosion in battle") — Mixkit (Mixkit Free Sound Effects License)
 - All other SFX and unit voices remain procedurally synthesized (WebAudio).
+
+NOTE: the Pixabay Content License and Mixkit Free License are royalty-free but **not** CC0/public domain — they permit use in this game but restrict redistributing the raw sound files as standalone assets. Fine for the shipped game; not redistributable on their own.
+
+## Music
+- `iron_directive.mp3`, `golden_dreams.mp3`, `frozen_flower.mp3`, `love_for_enemies.mp3`
+  — **ORIGIN / LICENSE TO BE CONFIRMED.** These looping tracks ship in `public/audio/`
+  but their source is not recorded here. If self-composed/synthesized, mark as original
+  work (rights reserved by the project). If sourced externally, record author + license
+  before relying on them. Do not assume CC0.
+
+## UI icons
+- Emoji glyphs (`public/twemoji/`, 83 SVGs) are **Twemoji** by Twitter, licensed
+  **CC-BY 4.0** (https://github.com/twitter/twemoji). Attribution required (this entry).
+
+## Hero / marketing art
+- `public/hero.jpg` — generated with Google Gemini. AI-generated imagery: usable per
+  Google's generative-AI terms; no third-party copyright claimed, but it is not CC0.
+
+## License status summary
+Not every asset is CC0/public domain. Tiers in use:
+- **CC0** — terrain/material textures; the 4 CC0 models (Tank, Heavy Tank, Engineer, Rocket Team); all procedural buildings/effects/synth SFX.
+- **CC-BY** (attribution, satisfied above) — ~20 unit/building models; Twemoji icons.
+- **CC-BY-SA** (copyleft) — `coalpower.glb` (Power Plant) only. ShareAlike is the most
+  restrictive license here; replace with a CC0/CC-BY model if a fully permissive set is wanted.
+- **Royalty-free, non-CC0** — the 6 recorded weapon/explosion SFX (Pixabay/Mixkit).
+- **Unverified** — the 4 music tracks (see Music). Resolve before treating as cleared.

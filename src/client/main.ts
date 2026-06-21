@@ -2248,12 +2248,12 @@ class GameClient {
         const who = this.game.players?.()[ev.p]?.n || 'Enemy';
         const msg = ev.reason === 'left' ? 'has left the battle — resigned.' : 'We surrender! The region is yours.';
         this.appendChat({ name: who, to: 'all', msg });
-        if (ev.p !== this.game.me) audio.play('surrender'); // cue when anyone else folds
+        if (ev.p !== this.game.me) { audio.play('surrender'); if (this.soundOff) this.notify(`⚑ ${who} surrendered`, '#c8a6ff'); }
       }
       if (ev.e === 'sdtick' && ev.owner === this.game.me) audio.play('sdbeep');
       if (ev.e === 'tech' && ev.tech === 'satellite') {
         // ANY player's satellite launch gets a one-time cue (per player)
-        if (!this.satCued.has(ev.p)) { this.satCued.add(ev.p); audio.play('satup'); }
+        if (!this.satCued.has(ev.p)) { this.satCued.add(ev.p); audio.play('satup'); if (this.soundOff) this.notify('🛰 Spy satellite launched', '#7df0c0'); }
         if (this.allies.has(ev.p)) {
           // an allied satellite goes up: dramatic rocket launch + permanent map reveal
           this.renderer.launchSatellite(ev.x ?? W / 2, ev.z ?? H / 2);
@@ -2595,29 +2595,65 @@ class GameClient {
       + `<br>Sim tick: ${ns?.tick ?? this.game.tickN}`;
   }
 
+  // when sound is off, the audio-only event cues are surfaced as on-screen text
+  // instead, so a muted player still gets the engine notifications.
+  private get soundOff() { return audio.muted || audio.sfxVol <= 0; }
+  private toastEl: HTMLDivElement | null = null;
+  notify(msg: string, color = '#8fd0ff') {
+    if (!this.toastEl) {
+      const el = document.createElement('div');
+      el.id = 'gameToasts';
+      el.style.cssText = 'position:fixed;top:48px;left:50%;transform:translateX(-50%);z-index:40;'
+        + 'display:flex;flex-direction:column;gap:4px;align-items:center;pointer-events:none';
+      document.body.appendChild(el);
+      this.toastEl = el;
+    }
+    const t = document.createElement('div');
+    t.textContent = msg;
+    t.style.cssText = `background:rgba(10,14,18,0.9);border:1px solid #2c3e50;border-left:3px solid ${color};`
+      + `border-radius:5px;padding:5px 12px;font:600 13px 'Segoe UI',sans-serif;color:#e8eef3;`
+      + `box-shadow:0 2px 8px rgba(0,0,0,.5);opacity:0;transition:opacity .2s`;
+    this.toastEl.appendChild(t);
+    requestAnimationFrame(() => { t.style.opacity = '1'; });
+    while (this.toastEl.children.length > 5) this.toastEl.removeChild(this.toastEl.firstChild!);
+    setTimeout(() => { t.style.opacity = '0'; setTimeout(() => t.remove(), 250); }, 4200);
+  }
+
   // F3 perf overlay: frame rate + where each frame's time goes, plus (for a
   // multiplayer match) the snapshot stream — rate, size and arrival latency.
   // rate-limited audio feedback cues (power state, under-attack, silo, satellite).
   // Each cue fires at most once per 30s, and the power cues only on a threshold
-  // CROSSING into a worse state so a steady brownout doesn't nag repeatedly.
+  // CROSSING into a worse state so a steady brownout doesn't nag repeatedly. When
+  // sound is off the same cues show as text toasts via notify().
   private updateAudioCues(views: any[]) {
     const now = performance.now();
-    const cue = (k: string, snd: string, gap = 30000) => {
-      if (now - (this.cueT[k] || 0) >= gap) { this.cueT[k] = now; audio.play(snd); }
+    const cue = (k: string, snd: string, gap = 30000, text?: string, color?: string) => {
+      if (now - (this.cueT[k] || 0) >= gap) {
+        this.cueT[k] = now; audio.play(snd);
+        if (text && this.soundOff) this.notify(text, color);
+      }
     };
     const me = this.game.players?.()[this.game.me];
     if (me && me.a !== false) {
       const st = me.pu > me.pm ? 2 : (me.pu > me.pm * 0.85 ? 1 : 0);
-      if (st > this.pwrState) { if (st === 2) cue('pwrout', 'pwrout'); else cue('pwrlow', 'pwrlow'); }
+      if (st > this.pwrState) {
+        if (st === 2) cue('pwrout', 'pwrout', 30000, '⚡ Power insufficient — buildings shutting down', '#ff5043');
+        else cue('pwrlow', 'pwrlow', 30000, '⚡ Power running low', '#ffc940');
+      }
       this.pwrState = st;
     }
     // a missile silo finished anywhere on the map — announce once per session
-    if (!this.siloCued && views.some(v => v.b && v.t === 'silo' && (v.pr ?? 1) >= 1)) { this.siloCued = true; audio.play('siloup'); }
+    if (!this.siloCued && views.some(v => v.b && v.t === 'silo' && (v.pr ?? 1) >= 1)) {
+      this.siloCued = true; audio.play('siloup');
+      if (this.soundOff) this.notify('☢ Missile silo online', '#ff8a5a');
+    }
     // my units / buildings taking fire — separate cues, 30s apart each
     for (const v of views) {
       if (v.o !== this.game.me) continue;
       const prev = this.hpPrev.get(v.i);
-      if (prev !== undefined && v.h < prev - 0.5) cue(v.b ? 'bldgattack' : 'unitattack', v.b ? 'bldgattack' : 'underattack');
+      if (prev !== undefined && v.h < prev - 0.5)
+        cue(v.b ? 'bldgattack' : 'unitattack', v.b ? 'bldgattack' : 'underattack', 30000,
+          v.b ? '⚠ Building under attack' : '⚠ Unit under attack', '#ff7a6a');
     }
     this.hpPrev.clear();
     for (const v of views) if (v.o === this.game.me) this.hpPrev.set(v.i, v.h);

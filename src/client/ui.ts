@@ -979,6 +979,26 @@ export class UI {
       ctx.fillStyle = frac >= 1 ? '#57d977' : '#e0ad28';
       ctx.fillRect(p.x - w / 2, p.y - 3, w * frac, 3);
     }
+    // upgrade-in-progress: a pulsing gold badge (target level) + a progress bar
+    // above any building currently being upgraded, so it's clear at a glance
+    for (const v of views) {
+      if (v.up === undefined || v.up >= 1) continue;
+      const p = project(v.x, v.z, (v.sz || 2) >= 3 ? 4.4 : 3.4);
+      if (!p.ok) continue;
+      const blink = (performance.now() / 400 | 0) % 2 === 0;
+      const label = '▲ Lv' + ((v.lv || 1) + 1);
+      const font = '700 11px system-ui,sans-serif';
+      const tw = this.textSprite(label, font, '#ffe9b8').w + 16;
+      const x0 = p.x - tw / 2, y0 = p.y - 16, h = 15;
+      ctx.fillStyle = blink ? 'rgba(196,132,22,0.96)' : 'rgba(150,100,16,0.92)';
+      ctx.beginPath();
+      (ctx as any).roundRect ? (ctx as any).roundRect(x0, y0, tw, h, 4) : ctx.rect(x0, y0, tw, h);
+      ctx.fill();
+      this.drawText(ctx, label, font, '#ffe9b8', p.x, y0 + h / 2 + 0.5, 'center');
+      const frac = Math.max(0, Math.min(1, v.up));
+      ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fillRect(x0, y0 + h + 1, tw, 3);
+      ctx.fillStyle = '#ffb02e';          ctx.fillRect(x0, y0 + h + 1, tw * frac, 3);
+    }
     // garrison indicator: a marker above any building infantry can move into, so
     // garrisonable structures are easy to spot. Green = open, grey = full.
     for (const v of views) {
