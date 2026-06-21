@@ -347,6 +347,11 @@ class AudioMan {
         this.tone('triangle', 1047, 1047, 0.12, 0.12 * v, 0.09);
         this.tone('triangle', 1319, 1319, 0.16, 0.1 * v, 0.18);
         break;
+      case 'surrender': // someone resigned: a solemn flag-lowering descending bugle
+        this.tone('triangle', 587, 587, 0.18, 0.13 * v);
+        this.tone('triangle', 494, 494, 0.2, 0.12 * v, 0.18);
+        this.tone('triangle', 392, 392, 0.34, 0.12 * v, 0.36);
+        break;
       case 'win':
         [523, 659, 784, 1047].forEach((f, i) => this.tone('triangle', f, f, 0.35, 0.2, i * 0.16));
         break;

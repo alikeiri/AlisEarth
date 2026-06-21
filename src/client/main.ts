@@ -2248,6 +2248,7 @@ class GameClient {
         const who = this.game.players?.()[ev.p]?.n || 'Enemy';
         const msg = ev.reason === 'left' ? 'has left the battle — resigned.' : 'We surrender! The region is yours.';
         this.appendChat({ name: who, to: 'all', msg });
+        if (ev.p !== this.game.me) audio.play('surrender'); // cue when anyone else folds
       }
       if (ev.e === 'sdtick' && ev.owner === this.game.me) audio.play('sdbeep');
       if (ev.e === 'tech' && ev.tech === 'satellite') {

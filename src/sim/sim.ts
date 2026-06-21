@@ -979,7 +979,9 @@ export class Sim {
       cons[i].sort((a, b) => (powerPrio(b.type) - powerPrio(a.type)) || (a.id - b.id));
       let onDraw = 0;
       for (const e of cons[i]) {
-        const d = -BUILDINGS[e.type].power;
+        const bd = BUILDINGS[e.type];
+        // unit-producing buildings draw extra while a unit is actually in the queue
+        const d = -bd.power + (bd.prodPower && e.queue.length ? bd.prodPower : 0);
         if (onDraw + d <= budget + 1e-6) { e.pOff = false; onDraw += d; }
         else e.pOff = true;
       }
@@ -1298,6 +1300,9 @@ export class Sim {
     if (att.holdFire && !force) return false; // weapons-hold: never fires on its own
     if (att.cd > 0) return false;
     att.cd = this.nextCd(att, rof);
+    // base defenses spend a little stored power per shot (drains the battery, can
+    // contribute to a brownout under sustained fire); units don't draw power
+    if (att.b) { const pl = this.players[att.owner]; if (pl) pl.power = Math.max(0, pl.power - 3); }
     att.aimX = tgt.x; att.aimZ = tgt.z;
     this.dealDamage(att, tgt, dmg, force);
     const ud = UNITS[att.type];

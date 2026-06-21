@@ -194,6 +194,7 @@ export const upgCost = (type: string, lvl: number, costMul: number) =>
 
 export interface BuildingDef {
   name: string; cost: number; hp: number; power: number;  // power: + makes, - uses
+  prodPower?: number;                                     // extra power drawn while actively producing a unit
   buildTime: number; size: number;                        // size in cells (square)
   attack?: { range: number; dmg: number; rof: number };
   prereq?: string;
@@ -212,11 +213,11 @@ export const BUILDINGS: Record<string, BuildingDef> = {
   conyard:  { name: 'Construction Yard', cost: 3000, hp: 1600, power: 10,   buildTime: 0,  size: 3 },
   power:    { name: 'Power Plant',       cost: 350,  hp: 650,  power: 100,  buildTime: 6,  size: 2 },
   refinery: { name: 'Ore Refinery',      cost: 1600, hp: 950,  power: -30,  buildTime: 12, size: 3, prereq: 'power' },
-  barracks: { name: 'Barracks',          cost: 450,  hp: 750,  power: -20,  buildTime: 7,  size: 2, prereq: 'power' },
-  factory:  { name: 'War Factory',       cost: 1900, hp: 1100, power: -40,  buildTime: 14, size: 3, prereq: 'refinery' },
+  barracks: { name: 'Barracks',          cost: 450,  hp: 750,  power: -20,  prodPower: 10, buildTime: 7,  size: 2, prereq: 'power' },
+  factory:  { name: 'War Factory',       cost: 1900, hp: 1100, power: -40,  prodPower: 20, buildTime: 14, size: 3, prereq: 'refinery' },
   turret:   { name: 'Defense Turret',    cost: 650,  hp: 560,  power: -25,  buildTime: 8,  size: 1, prereq: 'barracks',
               attack: { range: 7.5, dmg: 26, rof: 1.0 }, forceFire: true },
-  dronefac: { name: 'Drone Works',       cost: 1500, hp: 850,  power: -35,  buildTime: 11, size: 2, prereq: 'factory' },
+  dronefac: { name: 'Drone Works',       cost: 1500, hp: 850,  power: -35,  prodPower: 18, buildTime: 11, size: 2, prereq: 'factory' },
   sam:      { name: 'Missile Battery',   cost: 900,  hp: 700,  power: -30,  buildTime: 9,  size: 1, prereq: 'factory',
               attack: { range: 7, dmg: 50, rof: 2.5 } },
   cannon:   { name: 'Heavy Cannon',      cost: 1200, hp: 760,  power: -30,  buildTime: 11, size: 1, prereq: 'factory',
@@ -225,14 +226,14 @@ export const BUILDINGS: Record<string, BuildingDef> = {
               attack: { range: 6.5, dmg: 70, rof: 1.7 }, emp: 1.2, noAir: true }, // zaps + briefly stuns
   irondome: { name: 'Iron Dome',         cost: 1500, hp: 780,  power: -45,  buildTime: 13, size: 2, prereq: 'radar',
               intercept: { range: 15, cd: 3.5 } },                         // shoots down incoming silo missiles
-  shipyard: { name: 'Ship Factory',      cost: 1700, hp: 1000, power: -35,  buildTime: 13, size: 3, prereq: 'refinery' },
-  airforce: { name: 'Aircraft Plant',    cost: 2200, hp: 1000, power: -45,  buildTime: 15, size: 3, prereq: 'factory' },
+  shipyard: { name: 'Ship Factory',      cost: 1700, hp: 1000, power: -35,  prodPower: 15, buildTime: 13, size: 3, prereq: 'refinery' },
+  airforce: { name: 'Aircraft Plant',    cost: 2200, hp: 1000, power: -45,  prodPower: 20, buildTime: 15, size: 3, prereq: 'factory' },
   airfield: { name: 'Airfield',          cost: 800,  hp: 600,  power: -15,  buildTime: 8,  size: 2, prereq: 'airforce' },
   lab:      { name: 'Research Lab',       cost: 2000, hp: 850,  power: -50,  buildTime: 14, size: 2, prereq: 'factory' },
   silo:     { name: 'Missile Silo',       cost: 2500, hp: 900,  power: -60,  buildTime: 16, size: 2, prereq: 'lab' },
   // Oil Rig: not in the build menu — an Engineer constructs it on an oil well, then
   // it pumps a steady passive income. Soft target; destroying it frees the well.
-  oilrig:   { name: 'Oil Rig',            cost: 0,    hp: 600,  power: 0,    buildTime: 0,  size: 1, income: 15 },
+  oilrig:   { name: 'Oil Rig',            cost: 0,    hp: 600,  power: -10,  buildTime: 0,  size: 1, income: 15 }, // needs power: a shed rig earns nothing
   // neutral garrisonable city buildings (urban map only; spawned, not buildable).
   // Infantry move in and fire out; capacity scales with footprint.
   bldgsm:   { name: 'Building',           cost: 0,    hp: 1400, power: 0,    buildTime: 0,  size: 2, garrison: true, neutral: true },
