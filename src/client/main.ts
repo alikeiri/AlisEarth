@@ -618,6 +618,8 @@ class GameClient {
   private lastUiUpdate = 0; // wall-clock ms of the last sidebar/build-menu DOM update (throttled ~12/s)
   private lastSelSig = -1;  // selection signature — when it changes the sidebar refreshes immediately
   private over = false;
+  private surrendered = false;   // player hit Surrender → reveal the map, hold on a "view report" button
+  private pendingWinner = '';    // winner name to pass to the report screen once the player clicks through
   private hb: Worker | null = null;     // heartbeat worker: keeps the sim/net advancing when the tab is hidden
   private hbUrl = '';
   private lastRaf = 0;                  // wall clock of the last rAF frame (watchdog)
@@ -1084,6 +1086,7 @@ class GameClient {
 
   destroy() {
     disableExitGuard();   // tearing down the match — stop trapping the Back button
+    document.getElementById('reportBanner')?.classList.add('hidden');
     cancelAnimationFrame(this.raf);
     if (this.hb) { try { this.hb.postMessage('x'); this.hb.terminate(); } catch { /* already gone */ } this.hb = null; }
     if (this.hbUrl) { try { URL.revokeObjectURL(this.hbUrl); } catch { /* ignore */ } this.hbUrl = ''; }
@@ -2034,8 +2037,15 @@ class GameClient {
   // right away (no spectating; matches can be rewatched from Replays instead).
   surrender() {
     if (this.over) return;
+    this.surrendered = true; // reveal the map + show a "view report" button instead of jumping to stats
     this.game.issue({ k: 'surrender', p: this.game.me });
     audio.play('cancel');
+  }
+  // surrendered: the end block revealed the map; the player views the battle report
+  // when they're ready (button in the HUD)
+  viewReport() {
+    document.getElementById('reportBanner')?.classList.add('hidden');
+    this.onEnd(false, this.pendingWinner);
   }
 
   // reflect each toggleable command's state on its quickbar button: lit when the
@@ -2514,7 +2524,14 @@ class GameClient {
       if (this.fog) { this.fog.fill(2); this.renderer.setFog(this.fog); this.renderer.setTreeFog(this.fog); }
       const wn = st.over && st.winner >= 0 && players[st.winner] ? players[st.winner].n
         : meDead ? (players.find((p: any, i: number) => i !== this.game.me && p.a)?.n || 'The enemy') : 'Nobody';
-      this.onEnd(!meDead && st.winner === this.game.me, wn);
+      if (this.surrendered) {
+        // player surrendered: let them survey the now-revealed battlefield, then go
+        // to the report when they click the button (rather than snapping to stats)
+        this.pendingWinner = wn;
+        document.getElementById('reportBanner')?.classList.remove('hidden');
+      } else {
+        this.onEnd(!meDead && st.winner === this.game.me, wn);
+      }
     }
 
     if (this.perfOn) { this.workMs += (performance.now() - _w0 - this.workMs) * 0.2; if (this.frame % 6 === 0) this.updatePerfHud(); }
@@ -3875,6 +3892,8 @@ function initMenus() {
     closeExitMenu();
     if (client) client.surrender();
   });
+  // after surrendering, the revealed-map banner's button opens the battle report
+  $('reportBtn').addEventListener('click', () => client?.viewReport());
   // Multiplayer desync pause popup: keep waiting (snooze the popup; it auto-shows
   // again if still stalled after the snooze) or quit the match back to the menu.
   $('netStallContinue').addEventListener('click', () => {

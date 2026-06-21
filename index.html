@@ -303,6 +303,13 @@
   #tutBtns button.primary { background: #1f6d80; border-color: #38a0b8; color: #eafaff; font-weight: 700; }
   #tutBtns button.primary:hover { background: #25859c; }
   #tutProgress { flex: 1; text-align: center; font-size: 11px; color: #6f8497; letter-spacing: 0.04em; }
+  /* surrender → "view battle report" banner over the revealed map */
+  #reportBanner { position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%); z-index: 60;
+    display: flex; align-items: center; gap: 14px; padding: 12px 18px; border-radius: 10px;
+    background: rgba(18,26,34,0.94); border: 1px solid #5a3a3a; box-shadow: 0 8px 36px rgba(0,0,0,0.6); }
+  #reportBanner.hidden { display: none; }
+  #reportBanner span { color: #ffb9ad; font-size: 14px; }
+  #reportBanner #reportBtn { white-space: nowrap; }
 
   /* ===== Landing page ===== */
   #landing { position: fixed; inset: 0; z-index: 8000; overflow-y: auto; color: #e8eef3;
@@ -676,6 +683,12 @@
       <button class="mbtn primary" id="netStallContinue" style="width:100%;margin-bottom:8px">Keep waiting</button>
       <button class="mbtn" id="netStallQuit" style="width:100%;background:#3a1d1d;border-color:#7d3c3c;color:#ff9a8a">⚑ Quit match</button>
     </div>
+  </div>
+  <!-- after surrendering, the map is revealed; this banner lets the player survey
+       the battlefield, then go to the battle-report/stats screen when ready -->
+  <div id="reportBanner" class="hidden">
+    <span>⚑ You surrendered — the battlefield is revealed.</span>
+    <button class="mbtn primary" id="reportBtn">📊 View battle report</button>
   </div>
   <div id="endScreen" class="screen hidden">
     <div class="title" id="endTitle">VICTORY</div>
