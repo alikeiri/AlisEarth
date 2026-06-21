@@ -618,8 +618,9 @@ class GameClient {
   private lastUiUpdate = 0; // wall-clock ms of the last sidebar/build-menu DOM update (throttled ~12/s)
   private lastSelSig = -1;  // selection signature — when it changes the sidebar refreshes immediately
   private over = false;
-  private surrendered = false;   // player hit Surrender → reveal the map, hold on a "view report" button
+  private surrendered = false;   // player hit Surrender (only changes the banner wording)
   private pendingWinner = '';    // winner name to pass to the report screen once the player clicks through
+  private pendingWon = false;    // did the local player win? (passed to the report on click-through)
   private hb: Worker | null = null;     // heartbeat worker: keeps the sim/net advancing when the tab is hidden
   private hbUrl = '';
   private lastRaf = 0;                  // wall clock of the last rAF frame (watchdog)
@@ -2045,7 +2046,7 @@ class GameClient {
   // when they're ready (button in the HUD)
   viewReport() {
     document.getElementById('reportBanner')?.classList.add('hidden');
-    this.onEnd(false, this.pendingWinner);
+    this.onEnd(this.pendingWon, this.pendingWinner);
   }
 
   // reflect each toggleable command's state on its quickbar button: lit when the
@@ -2524,13 +2525,18 @@ class GameClient {
       if (this.fog) { this.fog.fill(2); this.renderer.setFog(this.fog); this.renderer.setTreeFog(this.fog); }
       const wn = st.over && st.winner >= 0 && players[st.winner] ? players[st.winner].n
         : meDead ? (players.find((p: any, i: number) => i !== this.game.me && p.a)?.n || 'The enemy') : 'Nobody';
-      if (this.surrendered) {
-        // player surrendered: let them survey the now-revealed battlefield, then go
-        // to the report when they click the button (rather than snapping to stats)
-        this.pendingWinner = wn;
-        document.getElementById('reportBanner')?.classList.remove('hidden');
+      const won = !meDead && st.winner === this.game.me;
+      if ((this.game as any).isSim || (this.game as any).isReplay) {
+        // AI-vs-AI spectate / replay: no player perspective to survey — go straight to the summary
+        this.onEnd(won, wn);
       } else {
-        this.onEnd(!meDead && st.winner === this.game.me, wn);
+        // EVERY played game ends by revealing the map; the player surveys the
+        // battlefield, then clicks the banner button to open the battle report
+        this.pendingWon = won; this.pendingWinner = wn;
+        const msg = document.getElementById('reportMsg');
+        if (msg) msg.textContent = this.surrendered ? '⚑ You surrendered — battlefield revealed.'
+          : won ? '🏆 Victory — battlefield revealed.' : '💥 Defeat — battlefield revealed.';
+        document.getElementById('reportBanner')?.classList.remove('hidden');
       }
     }
 
