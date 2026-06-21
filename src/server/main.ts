@@ -14,6 +14,7 @@ import { Sim } from '../sim/sim';
 import { aiTick } from '../sim/ai';
 import { FACTIONS, SIM_VERSION } from '../sim/data';
 import { setMapSize } from '../sim/map';
+import { ROADMAP_SEED } from './roadmap-seed';
 
 const PORT = Number(process.env.PORT) || 8080;
 const DIST = join(fileURLToPath(new URL('.', import.meta.url)), 'dist');
@@ -331,6 +332,69 @@ async function handleAdminUsers(req: any, res: any) {
   res.end(JSON.stringify({ users: list, count: list.length }));
 }
 
+// ---- developer roadmap: an operator-only backlog the admin panel edits. Items
+// flow backlog -> ready_build -> in_progress -> ready_prod -> shipped. Stored on
+// the mounted volume; seeded once from ROADMAP_SEED so a fresh box starts with
+// the known wishlist. Gated by the server secret like the rest of /admin. ----
+const ROADMAP_FILE = join(fileURLToPath(new URL('.', import.meta.url)), 'roadmap.json');
+const ROADMAP_STATUSES = ['backlog', 'ready_build', 'in_progress', 'ready_prod', 'shipped'];
+function writeRoadmap(items: any[]) { try { writeFileSync(ROADMAP_FILE, JSON.stringify(items)); } catch (e) { logErr('writeRoadmap', e); } }
+function seedRoadmap(): any[] {
+  const now = Date.now();
+  const items = ROADMAP_SEED.map((s, i) => ({
+    id: 'r' + (now + i).toString(36), title: s.title, cat: s.cat,
+    status: 'backlog', prio: i, created: now, updated: now,
+  }));
+  writeRoadmap(items);
+  return items;
+}
+function readRoadmap(): any[] {
+  try { return JSON.parse(readFileSync(ROADMAP_FILE, 'utf8')); } catch { return seedRoadmap(); }
+}
+async function handleRoadmap(req: any, res: any) {
+  const json = (code: number, obj: any) => { res.writeHead(code, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(obj)); };
+  const b = await readJsonBody(req);
+  if (!ADVISOR_KEY || !b || b.key !== ADVISOR_KEY) return json(403, { error: 'Forbidden' });
+  let items = readRoadmap();
+  const now = Date.now();
+  switch (b.action) {
+    case 'add': {
+      const title = String(b.title || '').trim().slice(0, 400);
+      if (!title) return json(400, { error: 'Empty title' });
+      const cat = String(b.cat || 'Uncategorized').trim().slice(0, 60) || 'Uncategorized';
+      const minPrio = items.reduce((m, it) => Math.min(m, it.prio ?? 0), 0);
+      items.unshift({ id: 'r' + now.toString(36) + Math.random().toString(36).slice(2, 6), title, cat, status: 'backlog', prio: minPrio - 1, created: now, updated: now });
+      writeRoadmap(items);
+      break;
+    }
+    case 'update': {
+      const it = items.find(x => x.id === b.id);
+      if (!it) return json(404, { error: 'No such item' });
+      if (typeof b.status === 'string' && ROADMAP_STATUSES.includes(b.status)) it.status = b.status;
+      if (typeof b.title === 'string' && b.title.trim()) it.title = b.title.trim().slice(0, 400);
+      if (typeof b.cat === 'string' && b.cat.trim()) it.cat = b.cat.trim().slice(0, 60);
+      if (typeof b.notes === 'string') it.notes = b.notes.slice(0, 600);
+      it.updated = now;
+      writeRoadmap(items);
+      break;
+    }
+    case 'delete':
+      items = items.filter(x => x.id !== b.id);
+      writeRoadmap(items);
+      break;
+    case 'reorder': {
+      const order: string[] = Array.isArray(b.ids) ? b.ids : [];
+      const pos = new Map(order.map((id, i) => [id, i]));
+      for (const it of items) if (pos.has(it.id)) it.prio = pos.get(it.id);
+      writeRoadmap(items);
+      break;
+    }
+    case 'list': default: break;
+  }
+  items.sort((a, b) => (a.prio - b.prio) || (a.created - b.created));
+  return json(200, { items, statuses: ROADMAP_STATUSES });
+}
+
 const http = createServer(async (req, res) => {
   try {
     let p = (req.url || '/').split('?')[0];
@@ -339,6 +403,7 @@ const http = createServer(async (req, res) => {
     if (req.method === 'POST' && p === '/auth/me') { handleAuth(req, res, 'me'); return; }
     if (req.method === 'POST' && p === '/auth/playstat') { handlePlaystat(req, res); return; }
     if (req.method === 'POST' && p === '/admin/users') { handleAdminUsers(req, res); return; }
+    if (req.method === 'POST' && p === '/admin/roadmap') { handleRoadmap(req, res); return; }
     if (req.method === 'POST' && p === '/advisor') { handleAdvisor(req, res); return; }
     if (p === '/intel') { handleIntel(req, res); return; }
     if (req.method === 'POST' && p === '/features/complete') { handleFeatureComplete(req, res); return; }

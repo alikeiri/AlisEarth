@@ -14,17 +14,23 @@
   .muted { color: #6f8497; font-size: 13px; }
   #gate { max-width: 360px; margin: 80px auto; background: #101a22; border: 1px solid #2c3e50; border-radius: 12px; padding: 24px; text-align: center; }
   #gate h2 { margin: 0 0 14px; font-size: 16px; }
-  input { width: 100%; box-sizing: border-box; padding: 11px 12px; border-radius: 7px; background: #0c151c; border: 1px solid #2c3e50; color: #e8eef3; font-size: 14px; margin-bottom: 12px; }
-  button { padding: 11px 18px; border-radius: 7px; border: 0; cursor: pointer; font-weight: 700; background: linear-gradient(180deg, #ffb44a, #ff7a1e); color: #2a1402; font-size: 14px; }
-  button.ghost { background: #1a2632; color: #cfe0ee; border: 1px solid #2c3e50; }
+  input, select, textarea { box-sizing: border-box; padding: 9px 11px; border-radius: 7px; background: #0c151c; border: 1px solid #2c3e50; color: #e8eef3; font-size: 14px; font-family: inherit; }
+  #gate input { width: 100%; margin-bottom: 12px; }
+  button { padding: 9px 16px; border-radius: 7px; border: 0; cursor: pointer; font-weight: 700; background: linear-gradient(180deg, #ffb44a, #ff7a1e); color: #2a1402; font-size: 14px; }
+  button.ghost { background: #1a2632; color: #cfe0ee; border: 1px solid #2c3e50; font-weight: 600; }
+  button.ghost.on { background: #20405a; color: #fff; border-color: #3a6c8f; }
   .err { color: #ff8a7a; font-size: 13px; min-height: 18px; }
-  #panel { display: none; padding: 14px 22px 40px; }
-  .stats { display: flex; gap: 22px; flex-wrap: wrap; margin: 6px 0 14px; }
-  .stat { background: #101a22; border: 1px solid #20303a; border-radius: 8px; padding: 10px 16px; }
-  .stat .n { font-size: 22px; font-weight: 800; color: #ffd79a; }
+  #panel { display: none; padding: 14px 22px 60px; }
+  .tabs { display: flex; gap: 8px; }
+  .stats { display: flex; gap: 14px; flex-wrap: wrap; margin: 6px 0 14px; }
+  .stat { background: #101a22; border: 1px solid #20303a; border-radius: 8px; padding: 9px 15px; cursor: default; }
+  .stat.click { cursor: pointer; }
+  .stat.click:hover { border-color: #3a6c8f; }
+  .stat .n { font-size: 21px; font-weight: 800; color: #ffd79a; }
   .stat .l { font-size: 11px; color: #8aa0b0; text-transform: uppercase; letter-spacing: 0.06em; }
-  .toolbar { display: flex; gap: 10px; align-items: center; margin-bottom: 10px; }
-  .toolbar input { width: 240px; margin: 0; }
+  .toolbar { display: flex; gap: 10px; align-items: center; margin-bottom: 12px; flex-wrap: wrap; }
+  .toolbar input.search { width: 260px; }
+  /* users table */
   table { width: 100%; border-collapse: collapse; font-size: 13px; }
   th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #18242e; white-space: nowrap; }
   th { color: #8aa0b0; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; cursor: pointer; user-select: none; position: sticky; top: 0; background: #0a0f14; }
@@ -33,6 +39,35 @@
   td.num { text-align: right; font-variant-numeric: tabular-nums; }
   .email { color: #9fb3c2; }
   .mono { font-family: ui-monospace, Menlo, Consolas, monospace; color: #b0bec5; }
+  /* roadmap */
+  .addbar { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
+  .addbar input.title { flex: 1; min-width: 280px; }
+  .legend { font-size: 12px; color: #7c91a3; margin: -4px 0 14px; }
+  .legend b { color: #aebfce; font-weight: 600; }
+  .rm-row { display: flex; align-items: flex-start; gap: 10px; padding: 9px 8px; border-bottom: 1px solid #16222c; }
+  .rm-row:hover { background: #0e1620; }
+  .rm-row.s-shipped { opacity: 0.55; }
+  .rm-ord { display: flex; flex-direction: column; gap: 1px; }
+  .rm-ord button { padding: 0 6px; line-height: 16px; font-size: 11px; background: #16242e; color: #9fb6c6; border: 1px solid #25333d; font-weight: 700; }
+  .rm-ord button:hover { color: #fff; border-color: #3a6c8f; }
+  .rm-main { flex: 1; min-width: 0; }
+  .rm-title { font-size: 14px; line-height: 1.45; cursor: text; }
+  .rm-title[contenteditable="true"] { outline: 1px solid #3a6c8f; border-radius: 4px; padding: 2px 4px; background: #0c151c; }
+  .rm-meta { margin-top: 5px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .cat { font-size: 11px; color: #88d0ff; background: #102733; border: 1px solid #1c3d4d; border-radius: 999px; padding: 2px 9px; }
+  .pill { font-size: 11px; font-weight: 700; border-radius: 999px; padding: 2px 10px; border: 1px solid transparent; }
+  .p-backlog { color: #9aa9b5; background: #1a242c; border-color: #2a3742; }
+  .p-ready_build { color: #ffd27a; background: #2c2310; border-color: #5a4416; }
+  .p-in_progress { color: #8fd0ff; background: #102835; border-color: #1d4a63; }
+  .p-ready_prod { color: #7df0c0; background: #0f2d23; border-color: #1c5a44; }
+  .p-shipped { color: #b7c6d2; background: #14202a; border-color: #243744; }
+  select.statusSel { font-size: 12px; padding: 4px 8px; }
+  .rm-actions { display: flex; gap: 6px; align-items: center; }
+  .rm-actions button { font-size: 12px; padding: 5px 10px; }
+  .rm-actions .del { background: #2a1416; color: #ff9a8a; border: 1px solid #4a2226; }
+  .rm-actions .promote { background: #14302a; color: #7df0c0; border: 1px solid #1c5a44; }
+  .ts { font-size: 11px; color: #5f7585; }
+  #rmView { display: none; }
 </style>
 </head>
 <body>
@@ -46,50 +81,193 @@
   <div id="panel">
     <header>
       <h1>INFINITE <span>GREED</span> — Admin</h1>
+      <div class="tabs">
+        <button class="ghost on" id="tabRoadmap">Roadmap</button>
+        <button class="ghost" id="tabUsers">Users</button>
+      </div>
       <span class="muted" id="updated"></span>
       <span style="flex:1"></span>
       <button class="ghost" id="refresh">Refresh</button>
       <button class="ghost" id="logout">Lock</button>
     </header>
-    <div class="stats" id="summary"></div>
-    <div class="toolbar">
-      <input id="filter" placeholder="Filter by callsign / email / location…" />
-      <span class="muted" id="shown"></span>
+
+    <!-- ================= ROADMAP ================= -->
+    <div id="rmView">
+      <div class="stats" id="rmSummary"></div>
+      <div class="addbar">
+        <input class="title" id="rmTitle" placeholder="New item — describe the feature / fix…" />
+        <input id="rmCat" list="rmCats" placeholder="Category" style="width:220px" />
+        <datalist id="rmCats"></datalist>
+        <button id="rmAdd">Add</button>
+      </div>
+      <div class="legend">
+        Flow: <b>Backlog</b> → <b>Ready for Build</b> (devs pick these up) → <b>In Progress</b> → <b>Ready for Prod</b> (tested, deploy) → <b>Shipped</b>.
+        Use ▲▼ to prioritize, the dropdown to change status, click a title to edit.
+      </div>
+      <div class="toolbar">
+        <select id="rmStatusFilter">
+          <option value="">All statuses</option>
+          <option value="backlog">Backlog</option>
+          <option value="ready_build">Ready for Build</option>
+          <option value="in_progress">In Progress</option>
+          <option value="ready_prod">Ready for Prod</option>
+          <option value="shipped">Shipped</option>
+        </select>
+        <select id="rmCatFilter"><option value="">All categories</option></select>
+        <input class="search" id="rmSearch" placeholder="Search items…" />
+        <span class="muted" id="rmShown"></span>
+      </div>
+      <div id="rmList"></div>
     </div>
-    <div style="overflow:auto">
-      <table id="tbl">
-        <thead><tr>
-          <th data-k="callsign">Callsign</th>
-          <th data-k="email">Email</th>
-          <th data-k="created">Signed up</th>
-          <th data-k="lastLogin">Last login</th>
-          <th data-k="logins" class="num">Logins</th>
-          <th data-k="minutesPlayed" class="num">Minutes</th>
-          <th data-k="matchesAI" class="num">vs AI</th>
-          <th data-k="matchesMP" class="num">MP</th>
-          <th data-k="ip">IP</th>
-          <th data-k="geo">Location</th>
-        </tr></thead>
-        <tbody id="rows"></tbody>
-      </table>
+
+    <!-- ================= USERS ================= -->
+    <div id="usersView" style="display:none">
+      <div class="stats" id="summary"></div>
+      <div class="toolbar">
+        <input class="search" id="filter" placeholder="Filter by callsign / email / location…" />
+        <span class="muted" id="shown"></span>
+      </div>
+      <div style="overflow:auto">
+        <table id="tbl">
+          <thead><tr>
+            <th data-k="callsign">Callsign</th>
+            <th data-k="email">Email</th>
+            <th data-k="created">Signed up</th>
+            <th data-k="lastLogin">Last login</th>
+            <th data-k="logins" class="num">Logins</th>
+            <th data-k="minutesPlayed" class="num">Minutes</th>
+            <th data-k="matchesAI" class="num">vs AI</th>
+            <th data-k="matchesMP" class="num">MP</th>
+            <th data-k="ip">IP</th>
+            <th data-k="geo">Location</th>
+          </tr></thead>
+          <tbody id="rows"></tbody>
+        </table>
+      </div>
     </div>
   </div>
 
 <script>
   const $ = id => document.getElementById(id);
-  let DATA = [], sortK = 'lastLogin', sortDir = -1, KEY = '';
+  let KEY = '';
   const fmtDate = ts => ts ? new Date(ts).toLocaleString() : '—';
+  const fmtDay = ts => ts ? new Date(ts).toLocaleDateString() : '—';
   const esc = s => String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const post = async (url, body) => {
+    const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: KEY, ...body }) });
+    if (!r.ok) throw new Error(r.status === 403 ? 'Wrong admin key' : 'Server error ' + r.status);
+    return r.json();
+  };
 
-  async function load() {
-    const r = await fetch('/admin/users', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: KEY }) });
-    if (!r.ok) { throw new Error(r.status === 403 ? 'Wrong admin key' : 'Server error ' + r.status); }
-    const j = await r.json();
-    DATA = j.users || [];
-    try { sessionStorage.setItem('ig_admin_key', KEY); } catch {}
+  /* ---------------- gate / tabs ---------------- */
+  async function unlock() {
+    await loadRoadmap();          // also validates the key
     $('gate').style.display = 'none'; $('panel').style.display = 'block';
+    showTab('roadmap');
+    try { sessionStorage.setItem('ig_admin_key', KEY); } catch {}
     $('updated').textContent = 'as of ' + new Date().toLocaleTimeString();
-    renderSummary(); render();
+  }
+  function showTab(which) {
+    const onRm = which === 'roadmap';
+    $('rmView').style.display = onRm ? 'block' : 'none';
+    $('usersView').style.display = onRm ? 'none' : 'block';
+    $('tabRoadmap').classList.toggle('on', onRm);
+    $('tabUsers').classList.toggle('on', !onRm);
+    if (!onRm && !USERS_LOADED) loadUsers().catch(e => alert(e.message));
+  }
+  $('tabRoadmap').addEventListener('click', () => showTab('roadmap'));
+  $('tabUsers').addEventListener('click', () => showTab('users'));
+
+  /* ---------------- ROADMAP ---------------- */
+  let RM = [], rmStatuses = ['backlog','ready_build','in_progress','ready_prod','shipped'];
+  const ST_LABEL = { backlog:'Backlog', ready_build:'Ready for Build', in_progress:'In Progress', ready_prod:'Ready for Prod', shipped:'Shipped' };
+
+  async function loadRoadmap() {
+    const j = await post('/admin/roadmap', { action: 'list' });
+    RM = j.items || []; if (j.statuses) rmStatuses = j.statuses;
+    renderRoadmap();
+  }
+  async function rmAct(body) { const j = await post('/admin/roadmap', body); RM = j.items || []; renderRoadmap(); }
+
+  function rmFiltered() {
+    const sf = $('rmStatusFilter').value, cf = $('rmCatFilter').value, q = $('rmSearch').value.trim().toLowerCase();
+    return RM.filter(it => (!sf || it.status === sf) && (!cf || it.cat === cf)
+      && (!q || (it.title + ' ' + it.cat).toLowerCase().includes(q)));
+  }
+  function renderRoadmap() {
+    // category lists (filter dropdown + add datalist)
+    const cats = [...new Set(RM.map(it => it.cat))].sort();
+    const curCf = $('rmCatFilter').value;
+    $('rmCatFilter').innerHTML = '<option value="">All categories</option>' + cats.map(c => `<option ${c===curCf?'selected':''}>${esc(c)}</option>`).join('');
+    $('rmCats').innerHTML = cats.map(c => `<option value="${esc(c)}">`).join('');
+    // summary tiles (click to filter)
+    const counts = {}; rmStatuses.forEach(s => counts[s] = 0);
+    RM.forEach(it => counts[it.status] = (counts[it.status]||0) + 1);
+    $('rmSummary').innerHTML = `<div class="stat">${''}<div class="n">${RM.length}</div><div class="l">Total</div></div>`
+      + rmStatuses.map(s => `<div class="stat click" data-s="${s}"><div class="n">${counts[s]||0}</div><div class="l">${ST_LABEL[s]}</div></div>`).join('');
+    $('rmSummary').querySelectorAll('.stat.click').forEach(el => el.onclick = () => { $('rmStatusFilter').value = el.dataset.s; renderRoadmap(); });
+    // rows
+    const list = rmFiltered();
+    $('rmShown').textContent = list.length + ' of ' + RM.length;
+    const opts = it => rmStatuses.map(s => `<option value="${s}" ${s===it.status?'selected':''}>${ST_LABEL[s]}</option>`).join('');
+    $('rmList').innerHTML = list.map(it => `
+      <div class="rm-row s-${it.status}" data-id="${it.id}">
+        <div class="rm-ord"><button class="up">▲</button><button class="down">▼</button></div>
+        <div class="rm-main">
+          <div class="rm-title" data-id="${it.id}" title="Click to edit">${esc(it.title)}</div>
+          <div class="rm-meta">
+            <span class="pill p-${it.status}">${ST_LABEL[it.status]}</span>
+            <select class="statusSel" data-id="${it.id}">${opts(it)}</select>
+            <span class="cat">${esc(it.cat)}</span>
+            <span class="ts">upd ${fmtDay(it.updated)}</span>
+          </div>
+        </div>
+        <div class="rm-actions">
+          ${it.status==='backlog' ? `<button class="promote" data-id="${it.id}" data-to="ready_build">→ Build</button>` : ''}
+          ${(it.status==='in_progress'||it.status==='ready_build') ? `<button class="promote" data-id="${it.id}" data-to="ready_prod">→ Prod</button>` : ''}
+          ${it.status==='ready_prod' ? `<button class="promote" data-id="${it.id}" data-to="shipped">✓ Shipped</button>` : ''}
+          <button class="del" data-id="${it.id}">✕</button>
+        </div>
+      </div>`).join('') || '<div class="muted" style="padding:20px">No items match.</div>';
+
+    // wire row controls
+    $('rmList').querySelectorAll('.statusSel').forEach(s => s.onchange = () => rmAct({ action:'update', id:s.dataset.id, status:s.value }).catch(e=>alert(e.message)));
+    $('rmList').querySelectorAll('.promote').forEach(b => b.onclick = () => rmAct({ action:'update', id:b.dataset.id, status:b.dataset.to }).catch(e=>alert(e.message)));
+    $('rmList').querySelectorAll('.del').forEach(b => b.onclick = () => { if (confirm('Delete this item?')) rmAct({ action:'delete', id:b.dataset.id }).catch(e=>alert(e.message)); });
+    $('rmList').querySelectorAll('.up').forEach(b => b.onclick = () => moveItem(b.closest('.rm-row').dataset.id, -1));
+    $('rmList').querySelectorAll('.down').forEach(b => b.onclick = () => moveItem(b.closest('.rm-row').dataset.id, 1));
+    $('rmList').querySelectorAll('.rm-title').forEach(t => {
+      t.onclick = () => { t.contentEditable = 'true'; t.focus(); };
+      t.onblur = () => { t.contentEditable = 'false'; const v = t.textContent.trim();
+        const it = RM.find(x => x.id === t.dataset.id);
+        if (it && v && v !== it.title) rmAct({ action:'update', id:t.dataset.id, title:v }).catch(e=>alert(e.message)); };
+      t.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); t.blur(); } if (e.key === 'Escape') { t.textContent = (RM.find(x=>x.id===t.dataset.id)||{}).title||''; t.blur(); } };
+    });
+  }
+  // reorder within the FULL prio order (so priority is global, not per-filter)
+  function moveItem(id, dir) {
+    const ord = [...RM]; // RM is already prio-sorted from the server
+    const i = ord.findIndex(x => x.id === id);
+    const j = i + dir;
+    if (i < 0 || j < 0 || j >= ord.length) return;
+    [ord[i], ord[j]] = [ord[j], ord[i]];
+    RM = ord; renderRoadmap(); // optimistic
+    rmAct({ action:'reorder', ids: ord.map(x => x.id) }).catch(e=>alert(e.message));
+  }
+  $('rmAdd').addEventListener('click', () => {
+    const title = $('rmTitle').value.trim(); if (!title) return;
+    const cat = $('rmCat').value.trim() || 'Uncategorized';
+    rmAct({ action:'add', title, cat }).then(() => { $('rmTitle').value = ''; }).catch(e=>alert(e.message));
+  });
+  $('rmTitle').addEventListener('keydown', e => { if (e.key === 'Enter') $('rmAdd').click(); });
+  ['rmStatusFilter','rmCatFilter','rmSearch'].forEach(id => $(id).addEventListener('input', renderRoadmap));
+
+  /* ---------------- USERS (unchanged) ---------------- */
+  let DATA = [], sortK = 'lastLogin', sortDir = -1, USERS_LOADED = false;
+  async function loadUsers() {
+    const j = await post('/admin/users', {});
+    DATA = j.users || []; USERS_LOADED = true;
+    renderSummary(); renderUsers();
   }
   function renderSummary() {
     const tot = DATA.length;
@@ -102,7 +280,7 @@
     $('summary').innerHTML = cell(tot,'Users') + cell(active,'Active 24h') + cell(mins.toLocaleString(),'Minutes played')
       + cell(mAI.toLocaleString(),'AI matches') + cell(mMP.toLocaleString(),'MP matches');
   }
-  function render() {
+  function renderUsers() {
     const f = $('filter').value.trim().toLowerCase();
     let rows = DATA.filter(u => !f || (u.callsign+' '+u.email+' '+u.geo).toLowerCase().includes(f));
     rows.sort((a,b) => {
@@ -127,15 +305,19 @@
   document.querySelectorAll('th[data-k]').forEach(th => th.addEventListener('click', () => {
     const k = th.getAttribute('data-k');
     if (sortK === k) sortDir = -sortDir; else { sortK = k; sortDir = (k==='callsign'||k==='email'||k==='geo') ? 1 : -1; }
-    render();
+    renderUsers();
   }));
-  $('filter').addEventListener('input', render);
-  $('enter').addEventListener('click', async () => { KEY = $('key').value.trim(); try { await load(); } catch (e) { $('gateErr').textContent = e.message; } });
+  $('filter').addEventListener('input', renderUsers);
+
+  /* ---------------- shell ---------------- */
+  $('enter').addEventListener('click', async () => { KEY = $('key').value.trim(); try { await unlock(); } catch (e) { $('gateErr').textContent = e.message; } });
   $('key').addEventListener('keydown', e => { if (e.key === 'Enter') $('enter').click(); });
-  $('refresh').addEventListener('click', () => load().catch(e => alert(e.message)));
+  $('refresh').addEventListener('click', () => {
+    const onRm = $('tabRoadmap').classList.contains('on');
+    (onRm ? loadRoadmap() : loadUsers()).then(() => $('updated').textContent = 'as of ' + new Date().toLocaleTimeString()).catch(e => alert(e.message));
+  });
   $('logout').addEventListener('click', () => { try { sessionStorage.removeItem('ig_admin_key'); } catch {}; location.reload(); });
-  // restore a prior session this tab
-  try { const k = sessionStorage.getItem('ig_admin_key'); if (k) { KEY = k; load().catch(()=>{ $('gate').style.display='block'; }); } } catch {}
+  try { const k = sessionStorage.getItem('ig_admin_key'); if (k) { KEY = k; unlock().catch(()=>{ $('gate').style.display='block'; }); } } catch {}
 </script>
 </body>
 </html>

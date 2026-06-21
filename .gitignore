@@ -8,6 +8,7 @@ batch-results.json
 ai-profile.json
 feature-requests.json
 users.json
+roadmap.json
 auth-secret
 replays/
 *.log
