@@ -337,7 +337,12 @@ async function handleAdminUsers(req: any, res: any) {
 // the mounted volume; seeded once from ROADMAP_SEED so a fresh box starts with
 // the known wishlist. Gated by the server secret like the rest of /admin. ----
 const ROADMAP_FILE = join(fileURLToPath(new URL('.', import.meta.url)), 'roadmap.json');
-const ROADMAP_STATUSES = ['backlog', 'ready_build', 'in_progress', 'ready_prod', 'shipped'];
+// workflow status (user-driven via the dropdown). 'ready_test' = devs delivered it,
+// awaiting playtest; 'ready_prod' = tested, cleared to ship.
+const ROADMAP_STATUSES = ['backlog', 'ready_build', 'in_progress', 'ready_test', 'ready_prod'];
+// deployment state (read-only in the UI; set by the deploy workflow): which
+// environment the code is live on. '' = not deployed yet.
+const ROADMAP_DEPLOYS = ['', 'test', 'prod'];
 function writeRoadmap(items: any[]) { try { writeFileSync(ROADMAP_FILE, JSON.stringify(items)); } catch (e) { logErr('writeRoadmap', e); } }
 function seedRoadmap(): any[] {
   const now = Date.now();
@@ -349,7 +354,17 @@ function seedRoadmap(): any[] {
   return items;
 }
 function readRoadmap(): any[] {
-  try { return JSON.parse(readFileSync(ROADMAP_FILE, 'utf8')); } catch { return seedRoadmap(); }
+  let items: any[];
+  try { items = JSON.parse(readFileSync(ROADMAP_FILE, 'utf8')); } catch { return seedRoadmap(); }
+  // migrate the old 'shipped' status -> ready_prod + deploy:'prod' (the read-only
+  // production marker now records "live") so legacy boards keep rendering cleanly
+  let dirty = false;
+  for (const it of items) {
+    if (it.status === 'shipped') { it.status = 'ready_prod'; it.deploy = 'prod'; dirty = true; }
+    if (it.deploy === undefined) { it.deploy = ''; dirty = true; }
+  }
+  if (dirty) writeRoadmap(items);
+  return items;
 }
 async function handleRoadmap(req: any, res: any) {
   const json = (code: number, obj: any) => { res.writeHead(code, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(obj)); };
@@ -371,6 +386,7 @@ async function handleRoadmap(req: any, res: any) {
       const it = items.find(x => x.id === b.id);
       if (!it) return json(404, { error: 'No such item' });
       if (typeof b.status === 'string' && ROADMAP_STATUSES.includes(b.status)) it.status = b.status;
+      if (typeof b.deploy === 'string' && ROADMAP_DEPLOYS.includes(b.deploy)) it.deploy = b.deploy;
       if (typeof b.title === 'string' && b.title.trim()) it.title = b.title.trim().slice(0, 400);
       if (typeof b.cat === 'string' && b.cat.trim()) it.cat = b.cat.trim().slice(0, 60);
       if (typeof b.notes === 'string') it.notes = b.notes.slice(0, 600);
