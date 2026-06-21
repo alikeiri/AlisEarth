@@ -46,7 +46,7 @@
   .legend b { color: #aebfce; font-weight: 600; }
   .rm-row { display: flex; align-items: flex-start; gap: 10px; padding: 9px 8px; border-bottom: 1px solid #16222c; }
   .rm-row:hover { background: #0e1620; }
-  .rm-row.s-shipped { opacity: 0.55; }
+  .rm-row.s-ready_prod { opacity: 0.72; }
   .rm-ord { display: flex; flex-direction: column; gap: 1px; }
   .rm-ord button { padding: 0 6px; line-height: 16px; font-size: 11px; background: #16242e; color: #9fb6c6; border: 1px solid #25333d; font-weight: 700; }
   .rm-ord button:hover { color: #fff; border-color: #3a6c8f; }
@@ -59,13 +59,17 @@
   .p-backlog { color: #9aa9b5; background: #1a242c; border-color: #2a3742; }
   .p-ready_build { color: #ffd27a; background: #2c2310; border-color: #5a4416; }
   .p-in_progress { color: #8fd0ff; background: #102835; border-color: #1d4a63; }
+  .p-ready_test { color: #c8a6ff; background: #1d1733; border-color: #3c2f63; }
   .p-ready_prod { color: #7df0c0; background: #0f2d23; border-color: #1c5a44; }
-  .p-shipped { color: #b7c6d2; background: #14202a; border-color: #243744; }
   select.statusSel { font-size: 12px; padding: 4px 8px; }
-  .rm-actions { display: flex; gap: 6px; align-items: center; }
+  .rm-actions { display: flex; gap: 8px; align-items: center; }
   .rm-actions button { font-size: 12px; padding: 5px 10px; }
   .rm-actions .del { background: #2a1416; color: #ff9a8a; border: 1px solid #4a2226; }
-  .rm-actions .promote { background: #14302a; color: #7df0c0; border: 1px solid #1c5a44; }
+  /* read-only deployment chip (set by the deploy workflow, not clickable) */
+  .deploy { font-size: 11px; font-weight: 700; border-radius: 6px; padding: 4px 9px; white-space: nowrap; min-width: 86px; text-align: center; }
+  .dep-none { color: #6f8497; background: #121b22; border: 1px dashed #2a3742; }
+  .dep-test { color: #ffd24a; background: #2c2310; border: 1px solid #5a4416; }
+  .dep-prod { color: #7df0c0; background: #0f2d23; border: 1px solid #1c5a44; }
   .ts { font-size: 11px; color: #5f7585; }
   #rmView { display: none; }
 </style>
@@ -101,8 +105,8 @@
         <button id="rmAdd">Add</button>
       </div>
       <div class="legend">
-        Flow: <b>Backlog</b> → <b>Ready for Build</b> (devs pick these up) → <b>In Progress</b> → <b>Ready for Prod</b> (tested, deploy) → <b>Shipped</b>.
-        Use ▲▼ to prioritize, the dropdown to change status, click a title to edit.
+        Flow: <b>Backlog</b> → <b>Ready for Build</b> (devs pick these up) → <b>In Progress</b> → <b>Ready to Test</b> (delivered, playtest it) → <b>Ready for Production</b> (cleared to ship).
+        Use ▲▼ to prioritize, the dropdown to change status, click a title to edit. The <b>Deploy</b> chip is read-only — set by the deploy workflow when code goes to Test / Production.
       </div>
       <div class="toolbar">
         <select id="rmStatusFilter">
@@ -110,8 +114,8 @@
           <option value="backlog">Backlog</option>
           <option value="ready_build">Ready for Build</option>
           <option value="in_progress">In Progress</option>
-          <option value="ready_prod">Ready for Prod</option>
-          <option value="shipped">Shipped</option>
+          <option value="ready_test">Ready to Test</option>
+          <option value="ready_prod">Ready for Production</option>
         </select>
         <select id="rmCatFilter"><option value="">All categories</option></select>
         <input class="search" id="rmSearch" placeholder="Search items…" />
@@ -179,8 +183,9 @@
   $('tabUsers').addEventListener('click', () => showTab('users'));
 
   /* ---------------- ROADMAP ---------------- */
-  let RM = [], rmStatuses = ['backlog','ready_build','in_progress','ready_prod','shipped'];
-  const ST_LABEL = { backlog:'Backlog', ready_build:'Ready for Build', in_progress:'In Progress', ready_prod:'Ready for Prod', shipped:'Shipped' };
+  let RM = [], rmStatuses = ['backlog','ready_build','in_progress','ready_test','ready_prod'];
+  const ST_LABEL = { backlog:'Backlog', ready_build:'Ready for Build', in_progress:'In Progress', ready_test:'Ready to Test', ready_prod:'Ready for Production' };
+  const DEP_LABEL = { '':'– not deployed', test:'● Test', prod:'● Production' };
 
   async function loadRoadmap() {
     const j = await post('/admin/roadmap', { action: 'list' });
@@ -223,16 +228,13 @@
           </div>
         </div>
         <div class="rm-actions">
-          ${it.status==='backlog' ? `<button class="promote" data-id="${it.id}" data-to="ready_build">→ Build</button>` : ''}
-          ${(it.status==='in_progress'||it.status==='ready_build') ? `<button class="promote" data-id="${it.id}" data-to="ready_prod">→ Prod</button>` : ''}
-          ${it.status==='ready_prod' ? `<button class="promote" data-id="${it.id}" data-to="shipped">✓ Shipped</button>` : ''}
-          <button class="del" data-id="${it.id}">✕</button>
+          <span class="deploy dep-${it.deploy||'none'}" title="Deployment state — set by the deploy workflow">${DEP_LABEL[it.deploy||'']}</span>
+          <button class="del" data-id="${it.id}" title="Delete item">✕</button>
         </div>
       </div>`).join('') || '<div class="muted" style="padding:20px">No items match.</div>';
 
     // wire row controls
     $('rmList').querySelectorAll('.statusSel').forEach(s => s.onchange = () => rmAct({ action:'update', id:s.dataset.id, status:s.value }).catch(e=>alert(e.message)));
-    $('rmList').querySelectorAll('.promote').forEach(b => b.onclick = () => rmAct({ action:'update', id:b.dataset.id, status:b.dataset.to }).catch(e=>alert(e.message)));
     $('rmList').querySelectorAll('.del').forEach(b => b.onclick = () => { if (confirm('Delete this item?')) rmAct({ action:'delete', id:b.dataset.id }).catch(e=>alert(e.message)); });
     $('rmList').querySelectorAll('.up').forEach(b => b.onclick = () => moveItem(b.closest('.rm-row').dataset.id, -1));
     $('rmList').querySelectorAll('.down').forEach(b => b.onclick = () => moveItem(b.closest('.rm-row').dataset.id, 1));
