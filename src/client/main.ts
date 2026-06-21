@@ -165,13 +165,14 @@ class LocalGame implements GameLike {
     const minForPlayers = nPlayers >= 4 ? 160 : nPlayers === 3 ? 136 : 112;
     const effSize = Math.min(MAXD, Math.max(size, minForPlayers));
     setMapSize(effSize);
-    // map type rides in seed bits: islands 0x40000000, urban 0x20000000, flatCity 0x10000000, steel 0x08000000, metal 0x04000000
-    let seed = ((Date.now() ^ (Math.random() * 0x7fffffff)) >>> 0) & ~0x7c000000;
+    // map type rides in seed bits 26-30; ore/oil level in bits 24-25 (0=normal)
+    let seed = ((Date.now() ^ (Math.random() * 0x7fffffff)) >>> 0) & ~0x7f000000;
     if (islandsEnabled) seed |= 0x40000000;
     if (urbanEnabled) seed |= 0x20000000;
     if (flatEnabled) seed |= 0x10000000;
     if (steelEnabled) seed |= 0x08000000;
     if (metalEnabled) seed |= 0x04000000;
+    seed |= (oreLevelSel & 3) << 24;
     const LVL_NAMES = ['Easy', 'Normal', 'Hard', 'Brutal'];
     const pickFacs = (avoid: string[], n: number) => {
       const pool = Object.keys(FACTIONS).filter(f => !avoid.includes(f));
@@ -2817,6 +2818,7 @@ let urbanEnabled = false;   // map-type selector: flat urban map (roads, river, 
 let flatEnabled = false;    // map-type selector: completely flat city (roads + buildings only)
 let steelEnabled = false;   // map-type selector: bare metallic arena, all rich ore
 let metalEnabled = false;   // map-type selector: flat metallic-grey slab, no textures
+let oreLevelSel = 0;        // ore/oil abundance: 0 normal, 1 sparse, 2 rich (rides seed bits 24-25)
 // skirmish AI roster: add each AI as an enemy or partner with its own level +
 // team. You are always team 1; team 1 = ally/partner, teams 2-4 = enemy sides.
 // Max 4 players total (3 AI). Default: one Normal enemy.
@@ -3604,12 +3606,13 @@ function pingBadge(ping: number | null | undefined): string {
 // roomcfg; the server echoes the authoritative room state back to everyone. ----
 let lobbyIsHost = false;
 let lastRoomSig = '';
-const lobbyCfg: { size: number; mapType: string; fog: boolean; ai: { lvl: number; team: number }[]; teams: number[] } =
-  { size: 96, mapType: 'continent', fog: true, ai: [], teams: [] };
-const LOBBY_SIZES: [number, string][] = [[72, 'Small'], [96, 'Medium'], [128, 'Large']];
+const lobbyCfg: { size: number; mapType: string; fog: boolean; oreLevel: number; ai: { lvl: number; team: number }[]; teams: number[] } =
+  { size: 96, mapType: 'continent', fog: true, oreLevel: 0, ai: [], teams: [] };
+const LOBBY_SIZES: [number, string][] = [[96, 'Medium'], [128, 'Large'], [160, 'Huge'], [192, 'Giant']];
+const ORE_LEVELS: [number, string][] = [[0, 'Normal'], [2, 'Rich'], [1, 'Sparse']];
 const LOBBY_MAPS: [string, string][] = [['continent', 'Continent'], ['islands', 'Islands'], ['urban', 'Urban'], ['flat', 'Flat City'], ['steel', 'Steel Arena'], ['metal', 'Metal Plain']];
 function sendRoomCfg() {
-  if (net && lobbyIsHost) net.send({ t: 'roomcfg', size: lobbyCfg.size, mapType: lobbyCfg.mapType, fog: lobbyCfg.fog, ai: lobbyCfg.ai, teams: lobbyCfg.teams });
+  if (net && lobbyIsHost) net.send({ t: 'roomcfg', size: lobbyCfg.size, mapType: lobbyCfg.mapType, fog: lobbyCfg.fog, oreLevel: lobbyCfg.oreLevel, ai: lobbyCfg.ai, teams: lobbyCfg.teams });
 }
 function renderRoom(m: any) {
   // skip ping-only refreshes (the server rebroadcasts every ~3s) so an open
@@ -3619,7 +3622,7 @@ function renderRoom(m: any) {
   lastRoomSig = sig;
   $('roomCode').textContent = m.code;
   lobbyIsHost = m.you === 0;
-  lobbyCfg.size = m.size || 96; lobbyCfg.mapType = m.mapType || 'continent'; lobbyCfg.fog = m.fog !== false;
+  lobbyCfg.size = m.size || 96; lobbyCfg.mapType = m.mapType || 'continent'; lobbyCfg.fog = m.fog !== false; lobbyCfg.oreLevel = (m.oreLevel | 0) & 3;
   lobbyCfg.ai = (m.ai || []).map((a: any) => ({ lvl: a.lvl | 0, team: a.team | 0 }));
   lobbyCfg.teams = m.players.map((p: any, i: number) => p.team ?? (i + 1));
   const selStyle = 'background:#1a2430;color:#cfe0ee;border:1px solid #2c3e50;border-radius:4px;padding:3px;font-size:11px';
@@ -3647,18 +3650,21 @@ function renderLobbyCfg() {
   if (!lobbyIsHost) {
     const mapL = (LOBBY_MAPS.find(x => x[0] === lobbyCfg.mapType) || ['', lobbyCfg.mapType])[1];
     const sizeL = (LOBBY_SIZES.find(x => x[0] === lobbyCfg.size) || [0, String(lobbyCfg.size)])[1];
-    cfg.innerHTML = `<div style="font-size:12px;color:#9fb3c8;background:rgba(20,28,38,0.7);border:1px solid #2c3a44;border-radius:6px;padding:8px 10px">Map: <b>${mapL}</b> · ${sizeL} · Fog ${lobbyCfg.fog ? 'on' : 'off'} · ${lobbyCfg.ai.length} AI — <span style="color:#5f7384">set by host</span></div>`;
+    const oreL = (ORE_LEVELS.find(x => x[0] === lobbyCfg.oreLevel) || [0, 'Normal'])[1];
+    cfg.innerHTML = `<div style="font-size:12px;color:#9fb3c8;background:rgba(20,28,38,0.7);border:1px solid #2c3a44;border-radius:6px;padding:8px 10px">Map: <b>${mapL}</b> · ${sizeL} · ${oreL} ore · Fog ${lobbyCfg.fog ? 'on' : 'off'} · ${lobbyCfg.ai.length} AI — <span style="color:#5f7384">set by host</span></div>`;
     return;
   }
   cfg.innerHTML =
     `<div style="font-size:11px;color:#9fb3c8;letter-spacing:0.06em;margin-bottom:4px">GAME SETUP</div>` +
     `<div class="optrow"><span class="optlabel">Map Size</span><select id="lcSize" style="${sel};flex:1">${LOBBY_SIZES.map(([v, l]) => `<option value="${v}" ${v === lobbyCfg.size ? 'selected' : ''}>${l}</option>`).join('')}</select></div>` +
     `<div class="optrow"><span class="optlabel">Map Type</span><select id="lcMap" style="${sel};flex:1">${LOBBY_MAPS.map(([v, l]) => `<option value="${v}" ${v === lobbyCfg.mapType ? 'selected' : ''}>${l}</option>`).join('')}</select></div>` +
+    `<div class="optrow"><span class="optlabel">Ore / Oil</span><select id="lcOre" style="${sel};flex:1">${ORE_LEVELS.map(([v, l]) => `<option value="${v}" ${v === lobbyCfg.oreLevel ? 'selected' : ''}>${l}</option>`).join('')}</select></div>` +
     `<label class="optrow" style="cursor:pointer"><span class="optlabel">Fog of War</span><span style="flex:1;display:flex;align-items:center;gap:8px;color:#9fb3c8;font-size:13px"><input type="checkbox" id="lcFog" ${lobbyCfg.fog ? 'checked' : ''} style="width:16px;height:16px;accent-color:#ffc940">Hide unexplored</span></label>` +
     `<div class="optrow" style="align-items:flex-start"><span class="optlabel">AI Players</span><div style="flex:1"><div id="lcAi"></div>` +
     `<div style="display:flex;gap:8px;margin-top:6px"><button type="button" class="mbtn" id="lcAddEnemy" style="flex:1;font-size:12px;padding:6px 4px">⚔ Add Enemy AI</button><button type="button" class="mbtn" id="lcAddPartner" style="flex:1;font-size:12px;padding:6px 4px">🤝 Add Partner AI</button></div></div></div>`;
   ($('lcSize') as HTMLSelectElement).onchange = e => { lobbyCfg.size = +(e.target as HTMLSelectElement).value; sendRoomCfg(); };
   ($('lcMap') as HTMLSelectElement).onchange = e => { lobbyCfg.mapType = (e.target as HTMLSelectElement).value; sendRoomCfg(); };
+  ($('lcOre') as HTMLSelectElement).onchange = e => { lobbyCfg.oreLevel = (+(e.target as HTMLSelectElement).value | 0) & 3; sendRoomCfg(); };
   ($('lcFog') as HTMLInputElement).onchange = e => { lobbyCfg.fog = (e.target as HTMLInputElement).checked; sendRoomCfg(); };
   ($('lcAddEnemy') as HTMLButtonElement).onclick = () => { if (lobbyCfg.ai.length < 3) { const used = new Set([...lobbyCfg.teams, ...lobbyCfg.ai.map(a => a.team)]); const t = [2, 3, 4, 5, 6].find(x => !used.has(x)) ?? 2; lobbyCfg.ai.push({ lvl: 1, team: t }); sendRoomCfg(); } };
   ($('lcAddPartner') as HTMLButtonElement).onclick = () => { if (lobbyCfg.ai.length < 3) { lobbyCfg.ai.push({ lvl: 1, team: lobbyCfg.teams[0] || 1 }); sendRoomCfg(); } };
@@ -3777,7 +3783,7 @@ function initMenus() {
   mv.addEventListener('input', () => { audio.init(); audio.setMusicVol(+mv.value / 100); });
   sv.addEventListener('input', () => { audio.init(); audio.setSfxVol(+sv.value / 100); });
   buildOptionRow('sizeRow',
-    [{ label: 'Medium', v: 112 }, { label: 'Large', v: 136 }, { label: 'Huge', v: 160 }],
+    [{ label: 'Medium', v: 112 }, { label: 'Large', v: 136 }, { label: 'Huge', v: 160 }, { label: 'Giant', v: 192 }],
     () => selSize, v => { selSize = v; });
   $('btnSkirmish').addEventListener('click', () => {
     const key = (($('claudeKey') as HTMLInputElement).value || '').trim();
@@ -3789,6 +3795,7 @@ function initMenus() {
     flatEnabled = mt === 'flat';
     steelEnabled = mt === 'steel';
     metalEnabled = mt === 'metal';
+    oreLevelSel = (+($('oreAmt') as HTMLSelectElement)?.value || 0) & 3;
     if (!aiList.length || !aiList.some(a => a.team !== 1)) {
       $('menuErr').textContent = 'Add at least one enemy AI to play.';
       return;

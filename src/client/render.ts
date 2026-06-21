@@ -1112,6 +1112,17 @@ export class Renderer {
       fragmentShader: WATER_FRAG,
       fog: false,
     });
+    // deep-ocean SEAFLOOR beneath the water, same extent — so the water that
+    // overhangs the map edge reads as real ocean (a dark bottom) instead of a
+    // translucent sheet floating over the sky/background past the island.
+    const seafloor = new THREE.Mesh(
+      new THREE.PlaneGeometry(W * 3, H * 3),
+      new THREE.MeshBasicMaterial({ color: 0x06222e, fog: true }),
+    );
+    seafloor.rotation.x = -Math.PI / 2;
+    seafloor.position.set(W / 2, SEA - 7, H / 2);
+    this.scene.add(seafloor);
+
     const water = new THREE.Mesh(new THREE.PlaneGeometry(W * 3, H * 3), this.waterMat);
     water.rotation.x = -Math.PI / 2;
     water.position.set(W / 2, SEA, H / 2);

@@ -6,7 +6,7 @@ import { RNG, hash2 } from './rng';
 import { hyp, dsin, dcos } from './dmath';
 
 export let W = 96, H = 96;
-export const MAXD = 160;           // largest supported map dimension
+export const MAXD = 192;           // largest supported map dimension (Giant)
 export const SEA = 1.2;
 export function setMapSize(n: number) { W = n; H = n; }
 
@@ -318,6 +318,12 @@ export function genMap(seed: number, nPlayers: number): GameMap {
   // metallic-grey colour with no textures at all. Like Steel Arena minus the
   // all-gem economy — normal ore, just a clean texture-less battleground.
   const metal = (seed & 0x04000000) !== 0;
+  // ore/oil abundance rides in seed bits 24-25 (0 = normal, so old seeds/replays
+  // without these bits keep the original economy). 1 = sparse, 2 = rich. Scales the
+  // number of contested ore fields, gem fields and oil wells (start fields stay
+  // fixed so no player is ever starved at spawn).
+  const oreLevel = (seed >> 24) & 3;
+  const oreMul = oreLevel === 1 ? 0.6 : oreLevel === 2 ? 1.6 : 1.0;
   const anyUrban = urban || flatCity;   // map flavours with roads + buildings
   const flat = flatCity || steel || metal; // completely flat height (no river/mountains)
   const anyFlatLike = urban || flatCity || steel || metal; // skip continent/island terrain + forests
@@ -653,7 +659,7 @@ export function genMap(seed: number, nPlayers: number): GameMap {
   };
   const MIN_GAP = 13;
   let placed = 0, tries = 0;
-  const wantOre = Math.max(3, Math.round(W / 19));
+  const wantOre = Math.max(3, Math.round(W / 19 * oreMul));
   while (placed < wantOre && tries < 600) {
     tries++;
     const cx = centerBiased(W, 24, 0.4), cz = centerBiased(H, 24, 0.4);
@@ -666,7 +672,7 @@ export function genMap(seed: number, nPlayers: number): GameMap {
   // map center (tight bias) so the high-value blue ore is genuinely a contested,
   // central prize rather than a lucky edge spawn.
   let gems = 0, gtries = 0;
-  const wantGems = Math.max(2, Math.round(W / 44));
+  const wantGems = Math.max(2, Math.round(W / 44 * oreMul));
   while (gems < wantGems && gtries < 600) {
     gtries++;
     const cx = centerBiased(W, Math.round(W * 0.28), 0.8), cz = centerBiased(H, Math.round(H * 0.28), 0.8);
@@ -701,7 +707,7 @@ export function genMap(seed: number, nPlayers: number): GameMap {
     return true;
   };
   let oilL = 0, olt = 0;
-  const wantOil = Math.max(3, Math.round(W / 30));
+  const wantOil = Math.max(3, Math.round(W / 30 * oreMul));
   while (oilL < wantOil && olt < 800) {
     olt++;
     const cx = centerBiased(W, 18, 0.3), cz = centerBiased(H, 18, 0.3);
