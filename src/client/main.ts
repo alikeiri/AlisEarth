@@ -2740,6 +2740,24 @@ let aiList: { lvl: number; team: number }[] = [{ lvl: 1, team: 2 }];
 let client: GameClient | null = null;
 let net: Net | null = null;
 let tutCtl: TutorialController | null = null;
+// per-match play-time tracking for the account stats (minutes + match counts).
+// matchMode is 'ai' for a skirmish vs AI, 'mp' for a multiplayer match, null for
+// sim/replay/tutorial (not counted). Reported once per match to /auth/playstat.
+let matchStartT = 0;
+let matchMode: 'ai' | 'mp' | null = null;
+let matchReported = true;
+function reportPlaystat() {
+  if (!matchMode || matchReported) return;
+  matchReported = true;
+  let token: string | null = null;
+  try { token = safeLS.getItem('fe_token'); } catch { /* no storage */ }
+  if (!token) return;
+  const minutes = (Date.now() - matchStartT) / 60000;
+  fetch('/auth/playstat', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ token, mode: matchMode, minutes }), keepalive: true, // survives tab close
+  }).catch(() => { /* offline — stats are best-effort */ });
+}
 let endReturnsToLobby = false; // a finished multiplayer match sends players back to the lobby
 
 // One guided step. `target` is a CSS selector to spotlight; `done` is an optional
@@ -3163,6 +3181,7 @@ function renderEndStats(game: GameLike) {
 let exitGuardActive = false;
 function beforeUnloadGuard(e: BeforeUnloadEvent) {
   if (!exitGuardActive) return;
+  reportPlaystat(); // flush play time before the tab unloads (keepalive request)
   // Browsers show their own generic wording (custom text is ignored), but a
   // non-empty returnValue + preventDefault is the most compatible way to make the
   // "Leave site?" prompt appear across Chrome and Firefox.
@@ -3196,12 +3215,20 @@ function startGame(game: GameLike) {
   // first game: preload all models behind the loading screen, then start (the
   // menu loads instantly; models are fetched only once a game is actually starting)
   if (!modelsReady) { startWithModels(() => startGame(game)); return; }
+  reportPlaystat(); // flush any prior match's play time before starting a new one
+  // count real matches only: skirmish vs AI ('ai') or multiplayer ('mp'); skip
+  // AI-vs-AI spectate, replays and the tutorial
+  matchMode = (game as any).isNet ? 'mp'
+    : (game instanceof LocalGame && !(game as any).isSim && !(game as any).isReplay && !game.tutorial) ? 'ai' : null;
+  matchStartT = Date.now();
+  matchReported = !matchMode;
   if (client) { client.destroy(); client = null; }
   if (advisor) { advisor.stop(); advisor = null; }
   if (tutCtl) { tutCtl.stop(); tutCtl = null; }
   hideAll();
   audio.init();
   client = new GameClient(game, (won, winnerName) => {
+    reportPlaystat();    // match decided — log play time + match count to the account
     disableExitGuard();  // match decided — the end screen / Back should work normally
     const isSim = (game as any).isSim;
     audio.play(won || isSim ? 'win' : 'lose');
@@ -3835,6 +3862,7 @@ function initMenus() {
   $('exMenuCancel').addEventListener('click', closeExitMenu);
   $('exMenuJustExit').addEventListener('click', () => {
     closeExitMenu();
+    reportPlaystat(); // log the play time even when leaving without a result
     // leave with no result: a human teammate inherits the forces (server side),
     // and the game ends if no human remains. No stats, not counted as a defeat.
     if (net) { net.send({ t: 'leave' }); net.close(); net = null; }
@@ -3855,6 +3883,7 @@ function initMenus() {
   });
   $('netStallQuit').addEventListener('click', () => {
     $('netStall').classList.add('hidden');
+    reportPlaystat(); // log the play time for the quit MP match
     if (net) { net.send({ t: 'leave' }); net.close(); net = null; }
     simQueue = null;
     if (tutCtl) { tutCtl.stop(); tutCtl = null; }

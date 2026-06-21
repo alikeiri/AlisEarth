@@ -230,9 +230,30 @@ function readJsonBody(req: any): Promise<any> {
   });
 }
 const TOKEN_TTL = 1000 * 60 * 60 * 24 * 180; // 180 days
+// real client IP: behind the nginx reverse-proxy the socket address is 127.0.0.1,
+// so prefer the proxy's X-Forwarded-For / X-Real-IP headers
+function clientIp(req: any): string {
+  const xf = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim();
+  return xf || String(req.headers['x-real-ip'] || '') || String(req.socket?.remoteAddress || '');
+}
+// best-effort IP -> location (country/region/city), cached; updates the user record
+// asynchronously so we never block a login on the lookup. Skips private/local IPs.
+const geoCache = new Map<string, string>();
+function lookupGeo(ip: string, email: string) {
+  if (!ip || /^(10\.|127\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.|::1|fc|fd)/.test(ip)) return;
+  const apply = (loc: string) => {
+    try { const us = readUsers(); if (us[email]) { us[email].geo = loc; writeUsers(us); } } catch { /* ignore */ }
+  };
+  const cached = geoCache.get(ip);
+  if (cached) { apply(cached); return; }
+  fetch(`http://ip-api.com/json/${encodeURIComponent(ip)}?fields=country,regionName,city`)
+    .then(r => r.ok ? r.json() : null)
+    .then((j: any) => { if (j) { const loc = [j.city, j.regionName, j.country].filter(Boolean).join(', '); geoCache.set(ip, loc); apply(loc); } })
+    .catch(() => { /* offline / rate-limited — leave geo unset */ });
+}
 async function handleAuth(req: any, res: any, kind: 'register' | 'login' | 'me') {
   const json = (code: number, obj: any) => { res.writeHead(code, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(obj)); };
-  const ip = (req.socket?.remoteAddress || '') as string;
+  const ip = clientIp(req);
   const now = Date.now();
   if (kind !== 'me') {
     if (now - (authLast.get(ip) || 0) < 800) return json(429, { error: 'Too many attempts — slow down' });
@@ -256,8 +277,12 @@ async function handleAuth(req: any, res: any, kind: 'register' | 'login' | 'me')
     if (ip && ipCount >= 6) return json(429, { error: 'Too many accounts from this network' });
     const callsign = cleanCallsign(b.callsign) || email.split('@')[0].slice(0, 18);
     const salt = randomBytes(16).toString('hex');
-    users[email] = { salt, hash: hashPw(pw, salt), callsign, created: now, ip };
+    users[email] = {
+      salt, hash: hashPw(pw, salt), callsign, created: now, ip, lastIp: ip, lastLogin: now,
+      logins: 1, minutesPlayed: 0, matchesMP: 0, matchesAI: 0,
+    };
     writeUsers(users);
+    lookupGeo(ip, email); // best-effort, async
     return json(200, { token: signToken({ email, callsign, exp: now + TOKEN_TTL }), callsign, email });
   }
   // login
@@ -267,8 +292,43 @@ async function handleAuth(req: any, res: any, kind: 'register' | 'login' | 'me')
   try { ok = timingSafeEqual(Buffer.from(hashPw(pw, u.salt), 'hex'), Buffer.from(u.hash, 'hex')); } catch { ok = false; }
   if (!ok) return json(401, { error: 'Incorrect password' });
   const cs = cleanCallsign(b.callsign);
-  if (cs && cs !== u.callsign) { u.callsign = cs; writeUsers(users); } // let the player update their callsign on login
+  if (cs && cs !== u.callsign) u.callsign = cs;          // let the player update their callsign on login
+  u.logins = (u.logins || 0) + 1; u.lastLogin = now; u.lastIp = ip;
+  writeUsers(users);
+  lookupGeo(ip, email);
   return json(200, { token: signToken({ email, callsign: u.callsign, exp: now + TOKEN_TTL }), callsign: u.callsign, email });
+}
+
+// client reports a finished match: bump the account's play time + match counters.
+// minutes is client-reported (low-stakes stats) so it's clamped to a sane range.
+async function handlePlaystat(req: any, res: any) {
+  const json = (code: number, obj: any) => { res.writeHead(code, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(obj)); };
+  const b = await readJsonBody(req);
+  const p = b && verifyToken(b.token);
+  if (!p) return json(401, { error: 'Invalid session' });
+  const users = readUsers();
+  const u = users[p.email];
+  if (!u) return json(404, { error: 'No account' });
+  u.minutesPlayed = Math.round((u.minutesPlayed || 0) + Math.max(0, Math.min(600, Number(b.minutes) || 0)));
+  if (b.mode === 'mp') u.matchesMP = (u.matchesMP || 0) + 1;
+  else if (b.mode === 'ai') u.matchesAI = (u.matchesAI || 0) + 1;
+  writeUsers(users);
+  return json(200, { ok: true });
+}
+// operator-only: the hidden admin panel pulls the signup list + play stats. Gated
+// by the server secret; NEVER returns password salts/hashes.
+async function handleAdminUsers(req: any, res: any) {
+  const b = await readJsonBody(req);
+  if (!ADVISOR_KEY || !b || b.key !== ADVISOR_KEY) { res.writeHead(403, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: 'Forbidden' })); return; }
+  const users = readUsers();
+  const list = Object.entries(users).map(([email, u]: [string, any]) => ({
+    email, callsign: u.callsign || '', created: u.created || 0,
+    ip: u.lastIp || u.ip || '', geo: u.geo || '',
+    logins: u.logins || 0, lastLogin: u.lastLogin || 0,
+    minutesPlayed: u.minutesPlayed || 0, matchesMP: u.matchesMP || 0, matchesAI: u.matchesAI || 0,
+  })).sort((a, b) => (b.lastLogin || b.created) - (a.lastLogin || a.created));
+  res.writeHead(200, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify({ users: list, count: list.length }));
 }
 
 const http = createServer(async (req, res) => {
@@ -277,6 +337,8 @@ const http = createServer(async (req, res) => {
     if (req.method === 'POST' && p === '/auth/register') { handleAuth(req, res, 'register'); return; }
     if (req.method === 'POST' && p === '/auth/login') { handleAuth(req, res, 'login'); return; }
     if (req.method === 'POST' && p === '/auth/me') { handleAuth(req, res, 'me'); return; }
+    if (req.method === 'POST' && p === '/auth/playstat') { handlePlaystat(req, res); return; }
+    if (req.method === 'POST' && p === '/admin/users') { handleAdminUsers(req, res); return; }
     if (req.method === 'POST' && p === '/advisor') { handleAdvisor(req, res); return; }
     if (p === '/intel') { handleIntel(req, res); return; }
     if (req.method === 'POST' && p === '/features/complete') { handleFeatureComplete(req, res); return; }

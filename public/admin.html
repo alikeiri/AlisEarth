@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="robots" content="noindex, nofollow" />
+<title>Admin — Infinite Greed</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; background: #0a0f14; color: #dfe9f0; font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; }
+  header { padding: 16px 22px; border-bottom: 1px solid #1d2a33; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+  h1 { font-size: 18px; margin: 0; letter-spacing: 1px; }
+  h1 span { color: #ffb02e; }
+  .muted { color: #6f8497; font-size: 13px; }
+  #gate { max-width: 360px; margin: 80px auto; background: #101a22; border: 1px solid #2c3e50; border-radius: 12px; padding: 24px; text-align: center; }
+  #gate h2 { margin: 0 0 14px; font-size: 16px; }
+  input { width: 100%; box-sizing: border-box; padding: 11px 12px; border-radius: 7px; background: #0c151c; border: 1px solid #2c3e50; color: #e8eef3; font-size: 14px; margin-bottom: 12px; }
+  button { padding: 11px 18px; border-radius: 7px; border: 0; cursor: pointer; font-weight: 700; background: linear-gradient(180deg, #ffb44a, #ff7a1e); color: #2a1402; font-size: 14px; }
+  button.ghost { background: #1a2632; color: #cfe0ee; border: 1px solid #2c3e50; }
+  .err { color: #ff8a7a; font-size: 13px; min-height: 18px; }
+  #panel { display: none; padding: 14px 22px 40px; }
+  .stats { display: flex; gap: 22px; flex-wrap: wrap; margin: 6px 0 14px; }
+  .stat { background: #101a22; border: 1px solid #20303a; border-radius: 8px; padding: 10px 16px; }
+  .stat .n { font-size: 22px; font-weight: 800; color: #ffd79a; }
+  .stat .l { font-size: 11px; color: #8aa0b0; text-transform: uppercase; letter-spacing: 0.06em; }
+  .toolbar { display: flex; gap: 10px; align-items: center; margin-bottom: 10px; }
+  .toolbar input { width: 240px; margin: 0; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #18242e; white-space: nowrap; }
+  th { color: #8aa0b0; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; cursor: pointer; user-select: none; position: sticky; top: 0; background: #0a0f14; }
+  th:hover { color: #fff; }
+  tr:hover td { background: #0e1620; }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .email { color: #9fb3c2; }
+  .mono { font-family: ui-monospace, Menlo, Consolas, monospace; color: #b0bec5; }
+</style>
+</head>
+<body>
+  <div id="gate">
+    <h2>🔒 Admin access</h2>
+    <input id="key" type="password" placeholder="Admin key" autocomplete="off" />
+    <button id="enter" style="width:100%">Unlock</button>
+    <div class="err" id="gateErr"></div>
+  </div>
+
+  <div id="panel">
+    <header>
+      <h1>INFINITE <span>GREED</span> — Admin</h1>
+      <span class="muted" id="updated"></span>
+      <span style="flex:1"></span>
+      <button class="ghost" id="refresh">Refresh</button>
+      <button class="ghost" id="logout">Lock</button>
+    </header>
+    <div class="stats" id="summary"></div>
+    <div class="toolbar">
+      <input id="filter" placeholder="Filter by callsign / email / location…" />
+      <span class="muted" id="shown"></span>
+    </div>
+    <div style="overflow:auto">
+      <table id="tbl">
+        <thead><tr>
+          <th data-k="callsign">Callsign</th>
+          <th data-k="email">Email</th>
+          <th data-k="created">Signed up</th>
+          <th data-k="lastLogin">Last login</th>
+          <th data-k="logins" class="num">Logins</th>
+          <th data-k="minutesPlayed" class="num">Minutes</th>
+          <th data-k="matchesAI" class="num">vs AI</th>
+          <th data-k="matchesMP" class="num">MP</th>
+          <th data-k="ip">IP</th>
+          <th data-k="geo">Location</th>
+        </tr></thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+  </div>
+
+<script>
+  const $ = id => document.getElementById(id);
+  let DATA = [], sortK = 'lastLogin', sortDir = -1, KEY = '';
+  const fmtDate = ts => ts ? new Date(ts).toLocaleString() : '—';
+  const esc = s => String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+
+  async function load() {
+    const r = await fetch('/admin/users', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: KEY }) });
+    if (!r.ok) { throw new Error(r.status === 403 ? 'Wrong admin key' : 'Server error ' + r.status); }
+    const j = await r.json();
+    DATA = j.users || [];
+    try { sessionStorage.setItem('ig_admin_key', KEY); } catch {}
+    $('gate').style.display = 'none'; $('panel').style.display = 'block';
+    $('updated').textContent = 'as of ' + new Date().toLocaleTimeString();
+    renderSummary(); render();
+  }
+  function renderSummary() {
+    const tot = DATA.length;
+    const mins = DATA.reduce((s,u)=>s+(u.minutesPlayed||0),0);
+    const mAI = DATA.reduce((s,u)=>s+(u.matchesAI||0),0);
+    const mMP = DATA.reduce((s,u)=>s+(u.matchesMP||0),0);
+    const dayAgo = Date.now() - 864e5;
+    const active = DATA.filter(u=>(u.lastLogin||0) > dayAgo).length;
+    const cell = (n,l) => `<div class="stat"><div class="n">${n}</div><div class="l">${l}</div></div>`;
+    $('summary').innerHTML = cell(tot,'Users') + cell(active,'Active 24h') + cell(mins.toLocaleString(),'Minutes played')
+      + cell(mAI.toLocaleString(),'AI matches') + cell(mMP.toLocaleString(),'MP matches');
+  }
+  function render() {
+    const f = $('filter').value.trim().toLowerCase();
+    let rows = DATA.filter(u => !f || (u.callsign+' '+u.email+' '+u.geo).toLowerCase().includes(f));
+    rows.sort((a,b) => {
+      let x = a[sortK], y = b[sortK];
+      if (typeof x === 'string') { x = (x||'').toLowerCase(); y = (y||'').toLowerCase(); return x<y?-sortDir:x>y?sortDir:0; }
+      return ((x||0)-(y||0))*sortDir;
+    });
+    $('shown').textContent = rows.length + ' of ' + DATA.length;
+    $('rows').innerHTML = rows.map(u => `<tr>
+      <td>${esc(u.callsign)}</td>
+      <td class="email">${esc(u.email)}</td>
+      <td>${fmtDate(u.created)}</td>
+      <td>${fmtDate(u.lastLogin)}</td>
+      <td class="num">${u.logins||0}</td>
+      <td class="num">${u.minutesPlayed||0}</td>
+      <td class="num">${u.matchesAI||0}</td>
+      <td class="num">${u.matchesMP||0}</td>
+      <td class="mono">${esc(u.ip)}</td>
+      <td>${esc(u.geo) || '<span class="muted">—</span>'}</td>
+    </tr>`).join('') || '<tr><td colspan="10" class="muted" style="padding:20px">No users yet.</td></tr>';
+  }
+  document.querySelectorAll('th[data-k]').forEach(th => th.addEventListener('click', () => {
+    const k = th.getAttribute('data-k');
+    if (sortK === k) sortDir = -sortDir; else { sortK = k; sortDir = (k==='callsign'||k==='email'||k==='geo') ? 1 : -1; }
+    render();
+  }));
+  $('filter').addEventListener('input', render);
+  $('enter').addEventListener('click', async () => { KEY = $('key').value.trim(); try { await load(); } catch (e) { $('gateErr').textContent = e.message; } });
+  $('key').addEventListener('keydown', e => { if (e.key === 'Enter') $('enter').click(); });
+  $('refresh').addEventListener('click', () => load().catch(e => alert(e.message)));
+  $('logout').addEventListener('click', () => { try { sessionStorage.removeItem('ig_admin_key'); } catch {}; location.reload(); });
+  // restore a prior session this tab
+  try { const k = sessionStorage.getItem('ig_admin_key'); if (k) { KEY = k; load().catch(()=>{ $('gate').style.display='block'; }); } } catch {}
+</script>
+</body>
+</html>
