@@ -343,7 +343,9 @@ async function handleAdminUsers(req: any, res: any) {
 const ROADMAP_FILE = join(fileURLToPath(new URL('.', import.meta.url)), 'roadmap.json');
 // workflow status (user-driven via the dropdown). 'ready_test' = devs delivered it,
 // awaiting playtest; 'ready_prod' = tested, cleared to ship.
-const ROADMAP_STATUSES = ['backlog', 'ready_build', 'in_progress', 'ready_test', 'ready_prod'];
+// 'not_fixed' = a delivered item the operator playtested and found still broken;
+// it carries a `notes` comment describing what's wrong, which the dev picks up.
+const ROADMAP_STATUSES = ['backlog', 'ready_build', 'in_progress', 'not_fixed', 'ready_test', 'ready_prod'];
 // deployment state (read-only in the UI; set by the deploy workflow): which
 // environment the code is live on. '' = not deployed yet.
 const ROADMAP_DEPLOYS = ['', 'test', 'prod'];
