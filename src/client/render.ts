@@ -77,7 +77,7 @@ const MODEL_DEFS: Record<string, { file: string; size: number; axis: 'l' | 'h'; 
 // replaced by the measured model top once the GLB loads. nose props sit at the
 // front of the fuselage and spin around the forward axis.
 const ROTORS: Record<string, { y: number; r: number; speed: number; nose?: boolean }> = {
-  heli:      { y: 1.05, r: 1.45, speed: 26 },
+  // heli (Mi-24) ships with its own modeled rotor, so no procedural rotor overlay
   helidrone: { y: 0.80, r: 0.95, speed: 31 },
   recon:     { y: 0.55, r: 0.60, speed: 36 },
   strike:    { y: 0.70, r: 0.85, speed: 33 },
@@ -2247,7 +2247,9 @@ export class Renderer {
   addEvents(events: any[]) {
     for (const ev of events) {
       if (ev.e === 'shot') {
-        const y1 = Math.max(this.map.heightAt(ev.x, ev.z), SEA) + (ev.f ? 2.4 : 0.6);
+        // flyer shots (ev.f) originate at the aircraft's cruise altitude, not just
+        // a small lift above the ground — otherwise tracers came from under the plane
+        const y1 = ev.f ? this.flyY(ev.x, ev.z, 2.3) : Math.max(this.map.heightAt(ev.x, ev.z), SEA) + 0.6;
         const y2 = Math.max(this.map.heightAt(ev.tx, ev.tz), SEA) + 0.5;
         // a turret fired: remember its aim so the gun pivot can track
         for (const rec of this.buildings.values()) {
@@ -2533,7 +2535,7 @@ export class Renderer {
       }
       let gy = this.map.heightAt(v.x, v.z);
       let y: number;
-      if (md?.fly) y = this.flyY(v.x, v.z, md.alt || 2.3) + Math.sin(this.time * 2.5 + v.i * 1.7) * 0.12; // level cruise, lifting over any terrain taller than the cruise line
+      if (md?.fly) { y = this.flyY(v.x, v.z, md.alt || 2.3) + Math.sin(this.time * 2.5 + v.i * 1.7) * 0.12; v.fy = y; } // level cruise; v.fy = absolute height for the overlay (HP bar) and selection ring
       else if (md?.move === 'sea') {
         y = SEA + (v.t === 'sub' ? -0.08 : 0.02) + Math.sin(this.time * 1.6 + v.i) * 0.03;
         gy = SEA; // selection ring floats on the water
@@ -2577,7 +2579,8 @@ export class Renderer {
 
       if (selection.has(v.i) && selN < MAX_INST) {
         this.dummy.rotation.set(0, 0, 0);
-        this.dummy.position.y = gy + 0.06; // ring stays on the ground, even for flyers
+        // flyers: ring rides at the model's flight height; everything else on the ground
+        this.dummy.position.y = (md?.fly ? y : gy) + 0.06;
         this.dummy.updateMatrix();
         this.selRing.setMatrixAt(selN++, this.dummy.matrix);
       }

@@ -2472,7 +2472,7 @@ class GameClient {
 
     if (!this.guiHidden) {
       prof.begin('overlay.2d');
-      this.ui.overlay(this.overlayCtx, this.renderer.project.bind(this.renderer), views, this.game.me, this.selection, dragRect, hover, circles, this.cmdFx);
+      this.ui.overlay(this.overlayCtx, this.renderer.project.bind(this.renderer), this.renderer.projectY.bind(this.renderer), views, this.game.me, this.selection, dragRect, hover, circles, this.cmdFx);
       prof.end('overlay.2d');
     }
 

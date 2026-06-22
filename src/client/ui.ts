@@ -820,6 +820,7 @@ export class UI {
   overlay(
     ctx: CanvasRenderingContext2D,
     project: (x: number, z: number, yOff?: number) => { x: number; y: number; ok: boolean },
+    projectY: (x: number, y: number, z: number) => { x: number; y: number; ok: boolean },
     views: any[], me: number, selection: Set<number>,
     dragRect: { x0: number; y0: number; x1: number; y1: number } | null,
     hover?: { x: number; y: number } | null,
@@ -951,7 +952,9 @@ export class UI {
       // no clutter from selecting them or their (brief) construction
       if (v.t === 'wall' || v.t === 'barrier') { if (!damaged) continue; }
       else if (!damaged && !constructing && !selection.has(v.i)) continue;
-      const p = project(v.x, v.z, v.b ? 2.4 : 1.25);
+      // flyers carry their absolute render height (v.fy) — anchor the bar above the
+      // model in the air, not on the ground beneath it
+      const p = v.fy !== undefined ? projectY(v.x, v.fy + 1.0, v.z) : project(v.x, v.z, v.b ? 2.4 : 1.25);
       if (!p.ok) continue;
       const w = v.b ? 36 : 22;
       const frac = Math.max(0, v.h / v.m);
