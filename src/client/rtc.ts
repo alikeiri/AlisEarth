@@ -69,7 +69,10 @@ export class RtcMesh {
     dc.onopen = () => { st.open = true; this.onState(); };
     dc.onclose = () => { if (st.open) { st.open = false; this.onState(); } };
     dc.onmessage = ev => {
-      try { const m = JSON.parse(ev.data); this.onFrame(m.player, m.frames); } catch { /* ignore garbage */ }
+      // attribute frames to the AUTHENTICATED peer (st.slot, fixed when the channel
+      // was negotiated via the server-relayed signaling) — NOT a client-claimed
+      // m.player, which a malicious peer could set to spoof another player's inputs.
+      try { const m = JSON.parse(ev.data); this.onFrame(st.slot, m.frames); } catch { /* ignore garbage */ }
     };
   }
 

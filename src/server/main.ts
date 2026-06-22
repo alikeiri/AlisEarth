@@ -286,12 +286,16 @@ async function handleAuth(req: any, res: any, kind: 'register' | 'login' | 'me')
     lookupGeo(ip, email); // best-effort, async
     return json(200, { token: signToken({ email, callsign, exp: now + TOKEN_TTL }), callsign, email });
   }
-  // login
+  // login — one generic message for "no such email" AND "wrong password" so the
+  // endpoint can't be used to enumerate which emails have accounts. When the email
+  // is unknown we still run a scrypt hash against a dummy salt so the response time
+  // doesn't reveal account existence either.
   const u = users[email];
-  if (!u) return json(401, { error: 'No account found for that email' });
+  const BAD = { error: 'Invalid email or password' };
+  if (!u) { try { hashPw(pw, '0'.repeat(32)); } catch { /* equalise timing */ } return json(401, BAD); }
   let ok = false;
   try { ok = timingSafeEqual(Buffer.from(hashPw(pw, u.salt), 'hex'), Buffer.from(u.hash, 'hex')); } catch { ok = false; }
-  if (!ok) return json(401, { error: 'Incorrect password' });
+  if (!ok) return json(401, BAD);
   const cs = cleanCallsign(b.callsign);
   if (cs && cs !== u.callsign) u.callsign = cs;          // let the player update their callsign on login
   u.logins = (u.logins || 0) + 1; u.lastLogin = now; u.lastIp = ip;
@@ -625,12 +629,19 @@ function handleReplayUpload(req: any, res: any) {
       const d = JSON.parse(raw);
       if (typeof d.seed !== 'number' || !Array.isArray(d.cmds) || !d.meta) { res.writeHead(400); res.end(); return; }
       const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-      const meta = { id, date: Date.now(), source: 'skirmish', ...d.meta };
+      // generated fields come LAST so a malicious client can't override id/date/source
+      // (a forged meta.id would otherwise reach the unlinkSync below as a path).
+      const meta = { ...d.meta, id, date: Date.now(), source: 'skirmish' };
       writeFileSync(join(REPLAY_DIR, id + '.json'), JSON.stringify({ meta, seed: d.seed, size: d.size || 96, cmds: d.cmds }));
       let idx: any[] = [];
       try { idx = JSON.parse(readFileSync(REPLAY_INDEX, 'utf8')); } catch { /* first */ }
       idx.unshift(meta);
-      for (const old of idx.slice(40)) { try { unlinkSync(join(REPLAY_DIR, old.id + '.json')); } catch { /* gone */ } }
+      // defence-in-depth: only ever unlink ids that match our generator's charset, so a
+      // legacy/forged index entry can't traverse out of REPLAY_DIR (e.g. "../../users").
+      for (const old of idx.slice(40)) {
+        if (!/^[a-z0-9]+$/.test(String(old?.id || ''))) continue;
+        try { unlinkSync(join(REPLAY_DIR, old.id + '.json')); } catch { /* gone */ }
+      }
       writeFileSync(REPLAY_INDEX, JSON.stringify(idx.slice(0, 40)));
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ id }));
