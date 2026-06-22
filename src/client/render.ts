@@ -77,7 +77,9 @@ const MODEL_DEFS: Record<string, { file: string; size: number; axis: 'l' | 'h'; 
 // replaced by the measured model top once the GLB loads. nose props sit at the
 // front of the fuselage and spin around the forward axis.
 const ROTORS: Record<string, { y: number; r: number; speed: number; nose?: boolean }> = {
-  // heli (Mi-24) ships with its own modeled rotor, so no procedural rotor overlay
+  // Mi-24's modeled rotor is static (single-mesh GLB), so spin a procedural rotor
+  // over it (sized to span the modeled blades) — the motion is what reads
+  heli:      { y: 0.62, r: 1.35, speed: 26 },
   helidrone: { y: 0.80, r: 0.95, speed: 31 },
   recon:     { y: 0.55, r: 0.60, speed: 36 },
   strike:    { y: 0.70, r: 0.85, speed: 33 },
