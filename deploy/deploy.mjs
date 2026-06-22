@@ -95,8 +95,12 @@ conn.on('ready', async () => {
     // optional Claude strategist key: lives only in the container env, never in files
     const advisorEnv = ADVISOR_KEY ? `-e ADVISOR_KEY='${ADVISOR_KEY}' ` : '';
     const run = await exec(
+      // publish ONLY on localhost: nginx reverse-proxies from 127.0.0.1, and binding
+      // here (not just ufw, which Docker's iptables bypasses) blocks direct internet
+      // access to the game port — so the X-Forwarded-For the app trusts can only come
+      // from the proxy, not a spoofed client hitting the port directly.
       `docker run -d --name ${NAME} --restart unless-stopped ` +
-      `-p ${PORT}:8080 -v ${REMOTE}:/app -w /app -m ${MEM} ${advisorEnv}node:20-alpine ` +
+      `-p 127.0.0.1:${PORT}:8080 -v ${REMOTE}:/app -w /app -m ${MEM} ${advisorEnv}node:20-alpine ` +
       `sh -c "[ -d node_modules ] || npm install --omit=dev --no-audit --no-fund; exec node server.mjs"`
     );
     console.log('docker run:', run.out, '(exit', run.code + ')');
