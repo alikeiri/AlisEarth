@@ -2635,20 +2635,25 @@ class GameClient {
   private updateAudioCues(views: any[]) {
     const now = performance.now();
     const cue = (k: string, snd: string, gap = 30000, text?: string, color?: string) => {
-      if (now - (this.cueT[k] || 0) >= gap) {
+      // a never-fired cue (cueT[k] undefined) ALWAYS fires — don't gate the very
+      // first one on performance.now() >= gap (that silenced cues for 30s after load).
+      if (this.cueT[k] === undefined || now - this.cueT[k] >= gap) {
         this.cueT[k] = now; audio.play(snd);
         if (text && this.soundOff) this.notify(text, color);
       }
     };
     const me = this.game.players?.()[this.game.me];
     if (me && me.a !== false) {
-      // Use the REAL power signals. powerUsed (pu) is capped to the sustainable load
-      // by load-shedding, so "pu > pm" almost never fired — the true tells are:
+      // Drive the power cues off the stored battery (what the HUD meter shows) and
+      // load-shedding — NOT pu>pm (powerUsed is capped to the sustainable load by
+      // shedding, and once the battery drains the base recharges with pu<pm, so that
+      // never fired even at ~0% battery).
       //   INSUFFICIENT = buildings are actually being shed (v.po) for lack of power,
-      //   LOW          = demand has caught up to generation and the battery is draining.
+      //   LOW          = the battery reserve has run down to <=15%.
       let shed = 0;
       for (const v of views) if (v.b && v.o === this.game.me && v.po) shed++;
-      const st = shed > 0 ? 2 : (me.pu >= me.pm && me.pwr < me.pmax * 0.6 ? 1 : 0);
+      const batt = me.pmax > 0 ? me.pwr / me.pmax : 1;
+      const st = shed > 0 ? 2 : (batt <= 0.15 ? 1 : 0);
       if (st > this.pwrState) {
         if (st === 2) cue('pwrout', 'pwrout', 30000, '⚡ Power insufficient — buildings shutting down', '#ff5043');
         else cue('pwrlow', 'pwrlow', 30000, '⚡ Power running low', '#ffc940');
