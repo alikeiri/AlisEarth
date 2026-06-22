@@ -59,11 +59,15 @@
   .p-backlog { color: #9aa9b5; background: #1a242c; border-color: #2a3742; }
   .p-ready_build { color: #ffd27a; background: #2c2310; border-color: #5a4416; }
   .p-in_progress { color: #8fd0ff; background: #102835; border-color: #1d4a63; }
+  .p-not_fixed { color: #ff8a7a; background: #2e1414; border-color: #5a2424; }
   .p-ready_test { color: #c8a6ff; background: #1d1733; border-color: #3c2f63; }
   .p-ready_prod { color: #7df0c0; background: #0f2d23; border-color: #1c5a44; }
+  .rm-row.s-not_fixed { border-left: 3px solid #d2453a; }
+  .rm-note { font-size: 12px; color: #ffb4a8; background: #2410100f; margin: 4px 0 2px; line-height: 1.4; }
   select.statusSel { font-size: 12px; padding: 4px 8px; }
   .rm-actions { display: flex; gap: 8px; align-items: center; }
   .rm-actions button { font-size: 12px; padding: 5px 10px; }
+  .rm-actions .note { background: #1a2632; color: #cfe0ee; border: 1px solid #2c3e50; }
   .rm-actions .del { background: #2a1416; color: #ff9a8a; border: 1px solid #4a2226; }
   /* read-only deployment chip (set by the deploy workflow, not clickable) */
   .deploy { font-size: 11px; font-weight: 700; border-radius: 6px; padding: 4px 9px; white-space: nowrap; min-width: 86px; text-align: center; }
@@ -114,6 +118,7 @@
           <option value="backlog">Backlog</option>
           <option value="ready_build">Ready for Build</option>
           <option value="in_progress">In Progress</option>
+          <option value="not_fixed">⚠ Not Fixed</option>
           <option value="ready_test">Ready to Test</option>
           <option value="ready_prod">Ready for Production</option>
         </select>
@@ -183,8 +188,8 @@
   $('tabUsers').addEventListener('click', () => showTab('users'));
 
   /* ---------------- ROADMAP ---------------- */
-  let RM = [], rmStatuses = ['backlog','ready_build','in_progress','ready_test','ready_prod'];
-  const ST_LABEL = { backlog:'Backlog', ready_build:'Ready for Build', in_progress:'In Progress', ready_test:'Ready to Test', ready_prod:'Ready for Production' };
+  let RM = [], rmStatuses = ['backlog','ready_build','in_progress','not_fixed','ready_test','ready_prod'];
+  const ST_LABEL = { backlog:'Backlog', ready_build:'Ready for Build', in_progress:'In Progress', not_fixed:'⚠ Not Fixed', ready_test:'Ready to Test', ready_prod:'Ready for Production' };
   const DEP_LABEL = { '':'– not deployed', test:'● Test', prod:'● Production' };
 
   async function loadRoadmap() {
@@ -220,6 +225,7 @@
         <div class="rm-ord"><button class="up">▲</button><button class="down">▼</button></div>
         <div class="rm-main">
           <div class="rm-title" data-id="${it.id}" title="Click to edit">${esc(it.title)}</div>
+          ${it.notes ? `<div class="rm-note">💬 ${esc(it.notes)}</div>` : ''}
           <div class="rm-meta">
             <span class="pill p-${it.status}">${ST_LABEL[it.status]}</span>
             <select class="statusSel" data-id="${it.id}">${opts(it)}</select>
@@ -228,13 +234,31 @@
           </div>
         </div>
         <div class="rm-actions">
+          <button class="note" data-id="${it.id}" title="Add / edit comment">💬</button>
           <span class="deploy dep-${it.deploy||'none'}" title="Deployment state — set by the deploy workflow">${DEP_LABEL[it.deploy||'']}</span>
           <button class="del" data-id="${it.id}" title="Delete item">✕</button>
         </div>
       </div>`).join('') || '<div class="muted" style="padding:20px">No items match.</div>';
 
     // wire row controls
-    $('rmList').querySelectorAll('.statusSel').forEach(s => s.onchange = () => rmAct({ action:'update', id:s.dataset.id, status:s.value }).catch(e=>alert(e.message)));
+    $('rmList').querySelectorAll('.statusSel').forEach(s => s.onchange = () => {
+      const it = RM.find(x => x.id === s.dataset.id);
+      // marking something "Not Fixed" prompts for a comment (what's still broken) so
+      // the dev has the context to resolve it; the note is saved alongside the status.
+      if (s.value === 'not_fixed') {
+        const c = prompt('What is still broken / not fixed? (this comment guides the fix)', (it && it.notes) || '');
+        if (c === null) { s.value = it ? it.status : 'ready_test'; return; } // cancelled — revert dropdown
+        rmAct({ action:'update', id:s.dataset.id, status:'not_fixed', notes:c.trim() }).catch(e=>alert(e.message));
+      } else {
+        rmAct({ action:'update', id:s.dataset.id, status:s.value }).catch(e=>alert(e.message));
+      }
+    });
+    $('rmList').querySelectorAll('.note').forEach(b => b.onclick = () => {
+      const it = RM.find(x => x.id === b.dataset.id);
+      const c = prompt('Comment for this item (leave blank to clear):', (it && it.notes) || '');
+      if (c === null) return;
+      rmAct({ action:'update', id:b.dataset.id, notes:c.trim() }).catch(e=>alert(e.message));
+    });
     $('rmList').querySelectorAll('.del').forEach(b => b.onclick = () => { if (confirm('Delete this item?')) rmAct({ action:'delete', id:b.dataset.id }).catch(e=>alert(e.message)); });
     $('rmList').querySelectorAll('.up').forEach(b => b.onclick = () => moveItem(b.closest('.rm-row').dataset.id, -1));
     $('rmList').querySelectorAll('.down').forEach(b => b.onclick = () => moveItem(b.closest('.rm-row').dataset.id, 1));
