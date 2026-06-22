@@ -1256,7 +1256,12 @@ class GameClient {
     const boxed: any[] = [];
     for (const v of this.lastViews) {
       if (v.b || v.o !== me) continue;
-      const p = this.renderer.project(v.x, v.z, 0.5);
+      // aircraft render at cruise altitude — project at that height so a click/box on
+      // the MODEL selects them (not the empty ground beneath, which was confusing)
+      const ud = UNITS[v.t];
+      const p = ud?.fly
+        ? this.renderer.projectY(v.x, this.renderer.flyY(v.x, v.z, ud.alt || 2.3), v.z)
+        : this.renderer.project(v.x, v.z, 0.5);
       if (p.ok && p.x >= lo.x && p.x <= hi.x && p.y >= lo.y && p.y <= hi.y) boxed.push(v);
     }
     // a mixed box-select drops the economy miners (harvesters + oil miners) so
@@ -2038,6 +2043,14 @@ class GameClient {
     const who = mine ? '' : neutral ? ` · Neutral${v.gar ? ' (garrison)' : ''}` : ` · ${owner} (${ally ? 'ally' : 'enemy'})`;
     let label = `<span style="color:${col}">${name}</span>${who} · ${hp}/${max} HP`;
     if (v.b && v.pr < 1) label += ` · ${Math.round(v.pr * 100)}% built`;
+    // buildings get a 2nd line: upgrade level + power (generated or consumed)
+    if (v.b) {
+      const bd: any = BUILDINGS[v.t];
+      const lvl = v.lv || 1;
+      const pw = bd?.power || 0;
+      const pwTxt = pw > 0 ? `generates ${pw}⚡` : pw < 0 ? `uses ${-pw}⚡` : 'no power draw';
+      label += `<br><span style="color:#9fb3c2;font-weight:500">Level ${lvl} · ${pwTxt}</span>`;
+    }
     this.tipEl.innerHTML = label;
     this.tipEl.style.left = (this.mouse.x + 14) + 'px';
     this.tipEl.style.top = (this.mouse.y + 16) + 'px';

@@ -12,7 +12,7 @@ CC0 (public domain, no attribution required):
 - Heavy Tank ("Tank") — KolosStudios
 - Engineer ("Pickup Truck") — Quaternius
 - Rocket Team ("SWAT") — Quaternius
-- Power Plant ("Turbine") — Kay Lousberg (poly.pizza)
+- Power Plant ("Structure") — Quaternius (poly.pizza)
 
 CC-BY 3.0 / 4.0 (attribution required — used under these terms):
 - Rifle Squad ("Soldier") — KolosStudios

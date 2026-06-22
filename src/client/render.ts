@@ -85,8 +85,7 @@ const ROTORS: Record<string, { y: number; r: number; speed: number; nose?: boole
   minidrone: { y: 0.34, r: 0.42, speed: 42 },
   chemdrone: { y: 0.70, r: 0.82, speed: 33 },
   biodrone:  { y: 0.70, r: 0.82, speed: 33 },
-  bomber:    { y: 0.42, r: 0.85, speed: 30, nose: true },
-  dbomber:   { y: 0.48, r: 0.95, speed: 30, nose: true },
+  // bomber/dbomber are jets (B-2 stealth) — no propeller
   gunship:   { y: 1.05, r: 1.45, speed: 26 },       // mercenary attack heli
   silicondrone: { y: 0.70, r: 0.85, speed: 33 },    // networked attack drone
 };
@@ -1190,7 +1189,7 @@ export class Renderer {
     this.scene.add(this.oilMesh);
     this.loadOilModel();
     this.loadFactoryModel();
-    this.loadBuildingModel('power', 'windturbine', 3.6, true); // Power Plant GLB ("Turbine" by Kay Lousberg, poly.pizza, CC0)
+    this.loadBuildingModel('power', 'powerplant', 2.4);   // Power Plant GLB ("Structure" by Quaternius, poly.pizza, CC0)
     this.loadBuildingModel('refinery', 'refinery', 8.72); // Ore Refinery GLB (Sketchfab, CC-BY)
     this.loadBuildingModel('airfield', 'airfield', 4.73);  // Airfield GLB (C&C-style building, Sketchfab, CC-BY)
     // Oil Rig reuses the oil-well "Oil Pump" model, 25% taller than the free well
