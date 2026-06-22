@@ -224,6 +224,10 @@ class AudioMan {
     // realistic recorded SFX take priority once loaded; otherwise fall through to
     // the procedural synth below (covers load lag + keys with no sample)
     if (this.sfxBuf[name]) { this.playBuffer(this.sfxBuf[name], v * (this.sfxGain[name] ?? 1)); return; }
+    // alert cues are spoken aloud (EVA-style). If the browser has a usable TTS
+    // voice, speak() handles it and we're done; otherwise fall through to the
+    // procedural tone below so voice-less browsers still get an audible cue.
+    if (AudioMan.CUE_SPEECH[name] && this.speak(AudioMan.CUE_SPEECH[name])) return;
     switch (name) {
       case 'mg':
         // rifle/autocannon: a snappy supersonic crack + body thwack + casing tick
@@ -443,6 +447,46 @@ class AudioMan {
       this._ausVoice = fem || au[0] || null;
       return this._ausVoice;
     } catch { return null; }
+  }
+
+  // ---------- spoken alert cues (EVA-style voice) ----------
+  // play(key) routes these keys to spoken voice instead of a tone.
+  private static CUE_SPEECH: Record<string, string> = {
+    pwrlow:      'Low power',
+    pwrout:      'Insufficient power',
+    underattack: 'Unit under attack',
+    bldgattack:  'Our base is under attack',
+    siloup:      'Warning: enemy missile silo detected',
+    satup:       'Spy satellite online',
+    surrender:   'The enemy has surrendered',
+  };
+  private _cueVoice?: SpeechSynthesisVoice | null;
+  private cueVoice(): SpeechSynthesisVoice | null {
+    if (this._cueVoice !== undefined) return this._cueVoice;
+    try {
+      const vs = window.speechSynthesis.getVoices();
+      if (!vs.length) return null;                       // not loaded yet — retry next cue
+      const en = vs.filter(v => /^en/i.test(v.lang));
+      this._cueVoice = en.find(v => v.default) || en[0] || vs[0] || null;
+      return this._cueVoice;
+    } catch { return null; }
+  }
+  // speak an alert line. Returns false when no TTS voice is available so the
+  // caller can fall back to a tone; returns true when handled (spoken, or
+  // intentionally silent because sound is off).
+  speak(text: string, rate = 1.0, pitch = 1.0): boolean {
+    if (this.muted || this.sfxVol <= 0) return true;     // sound off -> handled (text cue covers it)
+    try {
+      if (!('speechSynthesis' in window)) return false;
+      const v = this.cueVoice();
+      if (!v) return false;                              // no usable voice -> fall back to tone
+      window.speechSynthesis.cancel();                   // don't queue a backlog of alerts
+      const u = new SpeechSynthesisUtterance(text);
+      u.voice = v; u.rate = rate; u.pitch = pitch;
+      u.volume = Math.max(0, Math.min(1, 0.95 * this.masterVol));
+      window.speechSynthesis.speak(u);
+      return true;
+    } catch { return false; }
   }
 
   // ---------- generative music ----------
