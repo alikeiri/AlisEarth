@@ -24,7 +24,7 @@ CC-BY 3.0 / 4.0 (attribution required — used under these terms):
 - Helicopter — Zsky
 - Helidrone ("Helicopter") — Poly by Google
 - Gunboat / Naval Drone ("Military Boat") — Zsky
-- Destroyer ("low poly battleship") — angelo raffaele Catalano
+- Destroyer ("1:1 Low poly US NAVY DDG-51 USS Arleigh Burke") — Yi Tsung Lee (Sketchfab, CC-BY 4.0)
 - Submarine — Poly by Google
 - IFV ("M2 Bradley IFV") — 42manako (Sketchfab, CC-BY 4.0)
 - Ore Refinery ("Rare Earth Element Refinery") — novusod (Sketchfab, CC-BY 4.0)
