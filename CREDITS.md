@@ -19,8 +19,8 @@ CC-BY 3.0 / 4.0 (attribution required — used under these terms):
 - MLRS ("Truck Tank") — KolosStudios
 - Harvester ("Dump truck") — jeremy
 - Recon/Strike/Missile Drone ("Drone") — NateGazzard
-- Fighter ("Jet") — jeremy
-- Bomber / Drone Bomber ("Aeroplane") — Gilang Romadhan
+- Fighter ("Lockheed Martin F-35 Lightning II") — andertan (Sketchfab, CC-BY 4.0)
+- Bomber / Drone Bomber ("Lowpoly B-2 Spirit bomber") — SIpriv (Sketchfab, CC-BY 4.0)
 - Helicopter — Zsky
 - Helidrone ("Helicopter") — Poly by Google
 - Gunboat / Naval Drone ("Military Boat") — Zsky
