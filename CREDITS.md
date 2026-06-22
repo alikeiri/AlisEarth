@@ -12,9 +12,9 @@ CC0 (public domain, no attribution required):
 - Heavy Tank ("Tank") — KolosStudios
 - Engineer ("Pickup Truck") — Quaternius
 - Rocket Team ("SWAT") — Quaternius
-- Power Plant ("Structure") — Quaternius (poly.pizza)
 
 CC-BY 3.0 / 4.0 (attribution required — used under these terms):
+- Power Plant ("RTS Military Building 1") — Sabri Ayeş (Sketchfab, CC-BY 4.0)
 - Rifle Squad ("Soldier") — KolosStudios
 - MLRS ("Truck Tank") — KolosStudios
 - Harvester ("Dump truck") — jeremy
@@ -61,7 +61,7 @@ NOTE: the Pixabay Content License and Mixkit Free License are royalty-free but *
 
 ## License status summary
 Not every asset is CC0/public domain. Tiers in use:
-- **CC0** — terrain/material textures; the 5 CC0 models (Tank, Heavy Tank, Engineer, Rocket Team, Power Plant turbine); all procedural buildings/effects/synth SFX.
+- **CC0** — terrain/material textures; the 4 CC0 models (Tank, Heavy Tank, Engineer, Rocket Team); all procedural buildings/effects/synth SFX.
 - **CC-BY** (attribution, satisfied above) — ~20 unit/building models; Twemoji icons.
 - **Royalty-free, non-CC0** — the 6 recorded weapon/explosion SFX (Pixabay/Mixkit).
 - **Original work (project-owned)** — the 4 music tracks (see Music).
