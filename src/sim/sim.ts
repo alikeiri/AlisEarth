@@ -442,8 +442,15 @@ export class Sim {
         const u = this.ents.get(id);
         if (!u || u.b || u.owner !== c.p) continue;
         if ((UNITS[u.type]?.dmg ?? 0) <= 0) continue;
+        // engage THREATS first — armed enemy units + base defenses (things that can
+        // shoot back) — and only turn on passive buildings once the threats are gone.
+        // Within each tier, nearest first.
+        const threat = (e: Entity) => e.b
+          ? !!(BUILDINGS[e.type]?.attack || BUILDINGS[e.type]?.intercept)
+          : (UNITS[e.type]?.dmg ?? 0) > 0;
+        const d2 = (e: Entity) => (e.x - u.x) * (e.x - u.x) + (e.z - u.z) * (e.z - u.z);
         const list = [...targets]
-          .sort((a, b) => ((a.x - u.x) * (a.x - u.x) + (a.z - u.z) * (a.z - u.z)) - ((b.x - u.x) * (b.x - u.x) + (b.z - u.z) * (b.z - u.z)))
+          .sort((a, b) => ((threat(a) ? 0 : 1) - (threat(b) ? 0 : 1)) || (d2(a) - d2(b)))
           .slice(0, 24);
         u.orders = list.map(t => ({ k: 'attack' as const, tgt: t.id }));
         u.path = null;

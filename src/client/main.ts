@@ -2099,7 +2099,9 @@ class GameClient {
     if (this.frame % 30 === 0 && !this.guiHidden) this.updateTopStat();
 
     const _u0 = this.perfOn ? performance.now() : 0;
-    prof.begin('sim.update'); this.game.update(dt * 1000); prof.end('sim.update');
+    // once the match is decided, PAUSE the sim — don't keep advancing it (units would
+    // otherwise keep moving/fighting behind the report banner and rubberband).
+    if (!this.over) { prof.begin('sim.update'); this.game.update(dt * 1000); prof.end('sim.update'); }
     if (this.perfOn) this.updateMs += (performance.now() - _u0 - this.updateMs) * 0.2;
     this.checkNetStall();   // surface a pause popup if we're frozen waiting on a peer
 
@@ -2203,6 +2205,10 @@ class GameClient {
     }
 
     const allViews = this.game.views();
+    // game over: the sim is paused, so clear each unit's "moving" flag this frame —
+    // otherwise a unit frozen mid-stride keeps playing its walk/drive animation in
+    // place (the jitter). With mv off they settle into their idle pose.
+    if (this.over) for (const v of allViews) if (!v.b) v.mv = 0;
     // who's on my team (allies share vision and stay always-visible)
     const plList = this.game.players?.() || [];
     const myTeam = plList[this.game.me]?.tm;
