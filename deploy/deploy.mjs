@@ -83,8 +83,10 @@ conn.on('ready', async () => {
     // optional Claude strategist key: lives only in the container env, never in files
     const advisorEnv = ADVISOR_KEY ? `-e ADVISOR_KEY='${ADVISOR_KEY}' ` : '';
     const run = await exec(
+      // publish ONLY on localhost so nginx (127.0.0.1) reaches it but the game port
+      // isn't directly reachable from the internet (Docker's iptables bypasses ufw).
       `docker run -d --name fractured-earth --restart unless-stopped ` +
-      `-p ${PORT}:8080 -v ${REMOTE}:/app -w /app -m 300m ${advisorEnv}node:20-alpine ` +
+      `-p 127.0.0.1:${PORT}:8080 -v ${REMOTE}:/app -w /app -m 300m ${advisorEnv}node:20-alpine ` +
       `sh -c "[ -d node_modules ] || npm install --omit=dev --no-audit --no-fund; exec node server.mjs"`
     );
     console.log('docker run:', run.out, '(exit', run.code + ')');
