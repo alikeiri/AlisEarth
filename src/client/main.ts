@@ -2642,7 +2642,13 @@ class GameClient {
     };
     const me = this.game.players?.()[this.game.me];
     if (me && me.a !== false) {
-      const st = me.pu > me.pm ? 2 : (me.pu > me.pm * 0.85 ? 1 : 0);
+      // Use the REAL power signals. powerUsed (pu) is capped to the sustainable load
+      // by load-shedding, so "pu > pm" almost never fired — the true tells are:
+      //   INSUFFICIENT = buildings are actually being shed (v.po) for lack of power,
+      //   LOW          = demand has caught up to generation and the battery is draining.
+      let shed = 0;
+      for (const v of views) if (v.b && v.o === this.game.me && v.po) shed++;
+      const st = shed > 0 ? 2 : (me.pu >= me.pm && me.pwr < me.pmax * 0.6 ? 1 : 0);
       if (st > this.pwrState) {
         if (st === 2) cue('pwrout', 'pwrout', 30000, '⚡ Power insufficient — buildings shutting down', '#ff5043');
         else cue('pwrlow', 'pwrlow', 30000, '⚡ Power running low', '#ffc940');
