@@ -19,6 +19,7 @@ interface AiMem {
   threatX?: number; threatZ?: number; threatN?: number; // where attacks come from
   hiveCd?: number; // pace hive production
   seenAir?: number; // decaying count of enemy air spotted (reactive AA)
+  seenVeh?: number; seenInf?: number; // decaying counts of scouted enemy armor / infantry (live counters)
   enemyAA?: number; // live count of enemy anti-air (units + batteries)
   enemyCombat?: number; // live count of enemy fighting units
   enemyBuildings?: number; // live count of enemy structures (walls excluded)
@@ -32,9 +33,9 @@ interface AiMem {
 
 const LVL = [
   { cad: 5.5, peace: 480, waveEvery: 150, w0: 4,  wInc: 2, cap: 11, turrets: 2, sams: 0, harv: 3,  barracks: 1, factories: 1, refs: 2, air: false, siege: 0, raid: 0 },
-  { cad: 2.0, peace: 240, waveEvery: 60,  w0: 10, wInc: 4, cap: 32, turrets: 3, sams: 1, harv: 6,  barracks: 1, factories: 2, refs: 3, air: false, siege: 1, raid: 0 },
-  { cad: 1.0, peace: 150, waveEvery: 40,  w0: 16, wInc: 6, cap: 48, turrets: 4, sams: 2, harv: 8,  barracks: 2, factories: 2, refs: 4, air: true,  siege: 2, raid: 45 },
-  { cad: 1.0, peace: 90,  waveEvery: 30,  w0: 22, wInc: 8, cap: 70, turrets: 5, sams: 3, harv: 10, barracks: 2, factories: 3, refs: 4, air: true,  siege: 3, raid: 35 },
+  { cad: 2.0, peace: 240, waveEvery: 60,  w0: 10, wInc: 4, cap: 32, turrets: 3, sams: 1, harv: 6,  barracks: 1, factories: 1, refs: 3, air: false, siege: 1, raid: 0 },
+  { cad: 1.0, peace: 150, waveEvery: 40,  w0: 16, wInc: 6, cap: 48, turrets: 4, sams: 2, harv: 8,  barracks: 1, factories: 1, refs: 4, air: true,  siege: 2, raid: 45 },
+  { cad: 1.0, peace: 90,  waveEvery: 30,  w0: 22, wInc: 8, cap: 70, turrets: 5, sams: 3, harv: 10, barracks: 1, factories: 1, refs: 4, air: true,  siege: 3, raid: 35 },
 ];
 
 export function aiTick(sim: Sim, p: number): Cmd[] {
@@ -229,7 +230,7 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
 
   // --- live recon: react to the army the enemy is actually fielding now ---
   // (a brief sighting biases production for a while via a decaying counter)
-  let eAir = 0, eAA = 0, eCombat = 0, eBuildings = 0;
+  let eAir = 0, eAA = 0, eCombat = 0, eBuildings = 0, eVeh = 0, eInf = 0;
   for (const e of sim.ents.values()) {
     if (!sim.foe(e.owner, p) || e.hp <= 0 || !sim.players[e.owner]?.alive) continue;
     const ed = UNITS[e.type];
@@ -238,15 +239,27 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
       if (e.type === 'sam') eAA++; // anti-air structure
     } else if (ed && !ed.internal) {
       if (ed.kind === 'air' && ed.fly && !ed.missile) eAir++;
+      else if (ed.kind === 'veh') eVeh++;
+      else if (ed.kind === 'inf') eInf++;
       if (ed.dmg > 0) eCombat++;
       if (e.type === 'aatank' || e.type === 'flak' || e.type === 'sam') eAA++; // mobile AA
     }
   }
   mem.seenAir = Math.max((mem.seenAir || 0) * 0.96, eAir);
+  mem.seenVeh = Math.max((mem.seenVeh || 0) * 0.96, eVeh); // decaying memory of scouted armor
+  mem.seenInf = Math.max((mem.seenInf || 0) * 0.96, eInf); // ...and infantry
   mem.enemyAA = eAA;                 // live anti-air the enemy can bring to bear
   mem.enemyCombat = eCombat;         // standing enemy army (for the bomber-rush call)
   mem.enemyBuildings = eBuildings;
   if ((mem.seenAir || 0) >= 1) { antiAir = true; sams = Math.max(sams, (mem.seenAir || 0) >= 4 ? 3 : 2); }
+  // LIVE counter-composition: react to the army actually fielded this game (overrides
+  // the historical profile once we've scouted a real force) — armor → anti-armor,
+  // infantry masses → anti-infantry. User: "build counters to what I'm building."
+  const sVeh = mem.seenVeh || 0, sInf = mem.seenInf || 0;
+  if (sVeh + sInf >= 4) {
+    if (sVeh >= 3 && sVeh >= sInf * 0.8) antiArmor = true;
+    if (sInf >= 5 && sInf > sVeh * 1.2) antiInf = true;
+  }
 
   // --- dynamic posture: turtle when poor or pressured, press when rich/safe ---
   const underAttack = sim.tickN - (mem.lastHurtT ?? -1e9) < 15 * TICKS_PER_SEC;
@@ -255,7 +268,10 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
   // rush anti-missile cover (Iron Dome + Patriot). Sticky for 40s after last seen.
   if (enemyHasSilo(sim, p) || sim.missileInbound(p)) mem.missileThreatT = sim.tickN;
   const missileThreat = sim.tickN - (mem.missileThreatT ?? -1e9) < 40 * TICKS_PER_SEC;
-  if (pl.credits > 6000) { cap = Math.min(90, cap + 8); waveEvery = Math.max(18, waveEvery - 6); } // flush: attack
+  // flush with cash → raise the army cap so it SPENDS the hoard on units (with only
+  // one of each production building, a deep cap is how a rich AI converts 50k credits
+  // into a big army instead of banking it) and presses the attack
+  if (pl.credits > 6000) { cap = Math.min(140, cap + 8 + Math.floor((pl.credits - 6000) / 3500)); waveEvery = Math.max(18, waveEvery - 6); }
   if (pl.credits < 1200 && underAttack) mem.nextWave = Math.max(mem.nextWave, sim.tickN + 10 * TICKS_PER_SEC); // hold
 
   // once a solid ground force and a defensive line stand, every AI graduates to
@@ -432,13 +448,19 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
       const groundArmy = nU('tank') + nU('heavy') + nU('ifv') + nU('mlrs') + nU('aatank') + nU('flak');
       if (island && groundArmy >= 8) continue;
       const r = sim.aiRngP[p].next();
-      const t = nU('mlrs') < L.siege ? 'mlrs'
-        : (nU('aatank') + nU('flak') < aaTarget && r < aaPrio) ? (r < aaPrio * 0.5 ? 'aatank' : 'flak')
-        : r < (antiInf ? 0.4 : 0.25) ? 'mlrs' // artillery shreds infantry masses
-        : r < (antiInf ? 0.7 : 0.42) ? 'ifv'  // autocannons mop up the rest
-        : r < (antiInf ? 0.76 : 0.47) && pl.credits > 1600 ? 'fueltruck' // breach charge
-        : (pl.credits > 2000 && r < 0.6) ? 'heavy'
-        : 'tank';
+      // MLRS is fragile artillery (170hp) — keep it a SUPPORT fraction of the army,
+      // never the bulk, or it melts and trades 2:1 (replay mqqcc6prkpju: 484 MLRS
+      // queued, army lost 280 / killed 136). Durable tanks/heavies are the core.
+      const mlrsCap = Math.max(L.siege, Math.round(armyCount * (antiInf ? 0.30 : 0.18)));
+      const wantAA = nU('aatank') + nU('flak') < aaTarget && r < aaPrio;
+      const rich = pl.credits > 2000;
+      let t: string;
+      if (wantAA) t = r < aaPrio * 0.5 ? 'aatank' : 'flak';
+      else if (nU('mlrs') < mlrsCap && r < (antiInf ? 0.42 : 0.20)) t = 'mlrs'; // support artillery
+      else if (antiInf && r < 0.55) t = 'ifv';                  // autocannons shred infantry masses
+      else if (antiArmor) t = rich && r < 0.7 ? 'heavy' : 'tank'; // armor counters armor
+      else if (rich && r < 0.18) t = 'fueltruck';               // a breach charge for walls/clumps
+      else t = rich && r < 0.55 ? 'heavy' : (r < 0.85 ? 'tank' : 'ifv'); // durable mixed core
       cmds.push({ k: 'train', p, bid: fac.id, type: t });
     }
   }
