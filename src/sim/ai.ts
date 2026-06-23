@@ -220,7 +220,12 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
     return cmds;
   }
   const cost = (t: string) => Math.round(BUILDINGS[t].cost * pl.fac.costMul * pl.bonusCost);
-  const surplus = pl.powerMade - pl.powerUsed;
+  // count power plants still UNDER CONSTRUCTION toward the surplus, or the AI
+  // queues a 4th/5th plant while the first few are mid-build (6s) and reads the
+  // surplus as still-low — over-investing in power and going broke before economy.
+  let powerPipe = 0;
+  for (const b of (myB['power'] || [])) if (b.progress < b.total) powerPipe += BUILDINGS['power'].power;
+  const surplus = pl.powerMade - pl.powerUsed + powerPipe;
 
   // --- live recon: react to the army the enemy is actually fielding now ---
   // (a brief sighting biases production for a while via a decaying counter)
@@ -260,16 +265,16 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
   const groundCore = nB('factory') >= 1 && nB('barracks') >= 1 && groundForce >= 12 && nB('turret') >= 2;
   const goAir = L.air || island || dirAir || prefAir || groundCore;
 
-  // economy baseline: a poor AI MUST establish income (2 refineries + a harvester
-  // base + a factory) before spending on defense/tech. Otherwise it spirals on
-  // cheap turrets it can afford while the economy starves and it can never save
-  // the larger sum for a refinery/harvester (replays mqpynq0zokaq, mqq08z4kgh7n:
-  // 11-12 turrets built, 1 harvester, 1 refinery, broke all game).
+  // economy baseline: a factory + a basic harvester income (3) before the AI
+  // pours credits into turrets/army. Stops the broke-AI turret spiral (replays
+  // mqpynq0zokaq/mqq08z4kgh7n: 11-12 turrets, 1 harvester, broke all game) while
+  // still unlocking defense on poor maps where a 2nd refinery isn't affordable.
+  // The build order keeps refinery #2 ahead of turrets, so economy still expands.
   const econBoot = nB('factory') >= 1 && nB('refinery') >= 2 && nU('harv') >= 3;
 
   // build order — economy, production breadth, then defense depth
   let want: string | null = null;
-  if (surplus < 45) want = 'power'; // stay well ahead of demand — expansion + unit production keep drawing more
+  if (surplus < 30) want = 'power'; // just enough headroom to not brown out (counts plants still building)
   else if (!nB('refinery')) want = 'refinery';
   else if (!nB('barracks')) want = 'barracks';
   // the War Factory is CORE infrastructure — harvesters, engineers and every
@@ -313,7 +318,7 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
   // incoming silo missiles (high difficulty / when the enemy has gone nuclear)
   else if (pl.aiLvl >= 2 && nB('lab') && nB('tesla') < 1 && pl.credits > 2600) want = 'tesla';
   else if (pl.aiLvl >= 2 && nB('radar') && !nB('irondome') && enemyHasSilo(sim, p) && pl.credits > 2800) want = 'irondome';
-  else if (surplus < 100 && pl.credits > 1400) want = 'power'; // proactive power buffer whenever affordable (uncapped)
+  else if (econBoot && surplus < 90 && pl.credits > 1800) want = 'power'; // proactive buffer ONLY once economy stands (uncapped, but not before harvesters)
 
   if (want && nB('conyard')) {
     const def = BUILDINGS[want];
@@ -381,10 +386,10 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
   for (const bks of (myB['barracks'] || [])) {
     if (bks.progress < bks.total || bks.queue.length >= 2) continue;
     if (armyCount >= cap) continue;
-    // economy FIRST: don't bleed credits into army until the economy is booted
-    // (2 refineries + harvester base + factory) — else income never reaches the
-    // larger sum for a 2nd refinery. Flush (>2200) is the release valve.
-    if (!econBoot && pl.credits < 2200) continue;
+    // economy FIRST, but never DEFENSELESS: before the economy is booted, allow a
+    // small cheap infantry screen (≤4) for early defense, then stop bleeding credits
+    // into army so income can reach the 2nd refinery. Flush (>2200) is the release valve.
+    if (!econBoot && infCount >= 4 && pl.credits < 2200) continue;
     if (island && infCount >= 4) continue; // infantry can't swim — token garrison only
     if (hasFac && infCount >= Math.max(3, armyCount * 0.35)) continue; // leave credits for vehicles
     if (pl.credits > (hasFac ? 900 : 500)) {
