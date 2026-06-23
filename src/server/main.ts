@@ -4,7 +4,7 @@
 
 import { createServer } from 'http';
 import { readFile } from 'fs/promises';
-import { readFileSync, writeFileSync, mkdirSync, unlinkSync } from 'fs';
+import { readFileSync, writeFileSync, mkdirSync, unlinkSync, readdirSync } from 'fs';
 import { extname, join, normalize } from 'path';
 import { fileURLToPath } from 'url';
 import { randomBytes, scryptSync, createHmac, timingSafeEqual } from 'crypto';
@@ -594,6 +594,24 @@ function mergeServerLesson(lesson: string) {
 const REPLAY_DIR = join(fileURLToPath(new URL('.', import.meta.url)), 'replays');
 const REPLAY_INDEX = join(REPLAY_DIR, 'index.json');
 try { mkdirSync(REPLAY_DIR, { recursive: true }); } catch { /* exists */ }
+// one-time backfill: the skirmish upload handler used to drop `ver`, leaving those
+// replays unwatchable (the viewer requires ver === SIM_VERSION). They were all
+// recorded by current (v5) clients — the field was just lost on save — so stamp the
+// current version onto any SKIRMISH replay missing it. Idempotent; skips MP replays
+// (those always wrote a ver, so a missing one there could be genuinely old).
+(function backfillReplayVersions() {
+  try {
+    for (const f of readdirSync(REPLAY_DIR)) {
+      if (!f.endsWith('.json') || f === 'index.json') continue;
+      const fp = join(REPLAY_DIR, f);
+      let j: any; try { j = JSON.parse(readFileSync(fp, 'utf8')); } catch { continue; }
+      if (j && typeof j.ver !== 'number' && j.meta?.source === 'skirmish') {
+        j.ver = SIM_VERSION;
+        writeFileSync(fp, JSON.stringify(j));
+      }
+    }
+  } catch { /* no dir yet */ }
+})();
 function saveReplay(room: Room) {
   if (!room.rec || room.replaySaved || !room.sim) return;
   room.replaySaved = true;
@@ -634,7 +652,11 @@ function handleReplayUpload(req: any, res: any) {
       // generated fields come LAST so a malicious client can't override id/date/source
       // (a forged meta.id would otherwise reach the unlinkSync below as a path).
       const meta = { ...d.meta, id, date: Date.now(), source: 'skirmish' };
-      writeFileSync(join(REPLAY_DIR, id + '.json'), JSON.stringify({ meta, seed: d.seed, size: d.size || 96, cmds: d.cmds }));
+      // persist the sim version it was recorded on — the viewer refuses replays
+      // whose ver != SIM_VERSION (cross-version playback desyncs). This was being
+      // dropped here, so every skirmish replay became unwatchable.
+      const ver = typeof d.ver === 'number' ? d.ver : SIM_VERSION;
+      writeFileSync(join(REPLAY_DIR, id + '.json'), JSON.stringify({ meta, ver, seed: d.seed, size: d.size || 96, cmds: d.cmds }));
       let idx: any[] = [];
       try { idx = JSON.parse(readFileSync(REPLAY_INDEX, 'utf8')); } catch { /* first */ }
       idx.unshift(meta);
