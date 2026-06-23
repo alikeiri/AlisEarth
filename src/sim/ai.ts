@@ -26,13 +26,15 @@ interface AiMem {
   missileThreatT?: number; // last tick an enemy silo existed / a warhead was inbound on us
   defenders?: number[]; // infantry designated to the fortified defense line
   harvDefCd?: number; // cooldown between harvester-rescue reactions
+  richMul?: number; // ore-richness multiplier for harvester target (sampled once)
+  oilWells?: { cx: number; cz: number }[]; // reachable oil wells near base (engineer targets)
 }
 
 const LVL = [
-  { cad: 5.5, peace: 480, waveEvery: 150, w0: 4,  wInc: 2, cap: 11, turrets: 2, sams: 0, harv: 2, barracks: 1, factories: 1, refs: 2, air: false, siege: 0, raid: 0 },
-  { cad: 2.0, peace: 240, waveEvery: 60,  w0: 10, wInc: 4, cap: 32, turrets: 3, sams: 1, harv: 4, barracks: 1, factories: 2, refs: 3, air: false, siege: 1, raid: 0 },
-  { cad: 1.0, peace: 150, waveEvery: 40,  w0: 16, wInc: 6, cap: 48, turrets: 4, sams: 2, harv: 5, barracks: 2, factories: 2, refs: 4, air: true,  siege: 2, raid: 45 },
-  { cad: 1.0, peace: 90,  waveEvery: 30,  w0: 22, wInc: 8, cap: 70, turrets: 5, sams: 3, harv: 6, barracks: 2, factories: 3, refs: 4, air: true,  siege: 3, raid: 35 },
+  { cad: 5.5, peace: 480, waveEvery: 150, w0: 4,  wInc: 2, cap: 11, turrets: 2, sams: 0, harv: 3,  barracks: 1, factories: 1, refs: 2, air: false, siege: 0, raid: 0 },
+  { cad: 2.0, peace: 240, waveEvery: 60,  w0: 10, wInc: 4, cap: 32, turrets: 3, sams: 1, harv: 6,  barracks: 1, factories: 2, refs: 3, air: false, siege: 1, raid: 0 },
+  { cad: 1.0, peace: 150, waveEvery: 40,  w0: 16, wInc: 6, cap: 48, turrets: 4, sams: 2, harv: 8,  barracks: 2, factories: 2, refs: 4, air: true,  siege: 2, raid: 45 },
+  { cad: 1.0, peace: 90,  waveEvery: 30,  w0: 22, wInc: 8, cap: 70, turrets: 5, sams: 3, harv: 10, barracks: 2, factories: 3, refs: 4, air: true,  siege: 3, raid: 35 },
 ];
 
 export function aiTick(sim: Sim, p: number): Cmd[] {
@@ -173,6 +175,22 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
     let sea = 0, tot = 0;
     for (let z = 2; z < H - 2; z += 4) for (let x = 2; x < W - 2; x += 4) { tot++; if (sim.map.passableSea(x, z)) sea++; }
     mem.waterRel = tot > 0 && sea / tot >= 0.12;
+  }
+
+  // ore richness (sampled once): a rich map should be exploited with a bigger
+  // harvester fleet. 0.02 ore-cell density ~ a normal map; clamped so it can't
+  // run away. Also cache the reachable oil wells near our base for the engineer.
+  if (mem.richMul === undefined) {
+    let oreCells = 0, samp = 0;
+    for (let z = 0; z < H; z += 2) for (let x = 0; x < W; x += 2) { samp++; if (sim.map.oreMax[z * W + x] > 0) oreCells++; }
+    const density = oreCells / Math.max(1, samp);
+    mem.richMul = Math.max(0.9, Math.min(1.8, density / 0.02));
+    const reg = sim.map.regionAt(Math.floor(pl.spawn.x), Math.floor(pl.spawn.z));
+    const wells: { cx: number; cz: number }[] = [];
+    for (let z = 0; z < H; z++) for (let x = 0; x < W; x++)
+      if (sim.map.oil[z * W + x] === 1 && sim.map.regionAt(x, z) === reg) wells.push({ cx: x, cz: z });
+    wells.sort((a, b) => ((a.cx - pl.spawn.x) ** 2 + (a.cz - pl.spawn.z) ** 2) - ((b.cx - pl.spawn.x) ** 2 + (b.cz - pl.spawn.z) ** 2));
+    mem.oilWells = wells.slice(0, 6); // claim the closest handful
   }
   // once the AI has ever spotted an enemy warship, a navy is worth it even on a
   // map it judged 'dry' — it builds a shipyard to answer the threat
@@ -324,12 +342,27 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
   const hasFac = (myB['factory'] || []).some(b => b.progress >= b.total);
   // economy first: saturate every refinery with ~2 harvesters before army
   // spending — cheap units must not starve the harvester budget
-  const harvTarget = Math.max(L.harv, nB('refinery') * 2);
-  const ecoShort = hasFac && nU('harv') < harvTarget;
-  // safety net: down to the last 1-2 harvesters, or one being shot at → the
-  // economy is about to collapse, so cancel other builds and rush a replacement
+  // harvester target scales with refineries AND map ore richness (rich map → bigger
+  // fleet), capped so it can't run away
+  const harvTarget = Math.max(L.harv, Math.min(16, Math.round(Math.max(L.harv, nB('refinery') * 2) * (mem.richMul || 1))));
+  // count harvesters ALREADY in production (queued) toward the target, or the
+  // per-tick loop re-queues faster than they finish and badly overshoots the cap
+  const harvInProd = (myB['factory'] || []).reduce((n, f) => n + f.queue.filter((q: any) => q.type === 'harv').length, 0);
+  const harvHave = nU('harv') + harvInProd;
+  const ecoShort = hasFac && harvHave < harvTarget;
   const harvUnderFire = (myU['harv'] || []).some(h => sim.tickN - h.lastHitT < 40);
-  const harvEmergency = hasFac && (nU('harv') <= 2 || (harvUnderFire && nU('harv') <= 3));
+  // economy FIRST: until a working harvester base stands (the lesser of the target
+  // and a hard floor), treat harvesters as an emergency — cancel competing factory
+  // builds and buy them even while nearly broke, to break the income death-spiral.
+  const harvFloor = Math.min(harvTarget, hasFac ? 4 : 2);
+  const harvEmergency = hasFac && (harvHave < harvFloor || (harvUnderFire && nU('harv') <= 3));
+  // unclaimed oil wells reachable from base — passive income (no harvester needed)
+  const claimableOil = (mem.oilWells || []).filter((w: any) => sim.map.oil[w.cz * W + w.cx] === 1 && !sim.map.occ[w.cz * W + w.cx]);
+  // dispatch a spare engineer to erect an oil rig on the nearest unclaimed well
+  if (claimableOil.length) {
+    const eng = (myU['engineer'] || []).find(e => !e.orders.length || e.orders[0].k !== 'oilrig');
+    if (eng) cmds.push({ k: 'oilrig', p, ids: [eng.id], cx: claimableOil[0].cx, cz: claimableOil[0].cz });
+  }
   for (const bks of (myB['barracks'] || [])) {
     if (bks.progress < bks.total || bks.queue.length >= 2) continue;
     if (armyCount >= cap) continue;
@@ -353,10 +386,11 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
     if (harvEmergency && fac.queue.length && fac.queue[fac.queue.length - 1].type !== 'harv')
       cmds.push({ k: 'cancel', p, bid: fac.id, type: fac.queue[fac.queue.length - 1].type });
     if (fac.queue.length >= 2 && !harvEmergency) continue;
-    if (harvEmergency && nU('harv') < harvTarget + 1 && pl.credits > 300) cmds.push({ k: 'train', p, bid: fac.id, type: 'harv' });
+    if (harvEmergency && harvHave < harvTarget + 1 && pl.credits > 200) cmds.push({ k: 'train', p, bid: fac.id, type: 'harv' });
     else if (fac.queue.length >= 2) continue;
-    else if (nU('harv') < harvTarget && pl.credits > 1000) cmds.push({ k: 'train', p, bid: fac.id, type: 'harv' });
-    else if (nU('engineer') < 1 && pl.aiLvl >= 1 && pl.credits > 1500) cmds.push({ k: 'train', p, bid: fac.id, type: 'engineer' });
+    else if (harvHave < harvTarget && pl.credits > 900) cmds.push({ k: 'train', p, bid: fac.id, type: 'harv' });
+    // engineers: one for repair, plus extras to claim oil wells (passive income)
+    else if (nU('engineer') < (claimableOil.length ? 2 : 1) && pl.aiLvl >= 1 && pl.credits > 1100) cmds.push({ k: 'train', p, bid: fac.id, type: 'engineer' });
     // reactive AA is a NEED, not surplus: build to the target even at army cap
     // so an air assault always gets answered (user: "if air seen, build AA/flak")
     else if (airSeen >= 1 && nU('aatank') + nU('flak') < aaTarget && pl.credits > 700) {
