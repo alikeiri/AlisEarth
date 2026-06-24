@@ -124,20 +124,25 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
     }
     if (++scanned >= 40 || (mem.defCd > 0 && harvHit)) break; // bounded scan
   }
-  // economy under raid (a harvester is taking fire) → add an eco-defense gun so the
-  // base can fend off raiders even if the field army is away on a push
-  if (harvHit) turrets = Math.min(8, turrets + 1);
-  // harvesters under attack: rush the nearest spare combat units to defend them,
-  // and slip the miner to a safer field (away from the attacker, still nearby)
+  // harvesters under attack: turrets sit at the base and can't reach distant ore
+  // fields, so DISPATCH UNITS to defend. Send the nearest available combat units
+  // (idle, or peeled off an attack) to kill the raider — scaled to how many raiders
+  // are on the miner — and slip the miner to a safer field meanwhile.
   if (harvHit && (mem.harvDefCd ?? 0) <= 0) {
     const { v, attacker } = harvHit;
+    let raiders = 0;
+    for (const o of sim.ents.values()) {
+      if (o.b || o.hp <= 0 || !sim.foe(o.owner, p) || (UNITS[o.type]?.dmg ?? 0) <= 0) continue;
+      if ((o.x - v.x) ** 2 + (o.z - v.z) ** 2 < 144) raiders++;        // raiders within 12 of the miner
+    }
+    const want = Math.min(8, Math.max(4, raiders * 2));                // enough to overpower the raid
     const guards = armyOf(sim, p, true)
       .sort((a, b) => ((a.x - v.x) ** 2 + (a.z - v.z) ** 2) - ((b.x - v.x) ** 2 + (b.z - v.z) ** 2))
-      .slice(0, 5);
+      .slice(0, want);
     if (guards.length) cmds.push({ k: 'attack', p, ids: guards.map(u => u.id), tgt: attacker.id, x: attacker.x, z: attacker.z });
     const safe = saferOreField(sim, v, attacker.x, attacker.z);
     if (safe) cmds.push({ k: 'harvest', p, ids: [v.id], x: safe.x + 0.5, z: safe.z + 0.5 });
-    mem.harvDefCd = 6 * TICKS_PER_SEC;
+    mem.harvDefCd = 5 * TICKS_PER_SEC;
   }
 
   // --- macro cadence ---
