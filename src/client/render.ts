@@ -113,7 +113,7 @@ function loadGLB(file: string): Promise<any> {
 export async function preloadModels(onProgress?: (done: number, total: number) => void): Promise<void> {
   const files = new Set<string>();
   for (const t in MODEL_DEFS) files.add(MODEL_DEFS[t].file);
-  for (const f of ['oilfield', 'powerplant', 'ammobox', 'refinery', 'airfield', 'barracks', 'wall', 'radar', 'lab', 'sam']) files.add(f);
+  for (const f of ['oilfield', 'powerplant', 'ammobox', 'refinery', 'airfield', 'barracks', 'wall', 'radar', 'lab', 'sam', 'railgun']) files.add(f);
   const list = [...files]; let done = 0;
   onProgress?.(0, list.length);
   await Promise.all(list.map(f => loadGLB(f).catch(() => null).then(() => { onProgress?.(++done, list.length); })));
@@ -1008,6 +1008,7 @@ export class Renderer {
   private factoryTop = 2.6;                         // scaled model height (team band sits here)
   private bldgProtos: Record<string, THREE.Group> = {}; // other GLB building models, cloned per building
   private bldgAnims: Record<string, THREE.AnimationClip[]> = {}; // GLB clips (e.g. radar dish spin), played live per instance
+  private bldgAimOff: Record<string, number> = {};  // yaw offset (rad) for aimable GLB turrets so they face their target
   bldgFoot: Record<string, number> = {};           // GLB building model footprint half-extent (world units) — for picking + foundation
   private cruiseY = 12; // constant flight altitude (set from the map's tallest terrain in buildTerrain)
   private rampAnim = new Map<number, number>();     // unit id → seconds left of the "drive down the ramp" descent
@@ -1204,6 +1205,7 @@ export class Renderer {
     this.loadBuildingModel('wall', 'wall', 1.65);          // Wall GLB ("Concrete Barrier HQ" by Sabri Ayeş, Sketchfab, CC-BY) — 50% larger
     this.loadBuildingModel('lab', 'lab', 3.6);             // Research Lab GLB ("ResearchCenter_Building001" by Christian Rudorff, Sketchfab, CC-BY) — 25% smaller (4.8 -> 3.6)
     this.loadBuildingModel('sam', 'sam', 1.9);             // Missile Battery GLB ("MissileTower_Building002" by Christian Rudorff, Sketchfab, CC-BY) — AA missile tower
+    this.loadBuildingModel('cannon', 'railgun', 2.4);      // Heavy Cannon GLB ("Railgun Turret" by Yudha Mfr, Sketchfab, CC-BY) — animated; falls back to procedural until railgun.glb is present
     // Oil Rig reuses the oil-well "Oil Pump" model, 25% taller than the free well
     // (well is normalised to 2.0 tall in loadOilModel) so building one just enlarges it
     this.loadBuildingModel('oilrig', 'oilfield', 2.5, true);
@@ -1710,7 +1712,17 @@ export class Renderer {
       src.position.set(-ctr.x, -box.min.y, -ctr.z);
       src.traverse(o => { const m = o as any; if (m.isMesh) { m.castShadow = true; m.receiveShadow = true; } });
       const inner = new THREE.Group(); inner.add(src); inner.scale.setScalar(s);
-      const proto = new THREE.Group(); proto.add(inner);
+      const proto = new THREE.Group();
+      // aimable turrets (Missile Battery, Heavy Cannon): wrap the model in a yaw pivot
+      // so it can turn to face its target. The foundation stays on proto (doesn't turn).
+      // The number is a per-model facing offset (the model's "forward" axis) — tune visually.
+      const AIMABLE: Record<string, number> = { sam: 0, cannon: 0 };
+      if (type in AIMABLE) {
+        const pivot = new THREE.Group(); pivot.name = '__aimPivot'; pivot.add(inner); proto.add(pivot);
+        this.bldgAimOff[type] = AIMABLE[type];
+      } else {
+        proto.add(inner);
+      }
       this.bldgFoot[type] = Math.max(size.x, size.z) * s / 2; // scaled half-footprint
       // concrete foundation skirt: a dark slab under the model that extends below
       // the base, so on sloped/bumpy ground the building reads as sitting on a pad
@@ -1744,6 +1756,8 @@ export class Renderer {
     if (type === 'factory' && this.factoryProto) return this.factoryProto.clone(true);
     if (this.bldgProtos[type]) {
       const g = this.bldgProtos[type].clone(true);
+      const piv = g.getObjectByName('__aimPivot');   // aimable GLB turret → expose its yaw pivot
+      if (piv) g.userData.pivot = piv;
       const clips = this.bldgAnims[type];
       if (clips && clips.length) {
         // the GLB ships its own animation (e.g. the radar dish spinning) — play it
@@ -2374,6 +2388,20 @@ export class Renderer {
               t: 0, delay: 0, dur: Math.max(0.07, dist * 0.012), arc: 0.05, noSmoke: true, scale: 0.55,
             });
           }
+        } else if (ev.w === 12) {
+          // Missile Battery (SAM): a pair of guided AA missiles streaking up to the
+          // aircraft's altitude (y2 = flyer cruise height via ev.tf), each trailing
+          // smoke; the rockets updater spawns the impact burst on arrival at the target
+          const dist = Math.hypot(ev.tx - ev.x, ev.tz - ev.z);
+          for (let k = 0; k < 2 && this.rockets.length < 64; k++) {
+            const ox = (Math.random() - 0.5) * 0.5, oz = (Math.random() - 0.5) * 0.5;
+            this.rockets.push({
+              x0: ev.x, y0: y1 + 0.5, z0: ev.z,
+              x1: ev.tx + ox, y1: y2, z1: ev.tz + oz,
+              t: 0, delay: k * 0.12, dur: Math.max(0.28, dist * 0.025), arc: 0.6,
+            });
+          }
+          this.spawnParts(ev.x, y1 + 0.6, ev.z, 4, false); // launch flash
         } else {
           if (this.tracers.length < MAX_TRACER) this.tracers.push({ x1: ev.x, y1, z1: ev.z, x2: ev.tx, y2, z2: ev.tz, t: 0.1 });
           this.spawnParts(ev.tx, y2, ev.tz, 2, false);
@@ -2540,7 +2568,8 @@ export class Renderer {
         // turret gun tracks its last target
         const piv = rec.g.userData.pivot as THREE.Group | undefined;
         if (piv && rec.aim !== undefined) {
-          let da = rec.aim - piv.rotation.y;
+          const want = rec.aim + (this.bldgAimOff[rec.type] || 0); // model facing offset for GLB turrets
+          let da = want - piv.rotation.y;
           while (da > Math.PI) da -= Math.PI * 2;
           while (da < -Math.PI) da += Math.PI * 2;
           piv.rotation.y += da * Math.min(1, dt * 7);

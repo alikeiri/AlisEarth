@@ -1322,7 +1322,8 @@ export class Sim {
       : att.type === 'rifle' || att.type === 'ifv' ? 0
       : att.type === 'sub' ? (tgt.b ? 8 : 7)                                 // sub: cruise missile vs buildings, torpedo vs ships
       : att.type === 'flak' ? 5                                              // pom-pom flak
-      : att.type === 'rocket' || att.type === 'sam' || att.type === 'aatank' ? 1
+      : att.type === 'sam' ? 12                                              // Missile Battery: guided AA missiles streaking up to the target
+      : att.type === 'rocket' || att.type === 'aatank' ? 1
       : att.type === 'mlrs' || att.type === 'msldrone' || att.type === 'mortar' || att.type === 'artillery' || att.type === 'artyship' ? 4
       : att.type === 'heli' || att.type === 'helidrone' ? (tgtInf ? 0 : 1)   // guns vs inf, rockets vs veh/bld
       : att.type === 'heavy' || att.type === 'destroyer' ? 6                 // heavy/naval gun
