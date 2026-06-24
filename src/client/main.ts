@@ -1338,9 +1338,13 @@ class GameClient {
     const dbl = now - this.lastClick.t < 350 && Math.hypot(sx - this.lastClick.x, sy - this.lastClick.y) < 24;
     this.lastClick = { t: now, x: sx, y: sy };
     const ownHit = this.pickView(sx, sy, v => v.o === me);
-    if (dbl && ownHit && !ownHit.b) { // double-tap own unit → all same type on screen
+    if (dbl && ownHit) { // double-tap own unit OR building → select all of that type on screen (FOV)
       this.selection.clear();
-      for (const v of this.lastViews) if (!v.b && v.o === me && v.t === ownHit.t && this.renderer.project(v.x, v.z, 0.5).ok) this.selection.add(v.i);
+      for (const v of this.lastViews) {
+        if (!!v.b !== !!ownHit.b || v.o !== me || v.t !== ownHit.t) continue;
+        if (this.renderer.project(v.x, v.z, v.b ? 1 : 0.5).ok) this.selection.add(v.i);
+      }
+      audio.play('click');
       return;
     }
     // with a selection, tapping ground/enemy issues an order; tapping own unit selects it
