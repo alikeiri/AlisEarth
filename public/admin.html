@@ -216,8 +216,10 @@
     $('rmSummary').innerHTML = `<div class="stat">${''}<div class="n">${RM.length}</div><div class="l">Total</div></div>`
       + rmStatuses.map(s => `<div class="stat click" data-s="${s}"><div class="n">${counts[s]||0}</div><div class="l">${ST_LABEL[s]}</div></div>`).join('');
     $('rmSummary').querySelectorAll('.stat.click').forEach(el => el.onclick = () => { $('rmStatusFilter').value = el.dataset.s; renderRoadmap(); });
-    // rows
+    // rows — keep active work at the top; sink anything already shipped to
+    // production to the bottom (stable sort preserves the prio order within each group)
     const list = rmFiltered();
+    list.sort((a, b) => (a.deploy === 'prod' ? 1 : 0) - (b.deploy === 'prod' ? 1 : 0));
     $('rmShown').textContent = list.length + ' of ' + RM.length;
     const opts = it => rmStatuses.map(s => `<option value="${s}" ${s===it.status?'selected':''}>${ST_LABEL[s]}</option>`).join('');
     $('rmList').innerHTML = list.map(it => `
