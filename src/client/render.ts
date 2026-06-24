@@ -1193,7 +1193,7 @@ export class Renderer {
     this.loadFactoryModel();
     this.loadBuildingModel('power', 'powerplant', 3.6);   // Power Plant GLB ("RTS Military Building 1" by Sabri Ayeş, Sketchfab, CC-BY) — 50% larger footprint
     this.loadBuildingModel('refinery', 'refinery', 8.72); // Ore Refinery GLB (Sketchfab, CC-BY)
-    this.loadBuildingModel('airfield', 'airfield', 4.73);  // Airfield GLB ("RTS Airport" by Sabri Ayeş, Sketchfab, CC-BY)
+    this.loadBuildingModel('airfield', 'airfield', 8.28);  // Airfield GLB ("RTS Airport" by Sabri Ayeş, Sketchfab, CC-BY) — 75% larger
     this.loadBuildingModel('barracks', 'barracks', 4.5);   // Barracks GLB ("RTS Barracks" by Sabri Ayeş, Sketchfab, CC-BY) — 50% larger
     this.loadBuildingModel('radar', 'radar', 4.35);        // Radar Dome GLB ("RTS Radar Tower" by Sabri Ayeş, Sketchfab, CC-BY) — 50% larger
     this.loadBuildingModel('wall', 'wall', 1.65);          // Wall GLB ("Concrete Barrier HQ" by Sabri Ayeş, Sketchfab, CC-BY) — 50% larger
