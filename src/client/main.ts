@@ -1651,20 +1651,14 @@ class GameClient {
     const hit = this.pickView(e.clientX, e.clientY, v => v.o === me);
     // (rally points are set with RIGHT click; left-click on ground deselects)
 
-    if (dbl && hit && !hit.b) {
-      // select all same-type on screen
+    if (dbl && hit) {
+      // double-click own unit OR building → select all of that type on screen (FOV)
       this.selection.clear();
       for (const v of this.lastViews) {
-        if (v.b || v.o !== me || v.t !== hit.t) continue;
-        if (this.renderer.project(v.x, v.z, 0.5).ok) this.selection.add(v.i);
+        if (!!v.b !== !!hit.b || v.o !== me || v.t !== hit.t) continue;
+        if (this.renderer.project(v.x, v.z, v.b ? 1 : 0.5).ok) this.selection.add(v.i);
       }
-      return;
-    }
-    if (dbl && hit && hit.b && ['barracks', 'factory', 'dronefac', 'airforce', 'shipyard'].includes(hit.t)) {
-      // double-click a production building → set it primary for its type
-      this.game.issue({ k: 'primary', p: me, bid: hit.i });
-      this.selection.clear(); this.selection.add(hit.i);
-      audio.play('confirm');
+      audio.play('click');
       return;
     }
     if (!e.shiftKey) this.selection.clear();
@@ -2690,10 +2684,11 @@ class GameClient {
       }
       this.pwrState = st;
     }
-    // a missile silo finished anywhere on the map — announce once per session
-    if (!this.siloCued && views.some(v => v.b && v.t === 'silo' && (v.pr ?? 1) >= 1)) {
+    // an ENEMY missile silo finished — announce once per session (our own silo is
+    // no threat, so building one ourselves never triggers the warning)
+    if (!this.siloCued && views.some(v => v.b && v.t === 'silo' && v.o !== this.game.me && (v.pr ?? 1) >= 1)) {
       this.siloCued = true; audio.play('siloup');
-      if (this.soundOff) this.notify('☢ Missile silo online', '#ff8a5a');
+      if (this.soundOff) this.notify('☢ Enemy missile silo online', '#ff8a5a');
     }
     // my units / buildings taking fire — separate cues, 30s apart each
     for (const v of views) {
