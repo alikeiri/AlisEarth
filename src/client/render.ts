@@ -1194,8 +1194,8 @@ export class Renderer {
     // War Factory now wears the former Power Plant model ("RTS Military Building 1"),
     // same 3.6 sizing — generic loader, so makeBuildingGroup uses bldgProtos['factory']
     // (factoryProto stays null, the old poly.pizza factory is retired)
-    this.loadBuildingModel('factory', 'powerplant', 3.6); // ("RTS Military Building 1" by Sabri Ayeş, Sketchfab, CC-BY)
-    this.loadBuildingModel('power', 'ammobox', 4.8);       // Power Plant GLB ("RTS Ammo Box" by Sabri Ayeş, Sketchfab, CC-BY) — 2x the original 2.4 default
+    this.loadBuildingModel('factory', 'powerplant', 1.8); // ("RTS Military Building 1" by Sabri Ayeş, Sketchfab, CC-BY) — 50% smaller (3.6 -> 1.8)
+    this.loadBuildingModel('power', 'ammobox', 7.2);       // Power Plant GLB ("RTS Ammo Box" by Sabri Ayeş, Sketchfab, CC-BY) — 50% larger (4.8 -> 7.2)
     this.loadBuildingModel('refinery', 'refinery', 8.72); // Ore Refinery GLB (Sketchfab, CC-BY)
     this.loadBuildingModel('airfield', 'airfield', 8.28);  // Airfield GLB ("RTS Airport" by Sabri Ayeş, Sketchfab, CC-BY) — 75% larger
     this.loadBuildingModel('barracks', 'barracks', 4.5);   // Barracks GLB ("RTS Barracks" by Sabri Ayeş, Sketchfab, CC-BY) — 50% larger
