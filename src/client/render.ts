@@ -1007,6 +1007,7 @@ export class Renderer {
   private factoryProto: THREE.Group | null = null; // War Factory GLB (poly.pizza), cloned per building
   private factoryTop = 2.6;                         // scaled model height (team band sits here)
   private bldgProtos: Record<string, THREE.Group> = {}; // other GLB building models, cloned per building
+  private bldgAnims: Record<string, THREE.AnimationClip[]> = {}; // GLB clips (e.g. radar dish spin), played live per instance
   bldgFoot: Record<string, number> = {};           // GLB building model footprint half-extent (world units) — for picking + foundation
   private cruiseY = 12; // constant flight altitude (set from the map's tallest terrain in buildTerrain)
   private rampAnim = new Map<number, number>();     // unit id → seconds left of the "drive down the ramp" descent
@@ -1699,6 +1700,7 @@ export class Renderer {
   // its cell footprint) and cache a prototype cloned per building in makeBuildingGroup.
   private loadBuildingModel(type: string, file: string, target: number, byHeight = false) {
     loadGLB(file).then(gltf => {
+      if (gltf.animations && gltf.animations.length) this.bldgAnims[type] = gltf.animations; // keep clips (radar dish spin, etc.)
       const src = gltf.scene.clone(true); src.updateMatrixWorld(true); // clone: we mutate transforms
       const box = new THREE.Box3().setFromObject(src);
       const size = new THREE.Vector3(); box.getSize(size);
@@ -1740,7 +1742,26 @@ export class Renderer {
     // the GLB models speak for themselves; ownership reads via the selection ring,
     // minimap and HUD.
     if (type === 'factory' && this.factoryProto) return this.factoryProto.clone(true);
-    if (this.bldgProtos[type]) return this.bldgProtos[type].clone(true);
+    if (this.bldgProtos[type]) {
+      const g = this.bldgProtos[type].clone(true);
+      const clips = this.bldgAnims[type];
+      if (clips && clips.length) {
+        // the GLB ships its own animation (e.g. the radar dish spinning) — play it
+        // live on this instance. Cheap: buildings are individual clones, not instanced.
+        const mixer = new THREE.AnimationMixer(g);
+        for (const clip of clips) {
+          const act = mixer.clipAction(clip);
+          // loop continuous motion (dishes, antennae); one-shot deploy/door clips play
+          // once on build and clamp at their end pose instead of cycling forever
+          if (/door|open|close|activ|deploy|fire|shoot|launch|explo/i.test(clip.name)) {
+            act.setLoop(THREE.LoopOnce, 1); act.clampWhenFinished = true;
+          }
+          act.play();
+        }
+        g.userData.mixer = mixer;
+      }
+      return g;
+    }
     return buildingGroupPro(type, col);
   }
 
@@ -2524,9 +2545,12 @@ export class Renderer {
           while (da < -Math.PI) da += Math.PI * 2;
           piv.rotation.y += da * Math.min(1, dt * 7);
         }
-        // radar dish sweeps continuously
+        // radar dish sweeps continuously (procedural building)
         const dish = rec.g.userData.spinDish as THREE.Mesh | undefined;
         if (dish) dish.rotation.z = this.time * 1.4;
+        // GLB models that ship their own animation clips (radar dish spin, etc.) — advance them
+        const mx = rec.g.userData.mixer as THREE.AnimationMixer | undefined;
+        if (mx) mx.update(dt);
         if (selection.has(v.i) && selN < MAX_INST) {
           this.dummy.position.set(v.x, y + 0.1, v.z);
           this.dummy.scale.setScalar((v.sz || 1) * 1.6);
