@@ -1007,6 +1007,7 @@ export class Renderer {
   private factoryProto: THREE.Group | null = null; // War Factory GLB (poly.pizza), cloned per building
   private factoryTop = 2.6;                         // scaled model height (team band sits here)
   private bldgProtos: Record<string, THREE.Group> = {}; // other GLB building models, cloned per building
+  bldgFoot: Record<string, number> = {};           // GLB building model footprint half-extent (world units) — for picking + foundation
   private cruiseY = 12; // constant flight altitude (set from the map's tallest terrain in buildTerrain)
   private rampAnim = new Map<number, number>();     // unit id → seconds left of the "drive down the ramp" descent
   private prevVeh = new Set<number>();              // ground-vehicle ids seen last frame (to detect freshly-built ones)
@@ -1708,6 +1709,18 @@ export class Renderer {
       src.traverse(o => { const m = o as any; if (m.isMesh) { m.castShadow = true; m.receiveShadow = true; } });
       const inner = new THREE.Group(); inner.add(src); inner.scale.setScalar(s);
       const proto = new THREE.Group(); proto.add(inner);
+      this.bldgFoot[type] = Math.max(size.x, size.z) * s / 2; // scaled half-footprint
+      // concrete foundation skirt: a dark slab under the model that extends below
+      // the base, so on sloped/bumpy ground the building reads as sitting on a pad
+      // instead of floating or sinking into the terrain
+      const fw = Math.max(size.x, size.z) * s * 0.96;
+      const found = new THREE.Mesh(
+        new THREE.BoxGeometry(fw, 1.4, fw),
+        new THREE.MeshStandardMaterial({ color: 0x6b6f73, roughness: 0.95, metalness: 0.05 }),
+      );
+      found.position.y = -1.4 / 2 + 0.06; // top just above ground, body sunk to fill slope gaps
+      found.castShadow = false; found.receiveShadow = true;
+      proto.add(found);
       this.bldgProtos[type] = proto;
       this.refreshBuildingModel(type); // swap any already-placed buildings (e.g. the starting refinery)
     }).catch(() => { /* missing model — keep the procedural building */ });
@@ -2478,9 +2491,19 @@ export class Renderer {
         }
         // the shipyard straddles the coast — float it at the water surface so it
         // sits on the water (on stilts), not sunk to the ocean floor
-        const y = v.t === 'shipyard'
-          ? Math.max(this.map.heightAt(v.x, v.z), SEA - 0.05)
-          : this.map.heightAt(v.x, v.z);
+        let y: number;
+        if (v.t === 'shipyard') {
+          y = Math.max(this.map.heightAt(v.x, v.z), SEA - 0.05);
+        } else {
+          // sit on the HIGHEST terrain under the footprint so the model never sinks
+          // into a rise; the foundation skirt fills the gap on the downhill side
+          const hf = this.bldgFoot[v.t] ?? ((v.sz || 1) / 2);
+          y = Math.max(
+            this.map.heightAt(v.x, v.z),
+            this.map.heightAt(v.x - hf, v.z - hf), this.map.heightAt(v.x + hf, v.z - hf),
+            this.map.heightAt(v.x - hf, v.z + hf), this.map.heightAt(v.x + hf, v.z + hf),
+          );
+        }
         rec.g.position.set(v.x, y, v.z);
         const sc = 0.15 + 0.85 * Math.min(1, v.pr);
         const lvS = 1 + 0.06 * ((v.lv || 1) - 1); // upgraded buildings grow slightly

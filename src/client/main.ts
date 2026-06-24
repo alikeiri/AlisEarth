@@ -1370,7 +1370,18 @@ class GameClient {
         : this.renderer.project(v.x, v.z, v.b ? 1 : 0.5);
       if (!p.ok) continue;
       const d = Math.hypot(p.x - sx, p.y - sy);
-      const r = v.b ? 14 + (v.sz || 1) * 7 : (ud?.fly ? 20 : 16); // a touch more slack for fast movers
+      let r: number;
+      if (v.b) {
+        // GLB building models can be much larger than their grid footprint (e.g. the
+        // airfield) — size the hit area to the model's on-screen footprint so clicking
+        // the visible model selects it, not just the ground beside it
+        const foot = this.renderer.bldgFoot[v.t];
+        if (foot) {
+          const e = this.renderer.project(v.x + foot, v.z, 0.5);
+          const px = e.ok ? Math.hypot(e.x - p.x, e.y - p.y) : 0;
+          r = Math.max(14 + (v.sz || 1) * 7, px + 12);
+        } else r = 14 + (v.sz || 1) * 7;
+      } else r = ud?.fly ? 20 : 16; // a touch more slack for fast movers
       if (d < r && d < bd) { bd = d; best = v; }
     }
     return best;
@@ -3772,7 +3783,35 @@ async function goOnline(): Promise<boolean> {
   }
 }
 
+// remember the start-screen selections between games (faction, size, map type,
+// ore level, fog, AI roster) so the player doesn't reselect every time
+function saveMenuPrefs() {
+  try {
+    safeLS.setItem('fe_menu', JSON.stringify({
+      faction: selFaction, size: selSize,
+      mapType: ($('mapType') as HTMLSelectElement)?.value || 'continent',
+      ore: oreLevelSel, fog: fogEnabled, ai: aiList,
+    }));
+  } catch { /* no storage */ }
+}
+function loadMenuPrefs() {
+  let p: any = null;
+  try { p = JSON.parse(safeLS.getItem('fe_menu') || 'null'); } catch { /* none */ }
+  if (!p) return;
+  if (typeof p.faction === 'string') selFaction = p.faction;
+  if (typeof p.size === 'number') selSize = p.size;
+  if (typeof p.ore === 'number') oreLevelSel = p.ore & 3;
+  if (typeof p.fog === 'boolean') fogEnabled = p.fog;
+  if (Array.isArray(p.ai) && p.ai.length)
+    aiList = p.ai.filter((a: any) => typeof a?.lvl === 'number' && typeof a?.team === 'number').map((a: any) => ({ lvl: a.lvl, team: a.team }));
+  const mt = $('mapType') as HTMLSelectElement | null;
+  if (mt && typeof p.mapType === 'string' && [...mt.options].some(o => o.value === p.mapType)) mt.value = p.mapType;
+  const oa = $('oreAmt') as HTMLSelectElement | null; if (oa) oa.value = String(oreLevelSel);
+  const fc = $('fogChk') as HTMLInputElement | null; if (fc) fc.checked = fogEnabled;
+}
+
 function initMenus() {
+  loadMenuPrefs();   // restore the player's last start-screen choices
   buildFactionCards();
   // audio must be unlocked by a user gesture; init is idempotent
   document.addEventListener('pointerdown', () => audio.init());
@@ -3844,6 +3883,7 @@ function initMenus() {
       return;
     }
     $('menuErr').textContent = '';
+    saveMenuPrefs();                                 // remember these choices for next time
     const levels = aiList.map(a => a.lvl);          // each AI's difficulty
     const teams = [1, ...aiList.map(a => a.team)];   // you are team 1; AIs follow
     startGame(new LocalGame(playerName(), selFaction, selDiff, selSize, null, levels, teams));
