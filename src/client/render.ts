@@ -1194,14 +1194,14 @@ export class Renderer {
     // War Factory now wears the former Power Plant model ("RTS Military Building 1"),
     // same 3.6 sizing — generic loader, so makeBuildingGroup uses bldgProtos['factory']
     // (factoryProto stays null, the old poly.pizza factory is retired)
-    this.loadBuildingModel('factory', 'powerplant', 1.8); // ("RTS Military Building 1" by Sabri Ayeş, Sketchfab, CC-BY) — 50% smaller (3.6 -> 1.8)
-    this.loadBuildingModel('power', 'ammobox', 7.2);       // Power Plant GLB ("RTS Ammo Box" by Sabri Ayeş, Sketchfab, CC-BY) — 50% larger (4.8 -> 7.2)
+    this.loadBuildingModel('factory', 'powerplant', 5.4); // ("RTS Military Building 1" by Sabri Ayeş, Sketchfab, CC-BY) — War Factory 50% larger (3.6 -> 5.4)
+    this.loadBuildingModel('power', 'ammobox', 2.4);       // Power Plant GLB ("RTS Ammo Box" by Sabri Ayeş, Sketchfab, CC-BY) — 50% smaller (4.8 -> 2.4)
     this.loadBuildingModel('refinery', 'refinery', 8.72); // Ore Refinery GLB (Sketchfab, CC-BY)
     this.loadBuildingModel('airfield', 'airfield', 8.28);  // Airfield GLB ("RTS Airport" by Sabri Ayeş, Sketchfab, CC-BY) — 75% larger
     this.loadBuildingModel('barracks', 'barracks', 4.5);   // Barracks GLB ("RTS Barracks" by Sabri Ayeş, Sketchfab, CC-BY) — 50% larger
-    this.loadBuildingModel('radar', 'radar', 2.18);        // Radar Dome GLB ("RTS Radar Tower" by Sabri Ayeş, Sketchfab, CC-BY) — 50% smaller (4.35 -> 2.18)
+    this.loadBuildingModel('radar', 'radar', 2.83);        // Radar Dome GLB ("RTS Radar Tower" by Sabri Ayeş, Sketchfab, CC-BY) — 30% larger (2.18 -> 2.83)
     this.loadBuildingModel('wall', 'wall', 1.65);          // Wall GLB ("Concrete Barrier HQ" by Sabri Ayeş, Sketchfab, CC-BY) — 50% larger
-    this.loadBuildingModel('lab', 'lab', 4.8);             // Research Lab GLB ("ResearchCenter_Building001" by Christian Rudorff, Sketchfab, CC-BY) — 50% larger (3.2 -> 4.8)
+    this.loadBuildingModel('lab', 'lab', 3.6);             // Research Lab GLB ("ResearchCenter_Building001" by Christian Rudorff, Sketchfab, CC-BY) — 25% smaller (4.8 -> 3.6)
     this.loadBuildingModel('sam', 'sam', 1.9);             // Missile Battery GLB ("MissileTower_Building002" by Christian Rudorff, Sketchfab, CC-BY) — AA missile tower
     // Oil Rig reuses the oil-well "Oil Pump" model, 25% taller than the free well
     // (well is normalised to 2.0 tall in loadOilModel) so building one just enlarges it
