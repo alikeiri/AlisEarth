@@ -1194,9 +1194,9 @@ export class Renderer {
     this.loadBuildingModel('power', 'powerplant', 3.6);   // Power Plant GLB ("RTS Military Building 1" by Sabri Ayeş, Sketchfab, CC-BY) — 50% larger footprint
     this.loadBuildingModel('refinery', 'refinery', 8.72); // Ore Refinery GLB (Sketchfab, CC-BY)
     this.loadBuildingModel('airfield', 'airfield', 4.73);  // Airfield GLB ("RTS Airport" by Sabri Ayeş, Sketchfab, CC-BY)
-    this.loadBuildingModel('barracks', 'barracks', 3.0);   // Barracks GLB ("RTS Barracks" by Sabri Ayeş, Sketchfab, CC-BY)
-    this.loadBuildingModel('radar', 'radar', 2.9);         // Radar Dome GLB ("RTS Radar Tower" by Sabri Ayeş, Sketchfab, CC-BY)
-    this.loadBuildingModel('wall', 'wall', 1.1);           // Wall GLB ("Concrete Barrier HQ" by Sabri Ayeş, Sketchfab, CC-BY)
+    this.loadBuildingModel('barracks', 'barracks', 4.5);   // Barracks GLB ("RTS Barracks" by Sabri Ayeş, Sketchfab, CC-BY) — 50% larger
+    this.loadBuildingModel('radar', 'radar', 4.35);        // Radar Dome GLB ("RTS Radar Tower" by Sabri Ayeş, Sketchfab, CC-BY) — 50% larger
+    this.loadBuildingModel('wall', 'wall', 1.65);          // Wall GLB ("Concrete Barrier HQ" by Sabri Ayeş, Sketchfab, CC-BY) — 50% larger
     // Oil Rig reuses the oil-well "Oil Pump" model, 25% taller than the free well
     // (well is normalised to 2.0 tall in loadOilModel) so building one just enlarges it
     this.loadBuildingModel('oilrig', 'oilfield', 2.5, true);
@@ -2255,7 +2255,9 @@ export class Renderer {
         // flyer shots (ev.f) originate at the aircraft's cruise altitude, not just
         // a small lift above the ground — otherwise tracers came from under the plane
         const y1 = ev.f ? this.flyY(ev.x, ev.z, 2.3) : Math.max(this.map.heightAt(ev.x, ev.z), SEA) + 0.6;
-        const y2 = Math.max(this.map.heightAt(ev.tx, ev.tz), SEA) + 0.5;
+        // target airborne (ev.tf) → aim at the flyer cruise altitude (the same
+        // flyY(...,2.3) the unit renders at), not the ground beneath it
+        const y2 = ev.tf ? this.flyY(ev.tx, ev.tz, 2.3) : Math.max(this.map.heightAt(ev.tx, ev.tz), SEA) + 0.5;
         // a turret fired: remember its aim so the gun pivot can track
         for (const rec of this.buildings.values()) {
           if (!rec.g.userData.pivot) continue;

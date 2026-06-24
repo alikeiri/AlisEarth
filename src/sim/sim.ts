@@ -1329,6 +1329,9 @@ export class Sim {
       : ud?.kind === 'air' ? 3 : 2;
     const ev: any = { e: 'shot', x: att.x, z: att.z, tx: tgt.x, tz: tgt.z, w };
     if (ud?.fly) ev.f = 1;
+    // target is airborne → tell the renderer to aim the tracer at the flyer's
+    // cruise altitude, not the ground beneath it (AA fire was hitting the dirt)
+    if (!tgt.b && UNITS[tgt.type]?.fly) ev.tf = 1;
     this.events.push(ev);
   }
 
