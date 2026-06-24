@@ -14,6 +14,7 @@ export interface Order {
   pD?: number; pT?: number; // harvest approach progress watchdog
   r?: number; // force-fire barrage (Sperrfeuer): shells scatter randomly in this radius around x,z
   keep?: boolean; // attack: a player-issued order — stick to THIS target, no auto-switch
+  spd?: number; // move: cap travel to this base speed (group move = slowest member's speed)
 } // kinds: move attack harvest patrol rtb flee repair road
 
 export interface Entity {
@@ -678,7 +679,7 @@ export class Sim {
         const u = this.ents.get(c.ids[i]);
         if (!u || u.b || u.owner !== c.p) continue;
         if (c.xs?.[i] === undefined || c.zs?.[i] === undefined) continue;
-        const ord: Order = { k: 'move', x: c.xs[i], z: c.zs[i] };
+        const ord: Order = { k: 'move', x: c.xs[i], z: c.zs[i], spd: c.spd };
         if (c.q) u.orders.push(ord);
         else { u.orders = [ord]; u.path = null; }
       }
@@ -773,7 +774,7 @@ export class Sim {
       let ord: Order | null = null;
       if (c.k === 'move') {
         const o = FORM[Math.min(idx, FORM.length - 1)];
-        ord = { k: 'move', x: c.x + o.x, z: c.z + o.z };
+        ord = { k: 'move', x: c.x + o.x, z: c.z + o.z, spd: c.spd };
       } else if (c.k === 'attack') {
         // a human's direct attack order sticks to THIS target (no auto-switching
         // to whatever wanders into range); the AI keeps its fighting-advance
@@ -2518,7 +2519,11 @@ export class Sim {
   private moveToward(u: Entity, x: number, z: number, def: any): boolean {
     const d = Math.sqrt((u.x - x) * (u.x - x) + (u.z - z) * (u.z - z));
     if (d < 0.25) return true;
-    const speed = def.speed * this.players[u.owner].fac.speedMul;
+    // a group move caps everyone to the slowest member's base speed (ord.spd) so a
+    // mixed force advances together instead of fast units arriving alone and dying
+    const cap = u.orders[0]?.spd;
+    const baseSp = cap && cap > 0 ? Math.min(def.speed, cap) : def.speed;
+    const speed = baseSp * this.players[u.owner].fac.speedMul;
     if (def.fly) {
       // flyers travel in a straight line over anything
       const end = u.path?.[u.path.length - 1];

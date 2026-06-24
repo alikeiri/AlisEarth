@@ -982,6 +982,23 @@ export class UI {
         ctx.fillRect(p.x - w / 2, p.y + 3, w * Math.min(1, v.pr), 2);
       }
     }
+    // ammo / mine load: a row of small pips just under the HP bar (a bomber's bombs,
+    // an engineer's mines) — shown when selected or partly spent, so you can see at a
+    // glance what's left and when to rearm
+    for (const v of views) {
+      if (v.o !== me) continue;
+      const isAmmo = v.am !== undefined;
+      const have = isAmmo ? v.am : v.mn;
+      if (have === undefined) continue;
+      const max = isAmmo ? (UNITS[v.t]?.payload || 0) : (UNITS[v.t]?.mines || 0);
+      if (!max) continue;
+      if (!selection.has(v.i) && have >= max) continue;   // full + unselected → no clutter
+      const p = v.fy !== undefined ? projectY(v.x, v.fy + 1.0, v.z) : project(v.x, v.z, 1.25);
+      if (!p.ok) continue;
+      const n = Math.min(max, 8), pw = 4, gap = 1, tw = n * pw + (n - 1) * gap;
+      let x = p.x - tw / 2; const y = p.y + 2;
+      for (let i = 0; i < n; i++) { ctx.fillStyle = i < have ? (isAmmo ? '#ffd166' : '#9fd0ff') : 'rgba(0,0,0,0.55)'; ctx.fillRect(x, y, pw, 3); x += pw + gap; }
+    }
     // cargo progress bar above my harvesters / oil miners while they're working —
     // fills (gold) as they gather, turns green when full, empties on unload
     for (const v of views) {

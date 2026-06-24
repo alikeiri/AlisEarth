@@ -110,6 +110,8 @@ function simViews(sim: Sim, a: number): any[] {
       if (e.terraPath && e.terraPath.length) v.tf = 1; // bulldozer mid-terraform: ride the real ground, never float
       if (e.cargoUnits && e.cargoUnits.length) v.cu = e.cargoUnits.length; // transport: units aboard
       { const cap = UNITS[e.type]?.cargo; if (cap) v.cg = Math.max(0, Math.min(1, e.cargo / cap)); } // harvester/oil-miner fill %
+      if (e.ammo >= 0 && (UNITS[e.type]?.payload || 0) > 0) v.am = e.ammo;          // bomber bombs left this sortie
+      if (e.mineStock !== undefined && (UNITS[e.type]?.mines || 0) > 0) v.mn = e.mineStock; // engineer mines left
       if (e.wpLoop && e.wpLoop.length) v.lp = 1;                          // waypoint repeat on
       if (e.orders && e.orders.length) {                                  // remaining waypoints (for the path overlay)
         const wp: { x: number; z: number; a: number }[] = [];
@@ -596,6 +598,7 @@ class GameClient {
   private loadHover = false; // hovering my transport with loadable units selected
   private garrisonHover = false; // hovering a garrisonable building with infantry selected
   private oilHover = false; // engineer selected + hovering a claimable oil well
+  private oilCell: { cx: number; cz: number } | null = null; // that well's cell, for the oil-rig ghost
   private tipEl: HTMLDivElement | null = null;  // delayed name+HP hover tooltip
   private tipEntId = -1;
   private tipSince = 0;
@@ -1967,8 +1970,16 @@ class GameClient {
       this.recordWp(g.x, g.z, false, queue);
       return;
     }
-    this.game.issue({ k: 'move', p: me, ids, x: g.x, z: g.z, q: queue });
+    this.game.issue({ k: 'move', p: me, ids, x: g.x, z: g.z, q: queue, spd: this.groupSpd(ids) });
     this.recordWp(g.x, g.z, false, queue);
+  }
+
+  // slowest base speed among the moving units (2+) so a mixed group advances
+  // together instead of fast units arriving alone; undefined for a lone unit
+  private groupSpd(ids: number[]): number | undefined {
+    let n = 0, mn = Infinity;
+    for (const id of ids) { const v = this.byId.get(id); const s = v && !v.b ? (UNITS[v.t]?.speed || 0) : 0; if (s > 0) { mn = Math.min(mn, s); n++; } }
+    return n > 1 ? mn : undefined;
   }
 
   // Distribute selected units evenly along the drawn path, assigning slots
@@ -1984,7 +1995,7 @@ class GameClient {
     }
     if (L < 1.5) { // too short to be a line — treat as a normal move
       const end = path[path.length - 1];
-      this.game.issue({ k: 'move', p: this.game.me, ids, x: end.x, z: end.z, q: queue });
+      this.game.issue({ k: 'move', p: this.game.me, ids, x: end.x, z: end.z, q: queue, spd: this.groupSpd(ids) });
       audio.play('confirm');
       return;
     }
@@ -2012,7 +2023,7 @@ class GameClient {
       xs.push(Math.round(slots[i].x * 100) / 100);
       zs.push(Math.round(slots[i].z * 100) / 100);
     });
-    this.game.issue({ k: 'form', p: this.game.me, ids: ordered, xs, zs, q: queue });
+    this.game.issue({ k: 'form', p: this.game.me, ids: ordered, xs, zs, q: queue, spd: this.groupSpd(ordered) });
     audio.play('confirm');
     audio.ack(this.dominantType(ordered), 'move');
   }
@@ -2319,6 +2330,12 @@ class GameClient {
     } else if (this.ui.placing) {
       const gh = this.ghostAt(this.mouse.x, this.mouse.y);
       if (gh) { this.lastGhost = gh; this.renderer.setGhost(true, this.ui.placing, gh.cx, gh.cz, gh.ok); }
+    } else if (this.oilHover && this.oilCell) {
+      // engineer hovering a claimable oil well → preview the Oil Rig footprint there
+      this.lineCells = [];
+      this.lineStart = null;
+      this.lastGhost = null;
+      this.renderer.setGhost(true, 'oilrig', this.oilCell.cx, this.oilCell.cz, true);
     } else {
       this.lineCells = [];
       this.lineStart = null;
@@ -2420,9 +2437,10 @@ class GameClient {
         const gp = this.renderer.groundPoint(this.mouse.x / window.innerWidth, this.mouse.y / window.innerHeight);
         if (gp && gp.ok) {
           const ocx = Math.floor(gp.x), ocz = Math.floor(gp.z), m = this.game.map;
-          if (m.inB(ocx, ocz) && m.oil[ocz * W + ocx] === 1 && m.occ[ocz * W + ocx] === 0) oilH = true;
+          if (m.inB(ocx, ocz) && m.oil[ocz * W + ocx] === 1 && m.occ[ocz * W + ocx] === 0) { oilH = true; this.oilCell = { cx: ocx, cz: ocz }; }
         }
       }
+      if (!oilH) this.oilCell = null;
       this.oilHover = oilH;
       if (oilH) { hover = null; this.lastHover = null; }
     }
