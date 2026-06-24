@@ -304,12 +304,12 @@
   #tutBtns button.primary:hover { background: #25859c; }
   #tutProgress { flex: 1; text-align: center; font-size: 11px; color: #6f8497; letter-spacing: 0.04em; }
   /* surrender → "view battle report" banner over the revealed map */
-  #reportBanner { position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%); z-index: 60;
-    display: flex; align-items: center; gap: 14px; padding: 12px 18px; border-radius: 10px;
+  #reportBanner { position: fixed; left: 50%; top: 56px; transform: translateX(-50%); z-index: 60;
+    display: flex; align-items: center; gap: 16px; padding: 14px 22px; border-radius: 10px;
     background: rgba(18,26,34,0.94); border: 1px solid #2c3e50; box-shadow: 0 8px 36px rgba(0,0,0,0.6); }
   #reportBanner.hidden { display: none; }
-  #reportBanner span { color: #dfe9f0; font-size: 14px; }
-  #reportBanner #reportBtn { white-space: nowrap; }
+  #reportBanner span { color: #dfe9f0; font-size: 18px; font-weight: 600; }
+  #reportBanner #reportBtn { white-space: nowrap; font-size: 15px; }
 
   /* ===== Landing page ===== */
   #landing { position: fixed; inset: 0; z-index: 8000; overflow-y: auto; color: #e8eef3;
@@ -393,6 +393,26 @@
 </style>
 </head>
 <body>
+  <!-- staging banner: shown only when served from the TEST environment
+       (test.infinitegreed.com or the :8086 container). pointer-events:none so it
+       never blocks clicks. Toggled by the inline script just below. -->
+  <div id="envBanner" style="display:none;position:fixed;top:0;left:50%;transform:translateX(-50%);z-index:99999;pointer-events:none;
+       padding:3px 14px 4px;border-radius:0 0 8px 8px;font:700 12px/1.2 'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
+       letter-spacing:1.5px;color:#1a1206;background:linear-gradient(180deg,#ffd24a,#ff9e1b);
+       box-shadow:0 2px 8px rgba(0,0,0,.45);border:1px solid #b56b00;border-top:0;text-transform:uppercase">
+    ⚠ Test Environment
+  </div>
+  <script>
+    (function () {
+      var h = location.hostname, p = location.port;
+      if (h === 'test.infinitegreed.com' || h.indexOf('test.') === 0 || p === '8086') {
+        var b = document.getElementById('envBanner');
+        if (b) b.style.display = 'block';
+        document.title = '[TEST] ' + document.title;
+      }
+    })();
+  </script>
+
   <canvas id="three"></canvas>
   <canvas id="overlay"></canvas>
 
@@ -569,6 +589,12 @@
           <option value="flat">Flat City — totally flat: just roads &amp; buildings</option>
           <option value="steel">Steel Arena — bare metallic plain, all rich ore (mega battles)</option>
           <option value="metal">Metal Plain — flat metallic-grey floor, single colour, no textures</option>
+        </select></div>
+      <div class="optrow"><span class="optlabel">Ore / Oil</span>
+        <select id="oreAmt" style="flex:1;background:#1a2430;color:#cfe0ee;border:1px solid #2c3e50;border-radius:4px;padding:5px" title="How much contested ore, gem and oil there is on the map (start fields are unaffected)">
+          <option value="0">Normal</option>
+          <option value="2">Rich — more ore &amp; oil</option>
+          <option value="1">Sparse — less ore &amp; oil</option>
         </select></div>
       <button class="mbtn" id="btnTutorial" title="A guided first game — learn the economy, controls and combat step by step" style="width:100%;margin-bottom:8px;background:#13323d;border-color:#2e7d8f;color:#cdeef6">🎓 TUTORIAL — Learn to play</button>
       <div class="mrow">

@@ -710,8 +710,21 @@ export class UI {
 
   ping(x: number, z: number) { this.pings.push({ x, z, t: 1.2 }); }
 
-  minimap(map: GameMap, views: any[], camQuad: { x: number; z: number }[] | null, dt: number, fog?: (cx: number, cz: number) => number) {
+  minimap(map: GameMap, views: any[], camQuad: { x: number; z: number }[] | null, dt: number, fog?: (cx: number, cz: number) => number, gate?: 'ok' | 'noradar' | 'lowpower') {
     const ctx = this.mmCtx;
+    // gated: the minimap needs a powered Radar Dome to show the battlefield
+    if (gate && gate !== 'ok') {
+      ctx.fillStyle = '#0c1117'; ctx.fillRect(0, 0, 200, 200);
+      ctx.strokeStyle = gate === 'lowpower' ? '#5a3a3a' : '#33414f'; ctx.lineWidth = 2; ctx.strokeRect(4, 4, 192, 192);
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillStyle = gate === 'lowpower' ? '#ff6b5e' : '#7f93a6';
+      ctx.font = 'bold 14px system-ui, sans-serif';
+      ctx.fillText(gate === 'lowpower' ? 'LOW POWER' : 'NO RADAR', 100, 90);
+      ctx.fillStyle = '#69788a'; ctx.font = '11px system-ui, sans-serif';
+      ctx.fillText(gate === 'lowpower' ? 'Minimap offline' : 'Build a Radar Dome', 100, 112);
+      ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+      return;
+    }
     // rebuild the cached terrain image when bulldozing has reshaped the ground
     if (this.terrainCache && map.terraVersion !== this.terrainCacheVer) this.terrainCache = null;
     this.terrainCacheVer = map.terraVersion;
@@ -820,6 +833,7 @@ export class UI {
   overlay(
     ctx: CanvasRenderingContext2D,
     project: (x: number, z: number, yOff?: number) => { x: number; y: number; ok: boolean },
+    projectY: (x: number, y: number, z: number) => { x: number; y: number; ok: boolean },
     views: any[], me: number, selection: Set<number>,
     dragRect: { x0: number; y0: number; x1: number; y1: number } | null,
     hover?: { x: number; y: number } | null,
@@ -951,7 +965,9 @@ export class UI {
       // no clutter from selecting them or their (brief) construction
       if (v.t === 'wall' || v.t === 'barrier') { if (!damaged) continue; }
       else if (!damaged && !constructing && !selection.has(v.i)) continue;
-      const p = project(v.x, v.z, v.b ? 2.4 : 1.25);
+      // flyers carry their absolute render height (v.fy) — anchor the bar above the
+      // model in the air, not on the ground beneath it
+      const p = v.fy !== undefined ? projectY(v.x, v.fy + 1.0, v.z) : project(v.x, v.z, v.b ? 2.4 : 1.25);
       if (!p.ok) continue;
       const w = v.b ? 36 : 22;
       const frac = Math.max(0, v.h / v.m);
@@ -978,6 +994,26 @@ export class UI {
       ctx.fillRect(p.x - w / 2 - 1, p.y - 4, w + 2, 5);
       ctx.fillStyle = frac >= 1 ? '#57d977' : '#e0ad28';
       ctx.fillRect(p.x - w / 2, p.y - 3, w * frac, 3);
+    }
+    // upgrade-in-progress: a pulsing gold badge (target level) + a progress bar
+    // above any building currently being upgraded, so it's clear at a glance
+    for (const v of views) {
+      if (v.up === undefined || v.up >= 1) continue;
+      const p = project(v.x, v.z, (v.sz || 2) >= 3 ? 4.4 : 3.4);
+      if (!p.ok) continue;
+      const blink = (performance.now() / 400 | 0) % 2 === 0;
+      const label = '▲ Lv' + ((v.lv || 1) + 1);
+      const font = '700 11px system-ui,sans-serif';
+      const tw = this.textSprite(label, font, '#ffe9b8').w + 16;
+      const x0 = p.x - tw / 2, y0 = p.y - 16, h = 15;
+      ctx.fillStyle = blink ? 'rgba(196,132,22,0.96)' : 'rgba(150,100,16,0.92)';
+      ctx.beginPath();
+      (ctx as any).roundRect ? (ctx as any).roundRect(x0, y0, tw, h, 4) : ctx.rect(x0, y0, tw, h);
+      ctx.fill();
+      this.drawText(ctx, label, font, '#ffe9b8', p.x, y0 + h / 2 + 0.5, 'center');
+      const frac = Math.max(0, Math.min(1, v.up));
+      ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fillRect(x0, y0 + h + 1, tw, 3);
+      ctx.fillStyle = '#ffb02e';          ctx.fillRect(x0, y0 + h + 1, tw * frac, 3);
     }
     // garrison indicator: a marker above any building infantry can move into, so
     // garrisonable structures are easy to spot. Green = open, grey = full.

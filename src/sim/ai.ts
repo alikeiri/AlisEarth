@@ -19,6 +19,7 @@ interface AiMem {
   threatX?: number; threatZ?: number; threatN?: number; // where attacks come from
   hiveCd?: number; // pace hive production
   seenAir?: number; // decaying count of enemy air spotted (reactive AA)
+  seenVeh?: number; seenInf?: number; // decaying counts of scouted enemy armor / infantry (live counters)
   enemyAA?: number; // live count of enemy anti-air (units + batteries)
   enemyCombat?: number; // live count of enemy fighting units
   enemyBuildings?: number; // live count of enemy structures (walls excluded)
@@ -26,13 +27,15 @@ interface AiMem {
   missileThreatT?: number; // last tick an enemy silo existed / a warhead was inbound on us
   defenders?: number[]; // infantry designated to the fortified defense line
   harvDefCd?: number; // cooldown between harvester-rescue reactions
+  richMul?: number; // ore-richness multiplier for harvester target (sampled once)
+  oilWells?: { cx: number; cz: number }[]; // reachable oil wells near base (engineer targets)
 }
 
 const LVL = [
-  { cad: 5.5, peace: 480, waveEvery: 150, w0: 4,  wInc: 2, cap: 11, turrets: 2, sams: 0, harv: 2, barracks: 1, factories: 1, refs: 2, air: false, siege: 0, raid: 0 },
-  { cad: 2.0, peace: 240, waveEvery: 60,  w0: 10, wInc: 4, cap: 32, turrets: 3, sams: 1, harv: 4, barracks: 1, factories: 2, refs: 3, air: false, siege: 1, raid: 0 },
-  { cad: 1.0, peace: 150, waveEvery: 40,  w0: 16, wInc: 6, cap: 48, turrets: 4, sams: 2, harv: 5, barracks: 2, factories: 2, refs: 4, air: true,  siege: 2, raid: 45 },
-  { cad: 1.0, peace: 90,  waveEvery: 30,  w0: 22, wInc: 8, cap: 70, turrets: 5, sams: 3, harv: 6, barracks: 2, factories: 3, refs: 4, air: true,  siege: 3, raid: 35 },
+  { cad: 5.5, peace: 480, waveEvery: 150, w0: 4,  wInc: 2, cap: 11, turrets: 2, sams: 0, harv: 3,  barracks: 1, factories: 1, refs: 2, air: false, siege: 0, raid: 0 },
+  { cad: 2.0, peace: 240, waveEvery: 60,  w0: 10, wInc: 4, cap: 32, turrets: 3, sams: 1, harv: 6,  barracks: 1, factories: 1, refs: 3, air: false, siege: 1, raid: 0 },
+  { cad: 1.0, peace: 150, waveEvery: 40,  w0: 16, wInc: 6, cap: 48, turrets: 4, sams: 2, harv: 8,  barracks: 1, factories: 1, refs: 4, air: true,  siege: 2, raid: 45 },
+  { cad: 1.0, peace: 90,  waveEvery: 30,  w0: 22, wInc: 8, cap: 70, turrets: 5, sams: 3, harv: 10, barracks: 1, factories: 1, refs: 4, air: true,  siege: 3, raid: 35 },
 ];
 
 export function aiTick(sim: Sim, p: number): Cmd[] {
@@ -174,6 +177,22 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
     for (let z = 2; z < H - 2; z += 4) for (let x = 2; x < W - 2; x += 4) { tot++; if (sim.map.passableSea(x, z)) sea++; }
     mem.waterRel = tot > 0 && sea / tot >= 0.12;
   }
+
+  // ore richness (sampled once): a rich map should be exploited with a bigger
+  // harvester fleet. 0.02 ore-cell density ~ a normal map; clamped so it can't
+  // run away. Also cache the reachable oil wells near our base for the engineer.
+  if (mem.richMul === undefined) {
+    let oreCells = 0, samp = 0;
+    for (let z = 0; z < H; z += 2) for (let x = 0; x < W; x += 2) { samp++; if (sim.map.oreMax[z * W + x] > 0) oreCells++; }
+    const density = oreCells / Math.max(1, samp);
+    mem.richMul = Math.max(0.9, Math.min(1.8, density / 0.02));
+    const reg = sim.map.regionAt(Math.floor(pl.spawn.x), Math.floor(pl.spawn.z));
+    const wells: { cx: number; cz: number }[] = [];
+    for (let z = 0; z < H; z++) for (let x = 0; x < W; x++)
+      if (sim.map.oil[z * W + x] === 1 && sim.map.regionAt(x, z) === reg) wells.push({ cx: x, cz: z });
+    wells.sort((a, b) => ((a.cx - pl.spawn.x) ** 2 + (a.cz - pl.spawn.z) ** 2) - ((b.cx - pl.spawn.x) ** 2 + (b.cz - pl.spawn.z) ** 2));
+    mem.oilWells = wells.slice(0, 6); // claim the closest handful
+  }
   // once the AI has ever spotted an enemy warship, a navy is worth it even on a
   // map it judged 'dry' — it builds a shipyard to answer the threat
   if (!mem.sawEnemyNavy && enemyHasNavy(sim, p)) mem.sawEnemyNavy = true;
@@ -201,12 +220,43 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
     cmds.push({ k: 'surrender', p });
     return cmds;
   }
+
+  // CONYARD RESCUE: a Construction Vehicle unfolds into a new construction yard.
+  // If ours is gone or about to fall, build an MCV at the factory/shipyard (funds
+  // permitting); once the conyard is actually lost, drive it home and deploy it so
+  // the AI can keep building instead of being permanently crippled.
+  {
+    const cyB = (myB['conyard'] || [])[0];
+    const cyLost = !cyB;
+    const cyDying = !!cyB && cyB.hp < cyB.maxHp * 0.3;
+    if (cyLost || cyDying) {
+      const prodB = [...(myB['factory'] || []), ...(myB['shipyard'] || [])];
+      const haveMcv = (myU['mcv'] || []).length > 0;
+      const mcvQueued = prodB.some(f => f.queue.some((q: any) => q.type === 'mcv'));
+      const mcvCost = Math.round(UNITS['mcv'].cost * pl.fac.costMul * pl.bonusCost);
+      if (!haveMcv && !mcvQueued && pl.credits >= mcvCost) {
+        const f = prodB.find(b => b.progress >= b.total && b.queue.length < 2);
+        if (f) cmds.push({ k: 'train', p, bid: f.id, type: 'mcv' });
+      }
+      const mcv = (myU['mcv'] || [])[0];
+      if (cyLost && mcv) { // no conyard left → bring the MCV home and unfold it
+        const sx = pl.spawn.x, sz = pl.spawn.z;
+        if (hyp(mcv.x - sx, mcv.z - sz) > 3) cmds.push({ k: 'move', p, ids: [mcv.id], x: sx, z: sz });
+        else cmds.push({ k: 'deploy', p, ids: [mcv.id] });
+      }
+    }
+  }
   const cost = (t: string) => Math.round(BUILDINGS[t].cost * pl.fac.costMul * pl.bonusCost);
-  const surplus = pl.powerMade - pl.powerUsed;
+  // count power plants still UNDER CONSTRUCTION toward the surplus, or the AI
+  // queues a 4th/5th plant while the first few are mid-build (6s) and reads the
+  // surplus as still-low — over-investing in power and going broke before economy.
+  let powerPipe = 0;
+  for (const b of (myB['power'] || [])) if (b.progress < b.total) powerPipe += BUILDINGS['power'].power;
+  const surplus = pl.powerMade - pl.powerUsed + powerPipe;
 
   // --- live recon: react to the army the enemy is actually fielding now ---
   // (a brief sighting biases production for a while via a decaying counter)
-  let eAir = 0, eAA = 0, eCombat = 0, eBuildings = 0;
+  let eAir = 0, eAA = 0, eCombat = 0, eBuildings = 0, eVeh = 0, eInf = 0;
   for (const e of sim.ents.values()) {
     if (!sim.foe(e.owner, p) || e.hp <= 0 || !sim.players[e.owner]?.alive) continue;
     const ed = UNITS[e.type];
@@ -215,15 +265,27 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
       if (e.type === 'sam') eAA++; // anti-air structure
     } else if (ed && !ed.internal) {
       if (ed.kind === 'air' && ed.fly && !ed.missile) eAir++;
+      else if (ed.kind === 'veh') eVeh++;
+      else if (ed.kind === 'inf') eInf++;
       if (ed.dmg > 0) eCombat++;
       if (e.type === 'aatank' || e.type === 'flak' || e.type === 'sam') eAA++; // mobile AA
     }
   }
   mem.seenAir = Math.max((mem.seenAir || 0) * 0.96, eAir);
+  mem.seenVeh = Math.max((mem.seenVeh || 0) * 0.96, eVeh); // decaying memory of scouted armor
+  mem.seenInf = Math.max((mem.seenInf || 0) * 0.96, eInf); // ...and infantry
   mem.enemyAA = eAA;                 // live anti-air the enemy can bring to bear
   mem.enemyCombat = eCombat;         // standing enemy army (for the bomber-rush call)
   mem.enemyBuildings = eBuildings;
   if ((mem.seenAir || 0) >= 1) { antiAir = true; sams = Math.max(sams, (mem.seenAir || 0) >= 4 ? 3 : 2); }
+  // LIVE counter-composition: react to the army actually fielded this game (overrides
+  // the historical profile once we've scouted a real force) — armor → anti-armor,
+  // infantry masses → anti-infantry. User: "build counters to what I'm building."
+  const sVeh = mem.seenVeh || 0, sInf = mem.seenInf || 0;
+  if (sVeh + sInf >= 4) {
+    if (sVeh >= 3 && sVeh >= sInf * 0.8) antiArmor = true;
+    if (sInf >= 5 && sInf > sVeh * 1.2) antiInf = true;
+  }
 
   // --- dynamic posture: turtle when poor or pressured, press when rich/safe ---
   const underAttack = sim.tickN - (mem.lastHurtT ?? -1e9) < 15 * TICKS_PER_SEC;
@@ -232,7 +294,10 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
   // rush anti-missile cover (Iron Dome + Patriot). Sticky for 40s after last seen.
   if (enemyHasSilo(sim, p) || sim.missileInbound(p)) mem.missileThreatT = sim.tickN;
   const missileThreat = sim.tickN - (mem.missileThreatT ?? -1e9) < 40 * TICKS_PER_SEC;
-  if (pl.credits > 6000) { cap = Math.min(90, cap + 8); waveEvery = Math.max(18, waveEvery - 6); } // flush: attack
+  // flush with cash → raise the army cap so it SPENDS the hoard on units (with only
+  // one of each production building, a deep cap is how a rich AI converts 50k credits
+  // into a big army instead of banking it) and presses the attack
+  if (pl.credits > 6000) { cap = Math.min(140, cap + 8 + Math.floor((pl.credits - 6000) / 3500)); waveEvery = Math.max(18, waveEvery - 6); }
   if (pl.credits < 1200 && underAttack) mem.nextWave = Math.max(mem.nextWave, sim.tickN + 10 * TICKS_PER_SEC); // hold
 
   // once a solid ground force and a defensive line stand, every AI graduates to
@@ -242,28 +307,38 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
   const groundCore = nB('factory') >= 1 && nB('barracks') >= 1 && groundForce >= 12 && nB('turret') >= 2;
   const goAir = L.air || island || dirAir || prefAir || groundCore;
 
+  // economy baseline: a factory + a basic harvester income (3) before the AI
+  // pours credits into turrets/army. Stops the broke-AI turret spiral (replays
+  // mqpynq0zokaq/mqq08z4kgh7n: 11-12 turrets, 1 harvester, broke all game) while
+  // still unlocking defense on poor maps where a 2nd refinery isn't affordable.
+  // The build order keeps refinery #2 ahead of turrets, so economy still expands.
+  const econBoot = nB('factory') >= 1 && nB('refinery') >= 2 && nU('harv') >= 3;
+
   // build order — economy, production breadth, then defense depth
   let want: string | null = null;
-  if (surplus < 25) want = 'power';
+  if (surplus < 30) want = 'power'; // just enough headroom to not brown out (counts plants still building)
   else if (!nB('refinery')) want = 'refinery';
   else if (!nB('barracks')) want = 'barracks';
-  // expand the economy early — a 2nd refinery toward the ore frontier before
-  // committing to a deep army (the tester's AI stalled on one refinery)
-  else if (nB('refinery') < 2 && pl.credits > 1500) want = 'refinery';
-  else if (!nB('factory') && pl.credits > cost('factory') * 1.1) want = 'factory';
+  // the War Factory is CORE infrastructure — harvesters, engineers and every
+  // vehicle come from it. Build it before expanding refineries or any defense,
+  // and at its bare cost, so a poor AI reaches it instead of spiralling on cheap
+  // turrets it can afford (replay mqpynq0zokaq: 12 turrets built, factory NEVER).
+  else if (!nB('factory') && pl.credits >= cost('factory')) want = 'factory';
+  // expand the economy — a 2nd refinery as soon as affordable (income-critical)
+  else if (nB('refinery') < 2 && pl.credits >= cost('refinery')) want = 'refinery';
   // UNDER MISSILE ATTACK: rush anti-missile cover ahead of normal defense — a Radar
   // Dome first (Iron Dome needs it), then the Iron Dome itself. Any difficulty.
   else if (missileThreat && nB('factory') && !nB('radar') && pl.credits > 1300) want = 'radar';
   else if (missileThreat && nB('radar') && !nB('irondome') && pl.credits > 1700) want = 'irondome';
   // a couple of turrets for safety, then SPREAD: refineries toward the ore
   // frontier take priority over deep defense (tester: "AI not spreading out")
-  else if (nB('turret') < Math.min(2, turrets) && nB('barracks')) want = 'turret';
+  else if (econBoot && nB('turret') < Math.min(2, turrets) && nB('barracks')) want = 'turret';
   else if (nB('refinery') < refs && pl.credits > 1200) want = 'refinery';
   // vehicle throughput beats deep turret lines — factories before turret #3+
   // (islanders keep ONE factory and ONE barracks: ground forces can't leave)
   else if (nB('factory') < (island ? 1 : L.factories) && pl.credits > 1900) want = 'factory';
   else if (pl.aiLvl >= 1 && !nB('radar') && nB('factory') && pl.credits > 1400) want = 'radar';
-  else if (nB('turret') < turrets) want = 'turret';
+  else if (econBoot && nB('turret') < turrets) want = 'turret';
   else if (nB('barracks') < (island ? 1 : L.barracks) && pl.credits > 1200) want = 'barracks';
   // stranded on an island: drone works, air force and shipyard come early
   else if (island && !nB('dronefac') && nB('factory') && pl.credits > 1600) want = 'dronefac';
@@ -278,14 +353,14 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
   else if (goAir && nB('airforce') && nB('airfield') < 2 && pl.credits > 1600) want = 'airfield';
   else if ((pl.aiLvl >= 2 || dirTech) && !nB('lab') && nB('factory') && pl.credits > (dirTech ? 2400 : 3000)) want = 'lab';
   else if (pl.aiLvl >= 2 && nB('lab') && !nB('silo') && pl.credits > 3200) want = 'silo';
-  else if (nB('turret') < turrets + 1 && pl.credits > 2600) want = 'turret';
+  else if (econBoot && nB('turret') < turrets + 1 && pl.credits > 2600) want = 'turret';
   // heavy cannon emplacements anchor the line against armor (and outrange MLRS)
-  else if (nB('factory') && nB('cannon') < (pl.aiLvl >= 2 ? 2 : 1) && pl.credits > 2200) want = 'cannon';
+  else if (econBoot && nB('cannon') < (pl.aiLvl >= 2 ? 2 : 1) && pl.credits > 2200) want = 'cannon';
   // tech defenses once a lab stands: tesla zappers, then an Iron Dome to swat
   // incoming silo missiles (high difficulty / when the enemy has gone nuclear)
   else if (pl.aiLvl >= 2 && nB('lab') && nB('tesla') < 1 && pl.credits > 2600) want = 'tesla';
   else if (pl.aiLvl >= 2 && nB('radar') && !nB('irondome') && enemyHasSilo(sim, p) && pl.credits > 2800) want = 'irondome';
-  else if (surplus < 60 && pl.credits > 2400) want = 'power';
+  else if (econBoot && surplus < 90 && pl.credits > 1800) want = 'power'; // proactive buffer ONLY once economy stands (uncapped, but not before harvesters)
 
   if (want && nB('conyard')) {
     const def = BUILDINGS[want];
@@ -324,16 +399,39 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
   const hasFac = (myB['factory'] || []).some(b => b.progress >= b.total);
   // economy first: saturate every refinery with ~2 harvesters before army
   // spending — cheap units must not starve the harvester budget
-  const harvTarget = Math.max(L.harv, nB('refinery') * 2);
-  const ecoShort = hasFac && nU('harv') < harvTarget;
-  // safety net: down to the last 1-2 harvesters, or one being shot at → the
-  // economy is about to collapse, so cancel other builds and rush a replacement
+  // harvester target scales with refineries AND map ore richness (rich map → bigger
+  // fleet), capped so it can't run away
+  // ~2 harvesters per refinery, scaled by ore richness — NOT a flat floor, or the
+  // AI over-saturates ONE refinery (diminishing returns at the single unload point)
+  // and starves the credits it needs to build a 2nd. Hard+ has no fixed ceiling
+  // (refinery count is the natural cap); lower levels keep one.
+  const harvCap = pl.aiLvl >= 2 ? 99 : 16;
+  const harvTarget = Math.max(2, Math.min(harvCap, Math.round(nB('refinery') * 2 * (mem.richMul || 1))));
+  // count harvesters ALREADY in production (queued) toward the target, or the
+  // per-tick loop re-queues faster than they finish and badly overshoots the cap
+  const harvInProd = (myB['factory'] || []).reduce((n, f) => n + f.queue.filter((q: any) => q.type === 'harv').length, 0);
+  const harvHave = nU('harv') + harvInProd;
+  const ecoShort = hasFac && harvHave < harvTarget;
   const harvUnderFire = (myU['harv'] || []).some(h => sim.tickN - h.lastHitT < 40);
-  const harvEmergency = hasFac && (nU('harv') <= 2 || (harvUnderFire && nU('harv') <= 3));
+  // economy FIRST: until a working harvester base stands (the lesser of the target
+  // and a hard floor), treat harvesters as an emergency — cancel competing factory
+  // builds and buy them even while nearly broke, to break the income death-spiral.
+  const harvFloor = Math.min(harvTarget, hasFac ? 4 : 2);
+  const harvEmergency = hasFac && (harvHave < harvFloor || (harvUnderFire && nU('harv') <= 3));
+  // unclaimed oil wells reachable from base — passive income (no harvester needed)
+  const claimableOil = (mem.oilWells || []).filter((w: any) => sim.map.oil[w.cz * W + w.cx] === 1 && !sim.map.occ[w.cz * W + w.cx]);
+  // dispatch a spare engineer to erect an oil rig on the nearest unclaimed well
+  if (claimableOil.length) {
+    const eng = (myU['engineer'] || []).find(e => !e.orders.length || e.orders[0].k !== 'oilrig');
+    if (eng) cmds.push({ k: 'oilrig', p, ids: [eng.id], cx: claimableOil[0].cx, cz: claimableOil[0].cz });
+  }
   for (const bks of (myB['barracks'] || [])) {
     if (bks.progress < bks.total || bks.queue.length >= 2) continue;
     if (armyCount >= cap) continue;
-    if (ecoShort && pl.credits < 2200) continue; // harvesters get first claim
+    // economy FIRST, but never DEFENSELESS: before the economy is booted, allow a
+    // small cheap infantry screen (≤4) for early defense, then stop bleeding credits
+    // into army so income can reach the 2nd refinery. Flush (>2200) is the release valve.
+    if (!econBoot && infCount >= 4 && pl.credits < 2200) continue;
     if (island && infCount >= 4) continue; // infantry can't swim — token garrison only
     if (hasFac && infCount >= Math.max(3, armyCount * 0.35)) continue; // leave credits for vehicles
     if (pl.credits > (hasFac ? 900 : 500)) {
@@ -353,10 +451,14 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
     if (harvEmergency && fac.queue.length && fac.queue[fac.queue.length - 1].type !== 'harv')
       cmds.push({ k: 'cancel', p, bid: fac.id, type: fac.queue[fac.queue.length - 1].type });
     if (fac.queue.length >= 2 && !harvEmergency) continue;
-    if (harvEmergency && nU('harv') < harvTarget + 1 && pl.credits > 300) cmds.push({ k: 'train', p, bid: fac.id, type: 'harv' });
+    if (harvEmergency && harvHave < harvTarget + 1 && pl.credits > 200) cmds.push({ k: 'train', p, bid: fac.id, type: 'harv' });
     else if (fac.queue.length >= 2) continue;
-    else if (nU('harv') < harvTarget && pl.credits > 1000) cmds.push({ k: 'train', p, bid: fac.id, type: 'harv' });
-    else if (nU('engineer') < 1 && pl.aiLvl >= 1 && pl.credits > 1500) cmds.push({ k: 'train', p, bid: fac.id, type: 'engineer' });
+    // claim oil EARLY (right after the harvester floor) — passive income is the
+    // player's winning opening; don't wait for full harvester saturation
+    else if (claimableOil.length && nU('engineer') < Math.min(2, claimableOil.length) && pl.aiLvl >= 1 && pl.credits > 1100) cmds.push({ k: 'train', p, bid: fac.id, type: 'engineer' });
+    else if (harvHave < harvTarget && pl.credits > 900) cmds.push({ k: 'train', p, bid: fac.id, type: 'harv' });
+    // a spare repair engineer once there are no more wells to grab
+    else if (!claimableOil.length && nU('engineer') < 1 && pl.aiLvl >= 1 && pl.credits > 1500) cmds.push({ k: 'train', p, bid: fac.id, type: 'engineer' });
     // reactive AA is a NEED, not surplus: build to the target even at army cap
     // so an air assault always gets answered (user: "if air seen, build AA/flak")
     else if (airSeen >= 1 && nU('aatank') + nU('flak') < aaTarget && pl.credits > 700) {
@@ -367,18 +469,24 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
     else if (missileThreat && nU('patriot') < 2 && pl.credits > 1200) {
       cmds.push({ k: 'train', p, bid: fac.id, type: 'patriot' });
     }
-    else if (armyCount < cap && pl.credits > (ecoShort ? 2200 : 1000)) {
+    else if (armyCount < cap && pl.credits > (!econBoot ? 2200 : 1000)) {
       // islanders keep only a small home guard of vehicles
       const groundArmy = nU('tank') + nU('heavy') + nU('ifv') + nU('mlrs') + nU('aatank') + nU('flak');
       if (island && groundArmy >= 8) continue;
       const r = sim.aiRngP[p].next();
-      const t = nU('mlrs') < L.siege ? 'mlrs'
-        : (nU('aatank') + nU('flak') < aaTarget && r < aaPrio) ? (r < aaPrio * 0.5 ? 'aatank' : 'flak')
-        : r < (antiInf ? 0.4 : 0.25) ? 'mlrs' // artillery shreds infantry masses
-        : r < (antiInf ? 0.7 : 0.42) ? 'ifv'  // autocannons mop up the rest
-        : r < (antiInf ? 0.76 : 0.47) && pl.credits > 1600 ? 'fueltruck' // breach charge
-        : (pl.credits > 2000 && r < 0.6) ? 'heavy'
-        : 'tank';
+      // MLRS is fragile artillery (170hp) — keep it a SUPPORT fraction of the army,
+      // never the bulk, or it melts and trades 2:1 (replay mqqcc6prkpju: 484 MLRS
+      // queued, army lost 280 / killed 136). Durable tanks/heavies are the core.
+      const mlrsCap = Math.max(L.siege, Math.round(armyCount * (antiInf ? 0.30 : 0.18)));
+      const wantAA = nU('aatank') + nU('flak') < aaTarget && r < aaPrio;
+      const rich = pl.credits > 2000;
+      let t: string;
+      if (wantAA) t = r < aaPrio * 0.5 ? 'aatank' : 'flak';
+      else if (nU('mlrs') < mlrsCap && r < (antiInf ? 0.42 : 0.20)) t = 'mlrs'; // support artillery
+      else if (antiInf && r < 0.55) t = 'ifv';                  // autocannons shred infantry masses
+      else if (antiArmor) t = rich && r < 0.7 ? 'heavy' : 'tank'; // armor counters armor
+      else if (rich && r < 0.18) t = 'fueltruck';               // a breach charge for walls/clumps
+      else t = rich && r < 0.55 ? 'heavy' : (r < 0.85 ? 'tank' : 'ifv'); // durable mixed core
       cmds.push({ k: 'train', p, bid: fac.id, type: t });
     }
   }

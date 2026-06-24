@@ -174,7 +174,8 @@ export class Sim {
   // per-AI-player ledgers (AI-vs-AI simulations study the winner's doctrine)
   private dealtP: Record<number, Record<string, number>> = {};
   private lostP: Record<number, Record<string, number>> = {};
-  private pendingBlasts: { t: number; x: number; z: number; type: string; owner: number }[] = [];
+  private pendingBlasts: { t: number; x: number; z: number; type: string; owner: number; mid: number }[] = [];
+  private missileSeq = 0; // unique id per launched silo missile, so the renderer can cancel the right warhead when intercepted
   private firstHumanHit = -1;
   private reported = false;
   private grid = new Map<number, number[]>(); // spatial hash of units, cell = 2 units
@@ -442,8 +443,15 @@ export class Sim {
         const u = this.ents.get(id);
         if (!u || u.b || u.owner !== c.p) continue;
         if ((UNITS[u.type]?.dmg ?? 0) <= 0) continue;
+        // engage THREATS first — armed enemy units + base defenses (things that can
+        // shoot back) — and only turn on passive buildings once the threats are gone.
+        // Within each tier, nearest first.
+        const threat = (e: Entity) => e.b
+          ? !!(BUILDINGS[e.type]?.attack || BUILDINGS[e.type]?.intercept)
+          : (UNITS[e.type]?.dmg ?? 0) > 0;
+        const d2 = (e: Entity) => (e.x - u.x) * (e.x - u.x) + (e.z - u.z) * (e.z - u.z);
         const list = [...targets]
-          .sort((a, b) => ((a.x - u.x) * (a.x - u.x) + (a.z - u.z) * (a.z - u.z)) - ((b.x - u.x) * (b.x - u.x) + (b.z - u.z) * (b.z - u.z)))
+          .sort((a, b) => ((threat(a) ? 0 : 1) - (threat(b) ? 0 : 1)) || (d2(a) - d2(b)))
           .slice(0, 24);
         u.orders = list.map(t => ({ k: 'attack' as const, tgt: t.id }));
         u.path = null;
@@ -979,7 +987,9 @@ export class Sim {
       cons[i].sort((a, b) => (powerPrio(b.type) - powerPrio(a.type)) || (a.id - b.id));
       let onDraw = 0;
       for (const e of cons[i]) {
-        const d = -BUILDINGS[e.type].power;
+        const bd = BUILDINGS[e.type];
+        // unit-producing buildings draw extra while a unit is actually in the queue
+        const d = -bd.power + (bd.prodPower && e.queue.length ? bd.prodPower : 0);
         if (onDraw + d <= budget + 1e-6) { e.pOff = false; onDraw += d; }
         else e.pOff = true;
       }
@@ -1298,6 +1308,9 @@ export class Sim {
     if (att.holdFire && !force) return false; // weapons-hold: never fires on its own
     if (att.cd > 0) return false;
     att.cd = this.nextCd(att, rof);
+    // base defenses spend a little stored power per shot (drains the battery, can
+    // contribute to a brownout under sustained fire); units don't draw power
+    if (att.b) { const pl = this.players[att.owner]; if (pl) pl.power = Math.max(0, pl.power - 3); }
     att.aimX = tgt.x; att.aimZ = tgt.z;
     this.dealDamage(att, tgt, dmg, force);
     const ud = UNITS[att.type];
@@ -1317,6 +1330,9 @@ export class Sim {
       : ud?.kind === 'air' ? 3 : 2;
     const ev: any = { e: 'shot', x: att.x, z: att.z, tx: tgt.x, tz: tgt.z, w };
     if (ud?.fly) ev.f = 1;
+    // target is airborne → tell the renderer to aim the tracer at the flyer's
+    // cruise altitude, not the ground beneath it (AA fire was hitting the dirt)
+    if (!tgt.b && UNITS[tgt.type]?.fly) ev.tf = 1;
     this.events.push(ev);
   }
 
@@ -2174,8 +2190,9 @@ export class Sim {
     const mdef = UNITS[type];
     const tx = Math.max(0, Math.min(W - 0.01, x)), tz = Math.max(0, Math.min(H - 0.01, z));
     const ft = Math.max(12, Math.round((hyp(tx - b.x, tz - b.z) / (mdef.speed || 7)) * 10));
-    this.pendingBlasts.push({ t: this.tickN + ft, x: tx, z: tz, type, owner: b.owner });
-    this.events.push({ e: 'silo', x: b.x, z: b.z, tx, tz, ft });
+    const mid = ++this.missileSeq;
+    this.pendingBlasts.push({ t: this.tickN + ft, x: tx, z: tz, type, owner: b.owner, mid });
+    this.events.push({ e: 'silo', x: b.x, z: b.z, tx, tz, ft, mid });
     b.lastMissile = type;
     b.storedMissile = stock[0] || null; // next armed missile (or empty)
     return true;
@@ -2241,7 +2258,7 @@ export class Sim {
       if (best) {
         best.e.icd = best.cd;                               // spend the interceptor
         killed.push(bl);
-        this.events.push({ e: 'intercept', x: best.e.x, z: best.e.z, tx: bl.x, tz: bl.z });
+        this.events.push({ e: 'intercept', x: best.e.x, z: best.e.z, tx: bl.x, tz: bl.z, mid: bl.mid });
       }
     }
     if (killed.length) this.pendingBlasts = this.pendingBlasts.filter(b => !killed.includes(b));

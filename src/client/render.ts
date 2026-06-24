@@ -76,8 +76,10 @@ const MODEL_DEFS: Record<string, { file: string; size: number; axis: 'l' | 'h'; 
 // spinning rotor / propeller animation per type. y is a fallback hub height —
 // replaced by the measured model top once the GLB loads. nose props sit at the
 // front of the fuselage and spin around the forward axis.
-const ROTORS: Record<string, { y: number; r: number; speed: number; nose?: boolean }> = {
-  heli:      { y: 1.05, r: 1.45, speed: 26 },
+const ROTORS: Record<string, { y: number; r: number; speed: number; nose?: boolean; dy?: number }> = {
+  // Mi-24's modeled rotor is static (single-mesh GLB), so spin a procedural rotor
+  // over it. dy drops it from the model's top down onto the rotor mast.
+  heli:      { y: 0.62, r: 1.35, speed: 26, dy: -0.16 },
   helidrone: { y: 0.80, r: 0.95, speed: 31 },
   recon:     { y: 0.55, r: 0.60, speed: 36 },
   strike:    { y: 0.70, r: 0.85, speed: 33 },
@@ -85,8 +87,7 @@ const ROTORS: Record<string, { y: number; r: number; speed: number; nose?: boole
   minidrone: { y: 0.34, r: 0.42, speed: 42 },
   chemdrone: { y: 0.70, r: 0.82, speed: 33 },
   biodrone:  { y: 0.70, r: 0.82, speed: 33 },
-  bomber:    { y: 0.42, r: 0.85, speed: 30, nose: true },
-  dbomber:   { y: 0.48, r: 0.95, speed: 30, nose: true },
+  // bomber/dbomber are jets (B-2 stealth) — no propeller
   gunship:   { y: 1.05, r: 1.45, speed: 26 },       // mercenary attack heli
   silicondrone: { y: 0.70, r: 0.85, speed: 33 },    // networked attack drone
 };
@@ -112,7 +113,7 @@ function loadGLB(file: string): Promise<any> {
 export async function preloadModels(onProgress?: (done: number, total: number) => void): Promise<void> {
   const files = new Set<string>();
   for (const t in MODEL_DEFS) files.add(MODEL_DEFS[t].file);
-  for (const f of ['oilfield', 'factory', 'refinery', 'airfield']) files.add(f);
+  for (const f of ['oilfield', 'powerplant', 'ammobox', 'refinery', 'airfield', 'barracks', 'wall', 'radar', 'lab', 'sam']) files.add(f);
   const list = [...files]; let done = 0;
   onProgress?.(0, list.length);
   await Promise.all(list.map(f => loadGLB(f).catch(() => null).then(() => { onProgress?.(++done, list.length); })));
@@ -925,7 +926,7 @@ function buildingGroup(type: string, teamColor: number): THREE.Group {
 
 interface FxTracer { x1: number; y1: number; z1: number; x2: number; y2: number; z2: number; t: number }
 interface FxPart { x: number; y: number; z: number; vx: number; vy: number; vz: number; life: number; max: number; s: number }
-interface FxRocket { x0: number; y0: number; z0: number; x1: number; y1: number; z1: number; t: number; delay: number; dur: number; arc: number; noSmoke?: boolean; scale?: number }
+interface FxRocket { x0: number; y0: number; z0: number; x1: number; y1: number; z1: number; t: number; delay: number; dur: number; arc: number; noSmoke?: boolean; scale?: number; mid?: number }
 
 // graphics quality presets. Everything renders at NATIVE resolution (pr 1.0) so
 // the world is always crisp — earlier sub-native scaling looked blurry. The
@@ -1112,6 +1113,17 @@ export class Renderer {
       fragmentShader: WATER_FRAG,
       fog: false,
     });
+    // deep-ocean SEAFLOOR beneath the water, same extent — so the water that
+    // overhangs the map edge reads as real ocean (a dark bottom) instead of a
+    // translucent sheet floating over the sky/background past the island.
+    const seafloor = new THREE.Mesh(
+      new THREE.PlaneGeometry(W * 3, H * 3),
+      new THREE.MeshBasicMaterial({ color: 0x06222e, fog: true }),
+    );
+    seafloor.rotation.x = -Math.PI / 2;
+    seafloor.position.set(W / 2, SEA - 7, H / 2);
+    this.scene.add(seafloor);
+
     const water = new THREE.Mesh(new THREE.PlaneGeometry(W * 3, H * 3), this.waterMat);
     water.rotation.x = -Math.PI / 2;
     water.position.set(W / 2, SEA, H / 2);
@@ -1178,10 +1190,18 @@ export class Renderer {
     this.oilMesh.castShadow = false; // ground clutter — kept out of the shadow pass
     this.scene.add(this.oilMesh);
     this.loadOilModel();
-    this.loadFactoryModel();
-    this.loadBuildingModel('power', 'coalpower', 2.4);    // Power Plant GLB ("Coal Power Station" by MRowa, Sketchfab, CC-BY-SA 4.0)
+    // War Factory now wears the former Power Plant model ("RTS Military Building 1"),
+    // same 3.6 sizing — generic loader, so makeBuildingGroup uses bldgProtos['factory']
+    // (factoryProto stays null, the old poly.pizza factory is retired)
+    this.loadBuildingModel('factory', 'powerplant', 3.6); // ("RTS Military Building 1" by Sabri Ayeş, Sketchfab, CC-BY)
+    this.loadBuildingModel('power', 'ammobox', 4.8);       // Power Plant GLB ("RTS Ammo Box" by Sabri Ayeş, Sketchfab, CC-BY) — 2x the original 2.4 default
     this.loadBuildingModel('refinery', 'refinery', 8.72); // Ore Refinery GLB (Sketchfab, CC-BY)
-    this.loadBuildingModel('airfield', 'airfield', 4.73);  // Airfield GLB (C&C-style building, Sketchfab, CC-BY)
+    this.loadBuildingModel('airfield', 'airfield', 8.28);  // Airfield GLB ("RTS Airport" by Sabri Ayeş, Sketchfab, CC-BY) — 75% larger
+    this.loadBuildingModel('barracks', 'barracks', 4.5);   // Barracks GLB ("RTS Barracks" by Sabri Ayeş, Sketchfab, CC-BY) — 50% larger
+    this.loadBuildingModel('radar', 'radar', 4.35);        // Radar Dome GLB ("RTS Radar Tower" by Sabri Ayeş, Sketchfab, CC-BY) — 50% larger
+    this.loadBuildingModel('wall', 'wall', 1.65);          // Wall GLB ("Concrete Barrier HQ" by Sabri Ayeş, Sketchfab, CC-BY) — 50% larger
+    this.loadBuildingModel('lab', 'lab', 3.2);             // Research Lab GLB ("ResearchCenter_Building001" by Christian Rudorff, Sketchfab, CC-BY)
+    this.loadBuildingModel('sam', 'sam', 1.9);             // Missile Battery GLB ("MissileTower_Building002" by Christian Rudorff, Sketchfab, CC-BY) — AA missile tower
     // Oil Rig reuses the oil-well "Oil Pump" model, 25% taller than the free well
     // (well is normalised to 2.0 tall in loadOilModel) so building one just enlarges it
     this.loadBuildingModel('oilrig', 'oilfield', 2.5, true);
@@ -2237,8 +2257,12 @@ export class Renderer {
   addEvents(events: any[]) {
     for (const ev of events) {
       if (ev.e === 'shot') {
-        const y1 = Math.max(this.map.heightAt(ev.x, ev.z), SEA) + (ev.f ? 2.4 : 0.6);
-        const y2 = Math.max(this.map.heightAt(ev.tx, ev.tz), SEA) + 0.5;
+        // flyer shots (ev.f) originate at the aircraft's cruise altitude, not just
+        // a small lift above the ground — otherwise tracers came from under the plane
+        const y1 = ev.f ? this.flyY(ev.x, ev.z, 2.3) : Math.max(this.map.heightAt(ev.x, ev.z), SEA) + 0.6;
+        // target airborne (ev.tf) → aim at the flyer cruise altitude (the same
+        // flyY(...,2.3) the unit renders at), not the ground beneath it
+        const y2 = ev.tf ? this.flyY(ev.tx, ev.tz, 2.3) : Math.max(this.map.heightAt(ev.tx, ev.tz), SEA) + 0.5;
         // a turret fired: remember its aim so the gun pivot can track
         for (const rec of this.buildings.values()) {
           if (!rec.g.userData.pivot) continue;
@@ -2327,7 +2351,7 @@ export class Renderer {
         const y2s = Math.max(this.map.heightAt(ev.tx, ev.tz), SEA) + 0.2;
         if (this.rockets.length < 64) this.rockets.push({
           x0: ev.x, y0: y1s, z0: ev.z, x1: ev.tx, y1: y2s, z1: ev.tz,
-          t: 0, delay: 0, dur: Math.max(1.0, (ev.ft || 20) / 10), arc: 6 + dist * 0.35,
+          t: 0, delay: 0, dur: Math.max(1.0, (ev.ft || 20) / 10), arc: 6 + dist * 0.35, mid: ev.mid,
         });
         this.spawnParts(ev.x, y1s, ev.z, 8, true); // launch plume
       } else if (ev.e === 'burnfx') {
@@ -2352,11 +2376,27 @@ export class Renderer {
           });
         }
       } else if (ev.e === 'intercept') {
-        // a streak from the battery up to the doomed warhead, then an airburst
+        // catch the doomed warhead MID-AIR: find its in-flight rocket, take its
+        // current position, delete it (so it never lands), then streak an interceptor
+        // missile up from the battery to that point and burst it there
+        let cx = ev.tx, cz = ev.tz, cy = Math.max(this.map.heightAt(ev.tx, ev.tz), SEA) + 3.2;
+        if (ev.mid !== undefined) {
+          const inc = this.rockets.find(r => r.mid === ev.mid);
+          if (inc) {
+            const q = Math.max(0, Math.min(1, (inc.t - inc.delay) / inc.dur));
+            cx = inc.x0 + (inc.x1 - inc.x0) * q;
+            cz = inc.z0 + (inc.z1 - inc.z0) * q;
+            cy = inc.y0 + (inc.y1 - inc.y0) * q + Math.sin(Math.PI * q) * inc.arc;
+            this.rockets = this.rockets.filter(r => r !== inc); // warhead destroyed before impact
+          }
+        }
         const y1 = Math.max(this.map.heightAt(ev.x, ev.z), SEA) + 0.7;
-        const y2 = Math.max(this.map.heightAt(ev.tx, ev.tz), SEA) + 3.2; // warhead caught high
-        if (this.tracers.length < MAX_TRACER) this.tracers.push({ x1: ev.x, y1, z1: ev.z, x2: ev.tx, y2, z2: ev.tz, t: 0.12 });
-        this.spawnParts(ev.tx, y2, ev.tz, 10, true);
+        const dist = Math.hypot(cx - ev.x, cz - ev.z);
+        if (this.rockets.length < 64) this.rockets.push({ // interceptor missile from the battery
+          x0: ev.x, y0: y1, z0: ev.z, x1: cx, y1: cy, z1: cz,
+          t: 0, delay: 0, dur: Math.max(0.18, dist * 0.03), arc: 0.5,
+        });
+        this.spawnParts(cx, cy, cz, 16, true); // mid-air airburst at the catch point
       } else if (ev.e === 'empfx') {
         // crackling blue arcs over a stunned unit
         const y = Math.max(this.map.heightAt(ev.x, ev.z), SEA) + 0.6;
@@ -2415,6 +2455,10 @@ export class Renderer {
     // short "drive down the ramp" descent (render-only, see the unit y below)
     const facFront: { x: number; z: number }[] = [];
     for (const v of views) if (v.b && v.t === 'factory') facFront.push({ x: v.x, z: v.z });
+    // wall cells (per owner) so each barrier can orient along its run into a
+    // continuous wall instead of a row of disconnected segments
+    const wallCells = new Set<string>();
+    for (const v of views) if (v.b && v.t === 'wall') wallCells.add(v.o + ':' + v.cx + ',' + v.cz);
     const curVeh = new Set<number>();
 
     for (const v of views) {
@@ -2441,6 +2485,14 @@ export class Renderer {
         const sc = 0.15 + 0.85 * Math.min(1, v.pr);
         const lvS = 1 + 0.06 * ((v.lv || 1) - 1); // upgraded buildings grow slightly
         rec.g.scale.set(lvS, sc * lvS, lvS);
+        // walls: rotate each barrier so its long axis follows the run (the model is
+        // longer in Z; an E-W row spans the cell only if turned 90°), making a row
+        // read as one continuous wall instead of disconnected segments
+        if (v.t === 'wall') {
+          const has = (dx: number, dz: number) => wallCells.has(v.o + ':' + (v.cx + dx) + ',' + (v.cz + dz));
+          const ew = has(-1, 0) || has(1, 0), ns = has(0, -1) || has(0, 1);
+          rec.g.rotation.y = (ew && !ns) ? Math.PI / 2 : 0;
+        }
         // turret gun tracks its last target
         const piv = rec.g.userData.pivot as THREE.Group | undefined;
         if (piv && rec.aim !== undefined) {
@@ -2523,7 +2575,7 @@ export class Renderer {
       }
       let gy = this.map.heightAt(v.x, v.z);
       let y: number;
-      if (md?.fly) y = this.flyY(v.x, v.z, md.alt || 2.3) + Math.sin(this.time * 2.5 + v.i * 1.7) * 0.12; // level cruise, lifting over any terrain taller than the cruise line
+      if (md?.fly) { y = this.flyY(v.x, v.z, md.alt || 2.3) + Math.sin(this.time * 2.5 + v.i * 1.7) * 0.12; v.fy = y; } // level cruise; v.fy = absolute height for the overlay (HP bar) and selection ring
       else if (md?.move === 'sea') {
         y = SEA + (v.t === 'sub' ? -0.08 : 0.02) + Math.sin(this.time * 1.6 + v.i) * 0.03;
         gy = SEA; // selection ring floats on the water
@@ -2567,7 +2619,8 @@ export class Renderer {
 
       if (selection.has(v.i) && selN < MAX_INST) {
         this.dummy.rotation.set(0, 0, 0);
-        this.dummy.position.y = gy + 0.06; // ring stays on the ground, even for flyers
+        // flyers: ring rides at the model's flight height; everything else on the ground
+        this.dummy.position.y = (md?.fly ? y : gy) + 0.06;
         this.dummy.updateMatrix();
         this.selRing.setMatrixAt(selN++, this.dummy.matrix);
       }
@@ -2589,8 +2642,9 @@ export class Renderer {
           this.dummy.quaternion.copy(this.qTmp);
           this.dummy.scale.set(rot.r, 1, rot.r);
         } else {
-          // main rotor on top of the hull
-          this.dummy.position.set(v.x, y + (dims ? dims.h + 0.04 : rot.y), v.z);
+          // main rotor on top of the hull (dy lets a model with its own rotor mast
+          // pull the spinning overlay down onto it instead of floating above)
+          this.dummy.position.set(v.x, y + (dims ? dims.h + 0.04 + (rot.dy || 0) : rot.y), v.z);
           this.dummy.rotation.set(0, spin, 0);
           this.dummy.scale.set(rot.r * 1.6, 1, rot.r * 1.6);
         }

@@ -4,7 +4,7 @@
 
 import { createServer } from 'http';
 import { readFile } from 'fs/promises';
-import { readFileSync, writeFileSync, mkdirSync, unlinkSync } from 'fs';
+import { readFileSync, writeFileSync, mkdirSync, unlinkSync, readdirSync } from 'fs';
 import { extname, join, normalize } from 'path';
 import { fileURLToPath } from 'url';
 import { randomBytes, scryptSync, createHmac, timingSafeEqual } from 'crypto';
@@ -474,7 +474,7 @@ interface Room {
   code: string; clients: Client[]; started: boolean;
   sim: Sim | null; timer: ReturnType<typeof setInterval> | null; cmdQ: any[];
   aiSlots: number[]; size: number; diff: number; islands?: boolean; urban?: boolean; flat?: boolean; steel?: boolean; metal?: boolean; lockstep?: boolean;
-  mapType?: string; fog?: boolean;
+  mapType?: string; fog?: boolean; oreLevel?: number;
   ai?: { lvl: number; team: number; faction?: string }[]; // host-configured AI fill (lobby)
   teams?: number[];                                       // human slot -> team number (lobby)
   dropVote?: { player: number; votes: Map<number, number> }; // lockstep: drop-tick consensus
@@ -594,6 +594,24 @@ function mergeServerLesson(lesson: string) {
 const REPLAY_DIR = join(fileURLToPath(new URL('.', import.meta.url)), 'replays');
 const REPLAY_INDEX = join(REPLAY_DIR, 'index.json');
 try { mkdirSync(REPLAY_DIR, { recursive: true }); } catch { /* exists */ }
+// one-time backfill: the skirmish upload handler used to drop `ver`, leaving those
+// replays unwatchable (the viewer requires ver === SIM_VERSION). They were all
+// recorded by current (v5) clients — the field was just lost on save — so stamp the
+// current version onto any SKIRMISH replay missing it. Idempotent; skips MP replays
+// (those always wrote a ver, so a missing one there could be genuinely old).
+(function backfillReplayVersions() {
+  try {
+    for (const f of readdirSync(REPLAY_DIR)) {
+      if (!f.endsWith('.json') || f === 'index.json') continue;
+      const fp = join(REPLAY_DIR, f);
+      let j: any; try { j = JSON.parse(readFileSync(fp, 'utf8')); } catch { continue; }
+      if (j && typeof j.ver !== 'number' && j.meta?.source === 'skirmish') {
+        j.ver = SIM_VERSION;
+        writeFileSync(fp, JSON.stringify(j));
+      }
+    }
+  } catch { /* no dir yet */ }
+})();
 function saveReplay(room: Room) {
   if (!room.rec || room.replaySaved || !room.sim) return;
   room.replaySaved = true;
@@ -634,7 +652,11 @@ function handleReplayUpload(req: any, res: any) {
       // generated fields come LAST so a malicious client can't override id/date/source
       // (a forged meta.id would otherwise reach the unlinkSync below as a path).
       const meta = { ...d.meta, id, date: Date.now(), source: 'skirmish' };
-      writeFileSync(join(REPLAY_DIR, id + '.json'), JSON.stringify({ meta, seed: d.seed, size: d.size || 96, cmds: d.cmds }));
+      // persist the sim version it was recorded on — the viewer refuses replays
+      // whose ver != SIM_VERSION (cross-version playback desyncs). This was being
+      // dropped here, so every skirmish replay became unwatchable.
+      const ver = typeof d.ver === 'number' ? d.ver : SIM_VERSION;
+      writeFileSync(join(REPLAY_DIR, id + '.json'), JSON.stringify({ meta, ver, seed: d.seed, size: d.size || 96, cmds: d.cmds }));
       let idx: any[] = [];
       try { idx = JSON.parse(readFileSync(REPLAY_INDEX, 'utf8')); } catch { /* first */ }
       idx.unshift(meta);
@@ -670,7 +692,7 @@ function roomState(room: Room) {
     t: 'room', code: room.code,
     players: room.clients.map((c, i) => ({ name: c.name, faction: c.faction, ping: c.ping ?? null, team: (room.teams && room.teams[i]) || (i + 1) })),
     // lobby game setup (host edits via roomcfg; everyone sees it)
-    size: room.size, mapType: roomMapType(room), fog: room.fog !== false,
+    size: room.size, mapType: roomMapType(room), fog: room.fog !== false, oreLevel: (room.oreLevel | 0) & 3,
     ai: room.ai || [], lockstep: !!room.lockstep,
   };
 }
@@ -726,13 +748,14 @@ function startRoom(room: Room) {
     room.aiSlots.push(specs.length);
     specs.push({ name: `AI ${FACTIONS[f].name} (${lvlName(room.diff)})`, faction: f, isAI: true, aiLvl: room.diff, team: enemyTeam });
   }
-  // map type rides in seed bits: islands 0x40000000, urban 0x20000000, flatCity 0x10000000, steel 0x08000000, metal 0x04000000
-  let seed = ((Math.random() * 0x7fffffff) | 0) & ~0x7c000000;
+  // map type rides in seed bits 26-30; ore/oil level in bits 24-25 (0=normal)
+  let seed = ((Math.random() * 0x7fffffff) | 0) & ~0x7f000000;
   if (room.islands) seed |= 0x40000000;
   if (room.urban) seed |= 0x20000000;
   if (room.flat) seed |= 0x10000000;
   if (room.steel) seed |= 0x08000000;
   if (room.metal) seed |= 0x04000000;
+  seed |= ((room.oreLevel | 0) & 3) << 24;
 
   // LOCKSTEP mode: the server runs NO sim and sends NO snapshots — each client
   // runs its own deterministic sim and the server only relays input messages.
@@ -872,7 +895,7 @@ wss.on('connection', ws => {
       online.add(me);
       room = {
         code, clients: [me], started: false, sim: null, timer: null, cmdQ: [], aiSlots: [],
-        size: [72, 96, 128].includes(m.size) ? m.size : 96,
+        size: [96, 128, 160, 192].includes(m.size) ? m.size : 96,
         diff: Number.isInteger(m.diff) && m.diff >= 0 && m.diff <= 3 ? m.diff : 1,
         islands: !!m.islands,
         urban: !!m.urban,
@@ -917,12 +940,13 @@ wss.on('connection', ws => {
     } else if (m.t === 'roomcfg') {
       // host configures the match in the lobby: map, fog, AI fill, teams
       if (!room || !me || me.slot !== 0 || room.started) return;
-      if ([72, 96, 128].includes(m.size)) room.size = m.size;
+      if ([96, 128, 160, 192].includes(m.size)) room.size = m.size;
       if (MAP_TYPES.includes(m.mapType)) {
         room.mapType = m.mapType;
         room.islands = m.mapType === 'islands'; room.urban = m.mapType === 'urban';
         room.flat = m.mapType === 'flat'; room.steel = m.mapType === 'steel'; room.metal = m.mapType === 'metal';
       }
+      if (m.oreLevel !== undefined) room.oreLevel = (m.oreLevel | 0) & 3;
       if (typeof m.fog === 'boolean') room.fog = m.fog;
       if (Array.isArray(m.ai)) room.ai = m.ai.slice(0, 3).map((a: any) => ({ lvl: Math.max(0, Math.min(3, a.lvl | 0)), team: Math.min(8, Math.max(1, a.team | 0)) || 2 }));
       if (Array.isArray(m.teams)) room.teams = m.teams.slice(0, room.clients.length).map((t: any) => Math.min(8, Math.max(1, t | 0)) || 1);

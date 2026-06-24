@@ -165,13 +165,14 @@ class LocalGame implements GameLike {
     const minForPlayers = nPlayers >= 4 ? 160 : nPlayers === 3 ? 136 : 112;
     const effSize = Math.min(MAXD, Math.max(size, minForPlayers));
     setMapSize(effSize);
-    // map type rides in seed bits: islands 0x40000000, urban 0x20000000, flatCity 0x10000000, steel 0x08000000, metal 0x04000000
-    let seed = ((Date.now() ^ (Math.random() * 0x7fffffff)) >>> 0) & ~0x7c000000;
+    // map type rides in seed bits 26-30; ore/oil level in bits 24-25 (0=normal)
+    let seed = ((Date.now() ^ (Math.random() * 0x7fffffff)) >>> 0) & ~0x7f000000;
     if (islandsEnabled) seed |= 0x40000000;
     if (urbanEnabled) seed |= 0x20000000;
     if (flatEnabled) seed |= 0x10000000;
     if (steelEnabled) seed |= 0x08000000;
     if (metalEnabled) seed |= 0x04000000;
+    seed |= (oreLevelSel & 3) << 24;
     const LVL_NAMES = ['Easy', 'Normal', 'Hard', 'Brutal'];
     const pickFacs = (avoid: string[], n: number) => {
       const pool = Object.keys(FACTIONS).filter(f => !avoid.includes(f));
@@ -1255,7 +1256,12 @@ class GameClient {
     const boxed: any[] = [];
     for (const v of this.lastViews) {
       if (v.b || v.o !== me) continue;
-      const p = this.renderer.project(v.x, v.z, 0.5);
+      // aircraft render at cruise altitude — project at that height so a click/box on
+      // the MODEL selects them (not the empty ground beneath, which was confusing)
+      const ud = UNITS[v.t];
+      const p = ud?.fly
+        ? this.renderer.projectY(v.x, this.renderer.flyY(v.x, v.z, ud.alt || 2.3), v.z)
+        : this.renderer.project(v.x, v.z, 0.5);
       if (p.ok && p.x >= lo.x && p.x <= hi.x && p.y >= lo.y && p.y <= hi.y) boxed.push(v);
     }
     // a mixed box-select drops the economy miners (harvesters + oil miners) so
@@ -1332,9 +1338,13 @@ class GameClient {
     const dbl = now - this.lastClick.t < 350 && Math.hypot(sx - this.lastClick.x, sy - this.lastClick.y) < 24;
     this.lastClick = { t: now, x: sx, y: sy };
     const ownHit = this.pickView(sx, sy, v => v.o === me);
-    if (dbl && ownHit && !ownHit.b) { // double-tap own unit → all same type on screen
+    if (dbl && ownHit) { // double-tap own unit OR building → select all of that type on screen (FOV)
       this.selection.clear();
-      for (const v of this.lastViews) if (!v.b && v.o === me && v.t === ownHit.t && this.renderer.project(v.x, v.z, 0.5).ok) this.selection.add(v.i);
+      for (const v of this.lastViews) {
+        if (!!v.b !== !!ownHit.b || v.o !== me || v.t !== ownHit.t) continue;
+        if (this.renderer.project(v.x, v.z, v.b ? 1 : 0.5).ok) this.selection.add(v.i);
+      }
+      audio.play('click');
       return;
     }
     // with a selection, tapping ground/enemy issues an order; tapping own unit selects it
@@ -1641,20 +1651,14 @@ class GameClient {
     const hit = this.pickView(e.clientX, e.clientY, v => v.o === me);
     // (rally points are set with RIGHT click; left-click on ground deselects)
 
-    if (dbl && hit && !hit.b) {
-      // select all same-type on screen
+    if (dbl && hit) {
+      // double-click own unit OR building → select all of that type on screen (FOV)
       this.selection.clear();
       for (const v of this.lastViews) {
-        if (v.b || v.o !== me || v.t !== hit.t) continue;
-        if (this.renderer.project(v.x, v.z, 0.5).ok) this.selection.add(v.i);
+        if (!!v.b !== !!hit.b || v.o !== me || v.t !== hit.t) continue;
+        if (this.renderer.project(v.x, v.z, v.b ? 1 : 0.5).ok) this.selection.add(v.i);
       }
-      return;
-    }
-    if (dbl && hit && hit.b && ['barracks', 'factory', 'dronefac', 'airforce', 'shipyard'].includes(hit.t)) {
-      // double-click a production building → set it primary for its type
-      this.game.issue({ k: 'primary', p: me, bid: hit.i });
-      this.selection.clear(); this.selection.add(hit.i);
-      audio.play('confirm');
+      audio.play('click');
       return;
     }
     if (!e.shiftKey) this.selection.clear();
@@ -2037,6 +2041,14 @@ class GameClient {
     const who = mine ? '' : neutral ? ` · Neutral${v.gar ? ' (garrison)' : ''}` : ` · ${owner} (${ally ? 'ally' : 'enemy'})`;
     let label = `<span style="color:${col}">${name}</span>${who} · ${hp}/${max} HP`;
     if (v.b && v.pr < 1) label += ` · ${Math.round(v.pr * 100)}% built`;
+    // buildings get a 2nd line: upgrade level + power (generated or consumed)
+    if (v.b) {
+      const bd: any = BUILDINGS[v.t];
+      const lvl = v.lv || 1;
+      const pw = bd?.power || 0;
+      const pwTxt = pw > 0 ? `generates ${pw}⚡` : pw < 0 ? `uses ${-pw}⚡` : 'no power draw';
+      label += `<br><span style="color:#9fb3c2;font-weight:500">Level ${lvl} · ${pwTxt}</span>`;
+    }
     this.tipEl.innerHTML = label;
     this.tipEl.style.left = (this.mouse.x + 14) + 'px';
     this.tipEl.style.top = (this.mouse.y + 16) + 'px';
@@ -2098,7 +2110,9 @@ class GameClient {
     if (this.frame % 30 === 0 && !this.guiHidden) this.updateTopStat();
 
     const _u0 = this.perfOn ? performance.now() : 0;
-    prof.begin('sim.update'); this.game.update(dt * 1000); prof.end('sim.update');
+    // once the match is decided, PAUSE the sim — don't keep advancing it (units would
+    // otherwise keep moving/fighting behind the report banner and rubberband).
+    if (!this.over) { prof.begin('sim.update'); this.game.update(dt * 1000); prof.end('sim.update'); }
     if (this.perfOn) this.updateMs += (performance.now() - _u0 - this.updateMs) * 0.2;
     this.checkNetStall();   // surface a pause popup if we're frozen waiting on a peer
 
@@ -2202,6 +2216,10 @@ class GameClient {
     }
 
     const allViews = this.game.views();
+    // game over: the sim is paused, so clear each unit's "moving" flag this frame —
+    // otherwise a unit frozen mid-stride keeps playing its walk/drive animation in
+    // place (the jitter). With mv off they settle into their idle pose.
+    if (this.over) for (const v of allViews) if (!v.b) v.mv = 0;
     // who's on my team (allies share vision and stay always-visible)
     const plList = this.game.players?.() || [];
     const myTeam = plList[this.game.me]?.tm;
@@ -2248,11 +2266,12 @@ class GameClient {
         const who = this.game.players?.()[ev.p]?.n || 'Enemy';
         const msg = ev.reason === 'left' ? 'has left the battle — resigned.' : 'We surrender! The region is yours.';
         this.appendChat({ name: who, to: 'all', msg });
+        if (ev.p !== this.game.me) { audio.play('surrender'); if (this.soundOff) this.notify(`⚑ ${who} surrendered`, '#c8a6ff'); }
       }
       if (ev.e === 'sdtick' && ev.owner === this.game.me) audio.play('sdbeep');
       if (ev.e === 'tech' && ev.tech === 'satellite') {
         // ANY player's satellite launch gets a one-time cue (per player)
-        if (!this.satCued.has(ev.p)) { this.satCued.add(ev.p); audio.play('satup'); }
+        if (!this.satCued.has(ev.p)) { this.satCued.add(ev.p); audio.play('satup'); if (this.soundOff) this.notify('🛰 Spy satellite launched', '#7df0c0'); }
         if (this.allies.has(ev.p)) {
           // an allied satellite goes up: dramatic rocket launch + permanent map reveal
           this.renderer.launchSatellite(ev.x ?? W / 2, ev.z ?? H / 2);
@@ -2324,7 +2343,22 @@ class GameClient {
       const fogFn = (!(this.game as any).isSim && fogEnabled && this.fog) ? (cx: number, cz: number) => this.renderer.fogValue(cx, cz) : undefined;
       // radar-detected threats show on the minimap even through fog
       const mmViews = this.radarBlips.length ? views.concat(this.radarBlips) : views;
-      prof.begin('minimap'); this.ui.minimap(this.game.map, mmViews, this.camQuad(), elapsed, fogFn); prof.end('minimap');
+      // the minimap needs spare power AND a Radar Dome (or a spy satellite) to
+      // display. LOW POWER = spare generation (made - used) under 50 → it takes
+      // precedence; otherwise NO RADAR if none built. Spectator/replay show all.
+      let gate: 'ok' | 'noradar' | 'lowpower' = 'ok';
+      if (!(this.game as any).isSim) {
+        const meId = this.game.me;
+        const pl = this.game.players()[meId];
+        const lowPower = pl ? (pl.pwr ?? 0) < 50 : false; // stored battery under 50 = low (matches the HUD meter)
+        if (lowPower) gate = 'lowpower';
+        else if (!pl?.satOk) {
+          let built = false;
+          for (const v of mmViews) if (v.b && v.o === meId && v.t === 'radar' && (v.pr ?? 1) >= 1) { built = true; break; }
+          if (!built) gate = 'noradar';
+        }
+      }
+      prof.begin('minimap'); this.ui.minimap(this.game.map, mmViews, this.camQuad(), elapsed, fogFn, gate); prof.end('minimap');
     }
     // no selection box while drawing a patrol route or drag-placing a structure
     // line (walls / tank barriers) — those drags aren't a selection
@@ -2451,7 +2485,7 @@ class GameClient {
 
     if (!this.guiHidden) {
       prof.begin('overlay.2d');
-      this.ui.overlay(this.overlayCtx, this.renderer.project.bind(this.renderer), views, this.game.me, this.selection, dragRect, hover, circles, this.cmdFx);
+      this.ui.overlay(this.overlayCtx, this.renderer.project.bind(this.renderer), this.renderer.projectY.bind(this.renderer), views, this.game.me, this.selection, dragRect, hover, circles, this.cmdFx);
       prof.end('overlay.2d');
     }
 
@@ -2594,29 +2628,76 @@ class GameClient {
       + `<br>Sim tick: ${ns?.tick ?? this.game.tickN}`;
   }
 
+  // when sound is off, the audio-only event cues are surfaced as on-screen text
+  // instead, so a muted player still gets the engine notifications.
+  private get soundOff() { return audio.muted || audio.sfxVol <= 0; }
+  private toastEl: HTMLDivElement | null = null;
+  notify(msg: string, color = '#8fd0ff') {
+    if (!this.toastEl) {
+      const el = document.createElement('div');
+      el.id = 'gameToasts';
+      el.style.cssText = 'position:fixed;top:48px;left:50%;transform:translateX(-50%);z-index:40;'
+        + 'display:flex;flex-direction:column;gap:4px;align-items:center;pointer-events:none';
+      document.body.appendChild(el);
+      this.toastEl = el;
+    }
+    const t = document.createElement('div');
+    t.textContent = msg;
+    t.style.cssText = `background:rgba(10,14,18,0.9);border:1px solid #2c3e50;border-left:3px solid ${color};`
+      + `border-radius:5px;padding:5px 12px;font:600 13px 'Segoe UI',sans-serif;color:#e8eef3;`
+      + `box-shadow:0 2px 8px rgba(0,0,0,.5);opacity:0;transition:opacity .2s`;
+    this.toastEl.appendChild(t);
+    requestAnimationFrame(() => { t.style.opacity = '1'; });
+    while (this.toastEl.children.length > 5) this.toastEl.removeChild(this.toastEl.firstChild!);
+    setTimeout(() => { t.style.opacity = '0'; setTimeout(() => t.remove(), 250); }, 4200);
+  }
+
   // F3 perf overlay: frame rate + where each frame's time goes, plus (for a
   // multiplayer match) the snapshot stream — rate, size and arrival latency.
   // rate-limited audio feedback cues (power state, under-attack, silo, satellite).
   // Each cue fires at most once per 30s, and the power cues only on a threshold
-  // CROSSING into a worse state so a steady brownout doesn't nag repeatedly.
+  // CROSSING into a worse state so a steady brownout doesn't nag repeatedly. When
+  // sound is off the same cues show as text toasts via notify().
   private updateAudioCues(views: any[]) {
     const now = performance.now();
-    const cue = (k: string, snd: string, gap = 30000) => {
-      if (now - (this.cueT[k] || 0) >= gap) { this.cueT[k] = now; audio.play(snd); }
+    const cue = (k: string, snd: string, gap = 30000, text?: string, color?: string) => {
+      // a never-fired cue (cueT[k] undefined) ALWAYS fires — don't gate the very
+      // first one on performance.now() >= gap (that silenced cues for 30s after load).
+      if (this.cueT[k] === undefined || now - this.cueT[k] >= gap) {
+        this.cueT[k] = now; audio.play(snd);
+        if (text && this.soundOff) this.notify(text, color);
+      }
     };
     const me = this.game.players?.()[this.game.me];
     if (me && me.a !== false) {
-      const st = me.pu > me.pm ? 2 : (me.pu > me.pm * 0.85 ? 1 : 0);
-      if (st > this.pwrState) { if (st === 2) cue('pwrout', 'pwrout'); else cue('pwrlow', 'pwrlow'); }
+      // Drive the power cues off the stored battery (what the HUD meter shows) and
+      // load-shedding — NOT pu>pm (powerUsed is capped to the sustainable load by
+      // shedding, and once the battery drains the base recharges with pu<pm, so that
+      // never fired even at ~0% battery).
+      //   INSUFFICIENT = buildings are actually being shed (v.po) for lack of power,
+      //   LOW          = the stored battery reserve has dropped below 50 (HUD meter).
+      // The warning REPEATS every 30s (the cue() throttle) until power is restored —
+      // not just on the crossing — so a persistent brownout keeps nagging.
+      let shed = 0;
+      for (const v of views) if (v.b && v.o === this.game.me && v.po) shed++;
+      const st = shed > 0 ? 2 : ((me.pwr ?? 0) < 50 ? 1 : 0);
+      if (st === 2) cue('pwrout', 'pwrout', 30000, '⚡ Power insufficient — buildings shutting down', '#ff5043');
+      else if (st === 1) cue('pwrlow', 'pwrlow', 30000, '⚡ Power running low', '#ffc940');
       this.pwrState = st;
     }
-    // a missile silo finished anywhere on the map — announce once per session
-    if (!this.siloCued && views.some(v => v.b && v.t === 'silo' && (v.pr ?? 1) >= 1)) { this.siloCued = true; audio.play('siloup'); }
+    // an ENEMY missile silo finished — announce once per session (our own silo is
+    // no threat, so building one ourselves never triggers the warning)
+    if (!this.siloCued && views.some(v => v.b && v.t === 'silo' && v.o !== this.game.me && (v.pr ?? 1) >= 1)) {
+      this.siloCued = true; audio.play('siloup');
+      if (this.soundOff) this.notify('☢ Enemy missile silo online', '#ff8a5a');
+    }
     // my units / buildings taking fire — separate cues, 30s apart each
     for (const v of views) {
       if (v.o !== this.game.me) continue;
       const prev = this.hpPrev.get(v.i);
-      if (prev !== undefined && v.h < prev - 0.5) cue(v.b ? 'bldgattack' : 'unitattack', v.b ? 'bldgattack' : 'underattack');
+      if (prev !== undefined && v.h < prev - 0.5)
+        cue(v.b ? 'bldgattack' : 'unitattack', v.b ? 'bldgattack' : 'underattack', 30000,
+          v.b ? '⚠ Building under attack' : '⚠ Unit under attack', '#ff7a6a');
     }
     this.hpPrev.clear();
     for (const v of views) if (v.o === this.game.me) this.hpPrev.set(v.i, v.h);
@@ -2780,6 +2861,7 @@ let urbanEnabled = false;   // map-type selector: flat urban map (roads, river, 
 let flatEnabled = false;    // map-type selector: completely flat city (roads + buildings only)
 let steelEnabled = false;   // map-type selector: bare metallic arena, all rich ore
 let metalEnabled = false;   // map-type selector: flat metallic-grey slab, no textures
+let oreLevelSel = 0;        // ore/oil abundance: 0 normal, 1 sparse, 2 rich (rides seed bits 24-25)
 // skirmish AI roster: add each AI as an enemy or partner with its own level +
 // team. You are always team 1; team 1 = ally/partner, teams 2-4 = enemy sides.
 // Max 4 players total (3 AI). Default: one Normal enemy.
@@ -3567,12 +3649,13 @@ function pingBadge(ping: number | null | undefined): string {
 // roomcfg; the server echoes the authoritative room state back to everyone. ----
 let lobbyIsHost = false;
 let lastRoomSig = '';
-const lobbyCfg: { size: number; mapType: string; fog: boolean; ai: { lvl: number; team: number }[]; teams: number[] } =
-  { size: 96, mapType: 'continent', fog: true, ai: [], teams: [] };
-const LOBBY_SIZES: [number, string][] = [[72, 'Small'], [96, 'Medium'], [128, 'Large']];
+const lobbyCfg: { size: number; mapType: string; fog: boolean; oreLevel: number; ai: { lvl: number; team: number }[]; teams: number[] } =
+  { size: 96, mapType: 'continent', fog: true, oreLevel: 0, ai: [], teams: [] };
+const LOBBY_SIZES: [number, string][] = [[96, 'Medium'], [128, 'Large'], [160, 'Huge'], [192, 'Giant']];
+const ORE_LEVELS: [number, string][] = [[0, 'Normal'], [2, 'Rich'], [1, 'Sparse']];
 const LOBBY_MAPS: [string, string][] = [['continent', 'Continent'], ['islands', 'Islands'], ['urban', 'Urban'], ['flat', 'Flat City'], ['steel', 'Steel Arena'], ['metal', 'Metal Plain']];
 function sendRoomCfg() {
-  if (net && lobbyIsHost) net.send({ t: 'roomcfg', size: lobbyCfg.size, mapType: lobbyCfg.mapType, fog: lobbyCfg.fog, ai: lobbyCfg.ai, teams: lobbyCfg.teams });
+  if (net && lobbyIsHost) net.send({ t: 'roomcfg', size: lobbyCfg.size, mapType: lobbyCfg.mapType, fog: lobbyCfg.fog, oreLevel: lobbyCfg.oreLevel, ai: lobbyCfg.ai, teams: lobbyCfg.teams });
 }
 function renderRoom(m: any) {
   // skip ping-only refreshes (the server rebroadcasts every ~3s) so an open
@@ -3582,7 +3665,7 @@ function renderRoom(m: any) {
   lastRoomSig = sig;
   $('roomCode').textContent = m.code;
   lobbyIsHost = m.you === 0;
-  lobbyCfg.size = m.size || 96; lobbyCfg.mapType = m.mapType || 'continent'; lobbyCfg.fog = m.fog !== false;
+  lobbyCfg.size = m.size || 96; lobbyCfg.mapType = m.mapType || 'continent'; lobbyCfg.fog = m.fog !== false; lobbyCfg.oreLevel = (m.oreLevel | 0) & 3;
   lobbyCfg.ai = (m.ai || []).map((a: any) => ({ lvl: a.lvl | 0, team: a.team | 0 }));
   lobbyCfg.teams = m.players.map((p: any, i: number) => p.team ?? (i + 1));
   const selStyle = 'background:#1a2430;color:#cfe0ee;border:1px solid #2c3e50;border-radius:4px;padding:3px;font-size:11px';
@@ -3610,18 +3693,21 @@ function renderLobbyCfg() {
   if (!lobbyIsHost) {
     const mapL = (LOBBY_MAPS.find(x => x[0] === lobbyCfg.mapType) || ['', lobbyCfg.mapType])[1];
     const sizeL = (LOBBY_SIZES.find(x => x[0] === lobbyCfg.size) || [0, String(lobbyCfg.size)])[1];
-    cfg.innerHTML = `<div style="font-size:12px;color:#9fb3c8;background:rgba(20,28,38,0.7);border:1px solid #2c3a44;border-radius:6px;padding:8px 10px">Map: <b>${mapL}</b> · ${sizeL} · Fog ${lobbyCfg.fog ? 'on' : 'off'} · ${lobbyCfg.ai.length} AI — <span style="color:#5f7384">set by host</span></div>`;
+    const oreL = (ORE_LEVELS.find(x => x[0] === lobbyCfg.oreLevel) || [0, 'Normal'])[1];
+    cfg.innerHTML = `<div style="font-size:12px;color:#9fb3c8;background:rgba(20,28,38,0.7);border:1px solid #2c3a44;border-radius:6px;padding:8px 10px">Map: <b>${mapL}</b> · ${sizeL} · ${oreL} ore · Fog ${lobbyCfg.fog ? 'on' : 'off'} · ${lobbyCfg.ai.length} AI — <span style="color:#5f7384">set by host</span></div>`;
     return;
   }
   cfg.innerHTML =
     `<div style="font-size:11px;color:#9fb3c8;letter-spacing:0.06em;margin-bottom:4px">GAME SETUP</div>` +
     `<div class="optrow"><span class="optlabel">Map Size</span><select id="lcSize" style="${sel};flex:1">${LOBBY_SIZES.map(([v, l]) => `<option value="${v}" ${v === lobbyCfg.size ? 'selected' : ''}>${l}</option>`).join('')}</select></div>` +
     `<div class="optrow"><span class="optlabel">Map Type</span><select id="lcMap" style="${sel};flex:1">${LOBBY_MAPS.map(([v, l]) => `<option value="${v}" ${v === lobbyCfg.mapType ? 'selected' : ''}>${l}</option>`).join('')}</select></div>` +
+    `<div class="optrow"><span class="optlabel">Ore / Oil</span><select id="lcOre" style="${sel};flex:1">${ORE_LEVELS.map(([v, l]) => `<option value="${v}" ${v === lobbyCfg.oreLevel ? 'selected' : ''}>${l}</option>`).join('')}</select></div>` +
     `<label class="optrow" style="cursor:pointer"><span class="optlabel">Fog of War</span><span style="flex:1;display:flex;align-items:center;gap:8px;color:#9fb3c8;font-size:13px"><input type="checkbox" id="lcFog" ${lobbyCfg.fog ? 'checked' : ''} style="width:16px;height:16px;accent-color:#ffc940">Hide unexplored</span></label>` +
     `<div class="optrow" style="align-items:flex-start"><span class="optlabel">AI Players</span><div style="flex:1"><div id="lcAi"></div>` +
     `<div style="display:flex;gap:8px;margin-top:6px"><button type="button" class="mbtn" id="lcAddEnemy" style="flex:1;font-size:12px;padding:6px 4px">⚔ Add Enemy AI</button><button type="button" class="mbtn" id="lcAddPartner" style="flex:1;font-size:12px;padding:6px 4px">🤝 Add Partner AI</button></div></div></div>`;
   ($('lcSize') as HTMLSelectElement).onchange = e => { lobbyCfg.size = +(e.target as HTMLSelectElement).value; sendRoomCfg(); };
   ($('lcMap') as HTMLSelectElement).onchange = e => { lobbyCfg.mapType = (e.target as HTMLSelectElement).value; sendRoomCfg(); };
+  ($('lcOre') as HTMLSelectElement).onchange = e => { lobbyCfg.oreLevel = (+(e.target as HTMLSelectElement).value | 0) & 3; sendRoomCfg(); };
   ($('lcFog') as HTMLInputElement).onchange = e => { lobbyCfg.fog = (e.target as HTMLInputElement).checked; sendRoomCfg(); };
   ($('lcAddEnemy') as HTMLButtonElement).onclick = () => { if (lobbyCfg.ai.length < 3) { const used = new Set([...lobbyCfg.teams, ...lobbyCfg.ai.map(a => a.team)]); const t = [2, 3, 4, 5, 6].find(x => !used.has(x)) ?? 2; lobbyCfg.ai.push({ lvl: 1, team: t }); sendRoomCfg(); } };
   ($('lcAddPartner') as HTMLButtonElement).onclick = () => { if (lobbyCfg.ai.length < 3) { lobbyCfg.ai.push({ lvl: 1, team: lobbyCfg.teams[0] || 1 }); sendRoomCfg(); } };
@@ -3740,7 +3826,7 @@ function initMenus() {
   mv.addEventListener('input', () => { audio.init(); audio.setMusicVol(+mv.value / 100); });
   sv.addEventListener('input', () => { audio.init(); audio.setSfxVol(+sv.value / 100); });
   buildOptionRow('sizeRow',
-    [{ label: 'Medium', v: 112 }, { label: 'Large', v: 136 }, { label: 'Huge', v: 160 }],
+    [{ label: 'Medium', v: 112 }, { label: 'Large', v: 136 }, { label: 'Huge', v: 160 }, { label: 'Giant', v: 192 }],
     () => selSize, v => { selSize = v; });
   $('btnSkirmish').addEventListener('click', () => {
     const key = (($('claudeKey') as HTMLInputElement).value || '').trim();
@@ -3752,6 +3838,7 @@ function initMenus() {
     flatEnabled = mt === 'flat';
     steelEnabled = mt === 'steel';
     metalEnabled = mt === 'metal';
+    oreLevelSel = (+($('oreAmt') as HTMLSelectElement)?.value || 0) & 3;
     if (!aiList.length || !aiList.some(a => a.team !== 1)) {
       $('menuErr').textContent = 'Add at least one enemy AI to play.';
       return;
