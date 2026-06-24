@@ -33,6 +33,7 @@ CC-BY 3.0 / 4.0 (attribution required — used under these terms):
 - Barracks ("RTS Barracks") — Sabri Ayeş (Sketchfab, CC-BY 4.0)
 - Radar Dome ("RTS Radar Tower") — Sabri Ayeş (Sketchfab, CC-BY 4.0)
 - Research Lab ("ResearchCenter_Building001") — Christian Rudorff (Sketchfab, CC-BY 4.0)
+- Missile Battery ("MissileTower_Building002") — Christian Rudorff (Sketchfab, CC-BY 4.0)
 - Wall ("Concrete Barrier HQ") — Sabri Ayeş (Sketchfab, CC-BY 4.0)
 - Patriot SAM ("MIM-104 Patriot Air Defense System") — Muhamad Mirza Arrafi (Sketchfab, CC-BY 4.0)
 - Flak Gun ("Type-625 Anti Aircraft Gun Missile System") — Muhamad Mirza Arrafi (Sketchfab, CC-BY 4.0)
