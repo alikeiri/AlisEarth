@@ -2343,17 +2343,19 @@ class GameClient {
       const fogFn = (!(this.game as any).isSim && fogEnabled && this.fog) ? (cx: number, cz: number) => this.renderer.fogValue(cx, cz) : undefined;
       // radar-detected threats show on the minimap even through fog
       const mmViews = this.radarBlips.length ? views.concat(this.radarBlips) : views;
-      // the minimap needs a POWERED Radar Dome (or a spy satellite) to display —
-      // no radar → "NO RADAR"; radar shed for lack of power → "LOW POWER".
-      // Spectator/replay views always show the full map.
+      // the minimap needs spare power AND a Radar Dome (or a spy satellite) to
+      // display. LOW POWER = spare generation (made - used) under 50 → it takes
+      // precedence; otherwise NO RADAR if none built. Spectator/replay show all.
       let gate: 'ok' | 'noradar' | 'lowpower' = 'ok';
       if (!(this.game as any).isSim) {
-        const me = this.game.me;
-        const satOk = !!(this.game.players()[me]?.satOk);
-        if (!satOk) {
-          let built = false, powered = false;
-          for (const v of mmViews) if (v.b && v.o === me && v.t === 'radar' && (v.pr ?? 1) >= 1) { built = true; if (!v.po) powered = true; }
-          gate = !built ? 'noradar' : (!powered ? 'lowpower' : 'ok');
+        const meId = this.game.me;
+        const pl = this.game.players()[meId];
+        const lowPower = pl ? (pl.pwr ?? 0) < 50 : false; // stored battery under 50 = low (matches the HUD meter)
+        if (lowPower) gate = 'lowpower';
+        else if (!pl?.satOk) {
+          let built = false;
+          for (const v of mmViews) if (v.b && v.o === meId && v.t === 'radar' && (v.pr ?? 1) >= 1) { built = true; break; }
+          if (!built) gate = 'noradar';
         }
       }
       prof.begin('minimap'); this.ui.minimap(this.game.map, mmViews, this.camQuad(), elapsed, fogFn, gate); prof.end('minimap');
@@ -2673,15 +2675,14 @@ class GameClient {
       // shedding, and once the battery drains the base recharges with pu<pm, so that
       // never fired even at ~0% battery).
       //   INSUFFICIENT = buildings are actually being shed (v.po) for lack of power,
-      //   LOW          = the battery reserve has run down to <=15%.
+      //   LOW          = the stored battery reserve has dropped below 50 (HUD meter).
+      // The warning REPEATS every 30s (the cue() throttle) until power is restored —
+      // not just on the crossing — so a persistent brownout keeps nagging.
       let shed = 0;
       for (const v of views) if (v.b && v.o === this.game.me && v.po) shed++;
-      const batt = me.pmax > 0 ? me.pwr / me.pmax : 1;
-      const st = shed > 0 ? 2 : (batt <= 0.15 ? 1 : 0);
-      if (st > this.pwrState) {
-        if (st === 2) cue('pwrout', 'pwrout', 30000, '⚡ Power insufficient — buildings shutting down', '#ff5043');
-        else cue('pwrlow', 'pwrlow', 30000, '⚡ Power running low', '#ffc940');
-      }
+      const st = shed > 0 ? 2 : ((me.pwr ?? 0) < 50 ? 1 : 0);
+      if (st === 2) cue('pwrout', 'pwrout', 30000, '⚡ Power insufficient — buildings shutting down', '#ff5043');
+      else if (st === 1) cue('pwrlow', 'pwrlow', 30000, '⚡ Power running low', '#ffc940');
       this.pwrState = st;
     }
     // an ENEMY missile silo finished — announce once per session (our own silo is
