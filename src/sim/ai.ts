@@ -124,6 +124,9 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
     }
     if (++scanned >= 40 || (mem.defCd > 0 && harvHit)) break; // bounded scan
   }
+  // economy under raid (a harvester is taking fire) → add an eco-defense gun so the
+  // base can fend off raiders even if the field army is away on a push
+  if (harvHit) turrets = Math.min(8, turrets + 1);
   // harvesters under attack: rush the nearest spare combat units to defend them,
   // and slip the miner to a safer field (away from the attacker, still nearby)
   if (harvHit && (mem.harvDefCd ?? 0) <= 0) {
@@ -305,7 +308,14 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
   // punch, so it comes AFTER the ground core, not instead of it
   const groundForce = nU('tank') + nU('heavy') + nU('ifv') + nU('mlrs') + nU('rocket') + nU('rifle') + nU('aatank') + nU('flak');
   const groundCore = nB('factory') >= 1 && nB('barracks') >= 1 && groundForce >= 12 && nB('turret') >= 2;
-  const goAir = L.air || island || dirAir || prefAir || groundCore;
+  // heavy enemy anti-air makes aircraft suicidal (replay mqs2vfwprlaw: ~230 aircraft
+  // fed into 30+ AA units, traded 6:1 down). Stop committing to air when the enemy
+  // has a real AA wall — except on islands, where air is the only way to reach them —
+  // and let the budget flow to ground armor + siege instead.
+  const airWall = (mem.enemyAA || 0) >= 5;
+  const goAir = island || ((L.air || dirAir || prefAir || groundCore) && !airWall);
+  // crack a turtle (heavy enemy defenses, or air shut down) with massed siege
+  const siege = airWall || (mem.enemyBuildings || 0) >= 9;
 
   // economy baseline: a factory + a basic harvester income (3) before the AI
   // pours credits into turrets/army. Stops the broke-AI turret spiral (replays
@@ -477,12 +487,13 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
       // MLRS is fragile artillery (170hp) — keep it a SUPPORT fraction of the army,
       // never the bulk, or it melts and trades 2:1 (replay mqqcc6prkpju: 484 MLRS
       // queued, army lost 280 / killed 136). Durable tanks/heavies are the core.
-      const mlrsCap = Math.max(L.siege, Math.round(armyCount * (antiInf ? 0.30 : 0.18)));
+      // siege builds (turtle / no air) lean harder on long-range MLRS to crack the line
+      const mlrsCap = Math.max(L.siege, Math.round(armyCount * (siege ? 0.38 : antiInf ? 0.30 : 0.18)));
       const wantAA = nU('aatank') + nU('flak') < aaTarget && r < aaPrio;
       const rich = pl.credits > 2000;
       let t: string;
       if (wantAA) t = r < aaPrio * 0.5 ? 'aatank' : 'flak';
-      else if (nU('mlrs') < mlrsCap && r < (antiInf ? 0.42 : 0.20)) t = 'mlrs'; // support artillery
+      else if (nU('mlrs') < mlrsCap && r < (siege ? 0.5 : antiInf ? 0.42 : 0.20)) t = 'mlrs'; // long-range siege
       else if (antiInf && r < 0.55) t = 'ifv';                  // autocannons shred infantry masses
       else if (antiArmor) t = rich && r < 0.7 ? 'heavy' : 'tank'; // armor counters armor
       else if (rich && r < 0.18) t = 'fueltruck';               // a breach charge for walls/clumps
@@ -493,11 +504,14 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
   const dro = (myB['dronefac'] || []).find(b => b.progress >= b.total && b.queue.length < 2);
   if (dro && armyCount < cap && pl.credits > (ecoShort ? 2400 : 1100)) {
     const r = sim.aiRngP[p].next();
-    const t = pl.credits > 3000 && r < 0.35 ? 'msldrone' : pl.credits > 2600 && r < 0.65 ? 'strike' : 'recon';
-    cmds.push({ k: 'train', p, bid: dro.id, type: t });
+    // vs a heavy AA wall, attack drones just die — keep only a couple recon for vision
+    const t = (airWall && !island)
+      ? (nU('recon') < 2 ? 'recon' : null)
+      : (pl.credits > 3000 && r < 0.35 ? 'msldrone' : pl.credits > 2600 && r < 0.65 ? 'strike' : 'recon');
+    if (t) cmds.push({ k: 'train', p, bid: dro.id, type: t });
   }
   const af = (myB['airforce'] || []).find(b => b.progress >= b.total && b.queue.length < 2);
-  if (af && armyCount < cap && pl.credits > (island || dirAir || prefAir ? 1800 : 2000)) {
+  if (af && goAir && armyCount < cap && pl.credits > (island || dirAir || prefAir ? 1800 : 2000)) {
     const r = sim.aiRngP[p].next();
     // once the enemy army is broken (but buildings remain), switch to bombers to
     // level the base; vs an air-heavy enemy build interceptors; else a mix
