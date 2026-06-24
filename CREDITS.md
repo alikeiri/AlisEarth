@@ -14,7 +14,8 @@ CC0 (public domain, no attribution required):
 - Rocket Team ("SWAT") — Quaternius
 
 CC-BY 3.0 / 4.0 (attribution required — used under these terms):
-- Power Plant ("RTS Military Building 1") — Sabri Ayeş (Sketchfab, CC-BY 4.0)
+- Power Plant ("RTS Ammo Box") — Sabri Ayeş (Sketchfab, CC-BY 4.0)
+- War Factory ("RTS Military Building 1") — Sabri Ayeş (Sketchfab, CC-BY 4.0)
 - Rifle Squad ("Soldier") — KolosStudios
 - MLRS ("Truck Tank") — KolosStudios
 - Harvester ("Dump truck") — jeremy
@@ -38,7 +39,7 @@ CC-BY 3.0 / 4.0 (attribution required — used under these terms):
 - Patriot SAM ("MIM-104 Patriot Air Defense System") — Muhamad Mirza Arrafi (Sketchfab, CC-BY 4.0)
 - Flak Gun ("Type-625 Anti Aircraft Gun Missile System") — Muhamad Mirza Arrafi (Sketchfab, CC-BY 4.0)
 - Oil Field ("Oil pump") — Poly by Google
-- War Factory ("Factory") — Poly by Google
+- (retired) War Factory ("Factory") — Poly by Google — replaced by RTS Military Building 1
 
 Models sourced from https://poly.pizza (CC0 + CC-BY catalog).
 Buildings and effects are procedurally generated.

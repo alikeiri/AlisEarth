@@ -113,7 +113,7 @@ function loadGLB(file: string): Promise<any> {
 export async function preloadModels(onProgress?: (done: number, total: number) => void): Promise<void> {
   const files = new Set<string>();
   for (const t in MODEL_DEFS) files.add(MODEL_DEFS[t].file);
-  for (const f of ['oilfield', 'factory', 'refinery', 'airfield', 'barracks', 'wall', 'radar', 'lab', 'sam']) files.add(f);
+  for (const f of ['oilfield', 'powerplant', 'ammobox', 'refinery', 'airfield', 'barracks', 'wall', 'radar', 'lab', 'sam']) files.add(f);
   const list = [...files]; let done = 0;
   onProgress?.(0, list.length);
   await Promise.all(list.map(f => loadGLB(f).catch(() => null).then(() => { onProgress?.(++done, list.length); })));
@@ -1190,8 +1190,11 @@ export class Renderer {
     this.oilMesh.castShadow = false; // ground clutter — kept out of the shadow pass
     this.scene.add(this.oilMesh);
     this.loadOilModel();
-    this.loadFactoryModel();
-    this.loadBuildingModel('power', 'powerplant', 3.6);   // Power Plant GLB ("RTS Military Building 1" by Sabri Ayeş, Sketchfab, CC-BY) — 50% larger footprint
+    // War Factory now wears the former Power Plant model ("RTS Military Building 1"),
+    // same 3.6 sizing — generic loader, so makeBuildingGroup uses bldgProtos['factory']
+    // (factoryProto stays null, the old poly.pizza factory is retired)
+    this.loadBuildingModel('factory', 'powerplant', 3.6); // ("RTS Military Building 1" by Sabri Ayeş, Sketchfab, CC-BY)
+    this.loadBuildingModel('power', 'ammobox', 4.8);       // Power Plant GLB ("RTS Ammo Box" by Sabri Ayeş, Sketchfab, CC-BY) — 2x the original 2.4 default
     this.loadBuildingModel('refinery', 'refinery', 8.72); // Ore Refinery GLB (Sketchfab, CC-BY)
     this.loadBuildingModel('airfield', 'airfield', 8.28);  // Airfield GLB ("RTS Airport" by Sabri Ayeş, Sketchfab, CC-BY) — 75% larger
     this.loadBuildingModel('barracks', 'barracks', 4.5);   // Barracks GLB ("RTS Barracks" by Sabri Ayeş, Sketchfab, CC-BY) — 50% larger
