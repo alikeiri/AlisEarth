@@ -113,7 +113,7 @@ function loadGLB(file: string): Promise<any> {
 export async function preloadModels(onProgress?: (done: number, total: number) => void): Promise<void> {
   const files = new Set<string>();
   for (const t in MODEL_DEFS) files.add(MODEL_DEFS[t].file);
-  for (const f of ['oilfield', 'factory', 'refinery', 'airfield', 'barracks', 'wall', 'radar']) files.add(f);
+  for (const f of ['oilfield', 'factory', 'refinery', 'airfield', 'barracks', 'wall', 'radar', 'lab']) files.add(f);
   const list = [...files]; let done = 0;
   onProgress?.(0, list.length);
   await Promise.all(list.map(f => loadGLB(f).catch(() => null).then(() => { onProgress?.(++done, list.length); })));
@@ -1197,6 +1197,7 @@ export class Renderer {
     this.loadBuildingModel('barracks', 'barracks', 4.5);   // Barracks GLB ("RTS Barracks" by Sabri Ayeş, Sketchfab, CC-BY) — 50% larger
     this.loadBuildingModel('radar', 'radar', 4.35);        // Radar Dome GLB ("RTS Radar Tower" by Sabri Ayeş, Sketchfab, CC-BY) — 50% larger
     this.loadBuildingModel('wall', 'wall', 1.65);          // Wall GLB ("Concrete Barrier HQ" by Sabri Ayeş, Sketchfab, CC-BY) — 50% larger
+    this.loadBuildingModel('lab', 'lab', 3.2);             // Research Lab GLB ("ResearchCenter_Building001" by Christian Rudorff, Sketchfab, CC-BY)
     // Oil Rig reuses the oil-well "Oil Pump" model, 25% taller than the free well
     // (well is normalised to 2.0 tall in loadOilModel) so building one just enlarges it
     this.loadBuildingModel('oilrig', 'oilfield', 2.5, true);
