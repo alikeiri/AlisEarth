@@ -220,6 +220,32 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
     cmds.push({ k: 'surrender', p });
     return cmds;
   }
+
+  // CONYARD RESCUE: a Construction Vehicle unfolds into a new construction yard.
+  // If ours is gone or about to fall, build an MCV at the factory/shipyard (funds
+  // permitting); once the conyard is actually lost, drive it home and deploy it so
+  // the AI can keep building instead of being permanently crippled.
+  {
+    const cyB = (myB['conyard'] || [])[0];
+    const cyLost = !cyB;
+    const cyDying = !!cyB && cyB.hp < cyB.maxHp * 0.3;
+    if (cyLost || cyDying) {
+      const prodB = [...(myB['factory'] || []), ...(myB['shipyard'] || [])];
+      const haveMcv = (myU['mcv'] || []).length > 0;
+      const mcvQueued = prodB.some(f => f.queue.some((q: any) => q.type === 'mcv'));
+      const mcvCost = Math.round(UNITS['mcv'].cost * pl.fac.costMul * pl.bonusCost);
+      if (!haveMcv && !mcvQueued && pl.credits >= mcvCost) {
+        const f = prodB.find(b => b.progress >= b.total && b.queue.length < 2);
+        if (f) cmds.push({ k: 'train', p, bid: f.id, type: 'mcv' });
+      }
+      const mcv = (myU['mcv'] || [])[0];
+      if (cyLost && mcv) { // no conyard left → bring the MCV home and unfold it
+        const sx = pl.spawn.x, sz = pl.spawn.z;
+        if (hyp(mcv.x - sx, mcv.z - sz) > 3) cmds.push({ k: 'move', p, ids: [mcv.id], x: sx, z: sz });
+        else cmds.push({ k: 'deploy', p, ids: [mcv.id] });
+      }
+    }
+  }
   const cost = (t: string) => Math.round(BUILDINGS[t].cost * pl.fac.costMul * pl.bonusCost);
   // count power plants still UNDER CONSTRUCTION toward the surplus, or the AI
   // queues a 4th/5th plant while the first few are mid-build (6s) and reads the

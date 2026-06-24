@@ -710,8 +710,21 @@ export class UI {
 
   ping(x: number, z: number) { this.pings.push({ x, z, t: 1.2 }); }
 
-  minimap(map: GameMap, views: any[], camQuad: { x: number; z: number }[] | null, dt: number, fog?: (cx: number, cz: number) => number) {
+  minimap(map: GameMap, views: any[], camQuad: { x: number; z: number }[] | null, dt: number, fog?: (cx: number, cz: number) => number, gate?: 'ok' | 'noradar' | 'lowpower') {
     const ctx = this.mmCtx;
+    // gated: the minimap needs a powered Radar Dome to show the battlefield
+    if (gate && gate !== 'ok') {
+      ctx.fillStyle = '#0c1117'; ctx.fillRect(0, 0, 200, 200);
+      ctx.strokeStyle = gate === 'lowpower' ? '#5a3a3a' : '#33414f'; ctx.lineWidth = 2; ctx.strokeRect(4, 4, 192, 192);
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillStyle = gate === 'lowpower' ? '#ff6b5e' : '#7f93a6';
+      ctx.font = 'bold 14px system-ui, sans-serif';
+      ctx.fillText(gate === 'lowpower' ? 'LOW POWER' : 'NO RADAR', 100, 90);
+      ctx.fillStyle = '#69788a'; ctx.font = '11px system-ui, sans-serif';
+      ctx.fillText(gate === 'lowpower' ? 'Minimap offline' : 'Build a Radar Dome', 100, 112);
+      ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+      return;
+    }
     // rebuild the cached terrain image when bulldozing has reshaped the ground
     if (this.terrainCache && map.terraVersion !== this.terrainCacheVer) this.terrainCache = null;
     this.terrainCacheVer = map.terraVersion;

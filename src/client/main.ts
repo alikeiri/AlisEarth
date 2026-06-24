@@ -2349,7 +2349,20 @@ class GameClient {
       const fogFn = (!(this.game as any).isSim && fogEnabled && this.fog) ? (cx: number, cz: number) => this.renderer.fogValue(cx, cz) : undefined;
       // radar-detected threats show on the minimap even through fog
       const mmViews = this.radarBlips.length ? views.concat(this.radarBlips) : views;
-      prof.begin('minimap'); this.ui.minimap(this.game.map, mmViews, this.camQuad(), elapsed, fogFn); prof.end('minimap');
+      // the minimap needs a POWERED Radar Dome (or a spy satellite) to display —
+      // no radar → "NO RADAR"; radar shed for lack of power → "LOW POWER".
+      // Spectator/replay views always show the full map.
+      let gate: 'ok' | 'noradar' | 'lowpower' = 'ok';
+      if (!(this.game as any).isSim) {
+        const me = this.game.me;
+        const satOk = !!(this.game.players()[me]?.satOk);
+        if (!satOk) {
+          let built = false, powered = false;
+          for (const v of mmViews) if (v.b && v.o === me && v.t === 'radar' && (v.pr ?? 1) >= 1) { built = true; if (!v.po) powered = true; }
+          gate = !built ? 'noradar' : (!powered ? 'lowpower' : 'ok');
+        }
+      }
+      prof.begin('minimap'); this.ui.minimap(this.game.map, mmViews, this.camQuad(), elapsed, fogFn, gate); prof.end('minimap');
     }
     // no selection box while drawing a patrol route or drag-placing a structure
     // line (walls / tank barriers) — those drags aren't a selection

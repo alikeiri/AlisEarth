@@ -926,7 +926,7 @@ function buildingGroup(type: string, teamColor: number): THREE.Group {
 
 interface FxTracer { x1: number; y1: number; z1: number; x2: number; y2: number; z2: number; t: number }
 interface FxPart { x: number; y: number; z: number; vx: number; vy: number; vz: number; life: number; max: number; s: number }
-interface FxRocket { x0: number; y0: number; z0: number; x1: number; y1: number; z1: number; t: number; delay: number; dur: number; arc: number; noSmoke?: boolean; scale?: number }
+interface FxRocket { x0: number; y0: number; z0: number; x1: number; y1: number; z1: number; t: number; delay: number; dur: number; arc: number; noSmoke?: boolean; scale?: number; mid?: number }
 
 // graphics quality presets. Everything renders at NATIVE resolution (pr 1.0) so
 // the world is always crisp — earlier sub-native scaling looked blurry. The
@@ -2346,7 +2346,7 @@ export class Renderer {
         const y2s = Math.max(this.map.heightAt(ev.tx, ev.tz), SEA) + 0.2;
         if (this.rockets.length < 64) this.rockets.push({
           x0: ev.x, y0: y1s, z0: ev.z, x1: ev.tx, y1: y2s, z1: ev.tz,
-          t: 0, delay: 0, dur: Math.max(1.0, (ev.ft || 20) / 10), arc: 6 + dist * 0.35,
+          t: 0, delay: 0, dur: Math.max(1.0, (ev.ft || 20) / 10), arc: 6 + dist * 0.35, mid: ev.mid,
         });
         this.spawnParts(ev.x, y1s, ev.z, 8, true); // launch plume
       } else if (ev.e === 'burnfx') {
@@ -2371,11 +2371,27 @@ export class Renderer {
           });
         }
       } else if (ev.e === 'intercept') {
-        // a streak from the battery up to the doomed warhead, then an airburst
+        // catch the doomed warhead MID-AIR: find its in-flight rocket, take its
+        // current position, delete it (so it never lands), then streak an interceptor
+        // missile up from the battery to that point and burst it there
+        let cx = ev.tx, cz = ev.tz, cy = Math.max(this.map.heightAt(ev.tx, ev.tz), SEA) + 3.2;
+        if (ev.mid !== undefined) {
+          const inc = this.rockets.find(r => r.mid === ev.mid);
+          if (inc) {
+            const q = Math.max(0, Math.min(1, (inc.t - inc.delay) / inc.dur));
+            cx = inc.x0 + (inc.x1 - inc.x0) * q;
+            cz = inc.z0 + (inc.z1 - inc.z0) * q;
+            cy = inc.y0 + (inc.y1 - inc.y0) * q + Math.sin(Math.PI * q) * inc.arc;
+            this.rockets = this.rockets.filter(r => r !== inc); // warhead destroyed before impact
+          }
+        }
         const y1 = Math.max(this.map.heightAt(ev.x, ev.z), SEA) + 0.7;
-        const y2 = Math.max(this.map.heightAt(ev.tx, ev.tz), SEA) + 3.2; // warhead caught high
-        if (this.tracers.length < MAX_TRACER) this.tracers.push({ x1: ev.x, y1, z1: ev.z, x2: ev.tx, y2, z2: ev.tz, t: 0.12 });
-        this.spawnParts(ev.tx, y2, ev.tz, 10, true);
+        const dist = Math.hypot(cx - ev.x, cz - ev.z);
+        if (this.rockets.length < 64) this.rockets.push({ // interceptor missile from the battery
+          x0: ev.x, y0: y1, z0: ev.z, x1: cx, y1: cy, z1: cz,
+          t: 0, delay: 0, dur: Math.max(0.18, dist * 0.03), arc: 0.5,
+        });
+        this.spawnParts(cx, cy, cz, 16, true); // mid-air airburst at the catch point
       } else if (ev.e === 'empfx') {
         // crackling blue arcs over a stunned unit
         const y = Math.max(this.map.heightAt(ev.x, ev.z), SEA) + 0.6;
