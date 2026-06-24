@@ -1199,9 +1199,9 @@ export class Renderer {
     this.loadBuildingModel('refinery', 'refinery', 8.72); // Ore Refinery GLB (Sketchfab, CC-BY)
     this.loadBuildingModel('airfield', 'airfield', 8.28);  // Airfield GLB ("RTS Airport" by Sabri Ayeş, Sketchfab, CC-BY) — 75% larger
     this.loadBuildingModel('barracks', 'barracks', 4.5);   // Barracks GLB ("RTS Barracks" by Sabri Ayeş, Sketchfab, CC-BY) — 50% larger
-    this.loadBuildingModel('radar', 'radar', 4.35);        // Radar Dome GLB ("RTS Radar Tower" by Sabri Ayeş, Sketchfab, CC-BY) — 50% larger
+    this.loadBuildingModel('radar', 'radar', 2.18);        // Radar Dome GLB ("RTS Radar Tower" by Sabri Ayeş, Sketchfab, CC-BY) — 50% smaller (4.35 -> 2.18)
     this.loadBuildingModel('wall', 'wall', 1.65);          // Wall GLB ("Concrete Barrier HQ" by Sabri Ayeş, Sketchfab, CC-BY) — 50% larger
-    this.loadBuildingModel('lab', 'lab', 3.2);             // Research Lab GLB ("ResearchCenter_Building001" by Christian Rudorff, Sketchfab, CC-BY)
+    this.loadBuildingModel('lab', 'lab', 4.8);             // Research Lab GLB ("ResearchCenter_Building001" by Christian Rudorff, Sketchfab, CC-BY) — 50% larger (3.2 -> 4.8)
     this.loadBuildingModel('sam', 'sam', 1.9);             // Missile Battery GLB ("MissileTower_Building002" by Christian Rudorff, Sketchfab, CC-BY) — AA missile tower
     // Oil Rig reuses the oil-well "Oil Pump" model, 25% taller than the free well
     // (well is normalised to 2.0 tall in loadOilModel) so building one just enlarges it
