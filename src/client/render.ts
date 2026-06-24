@@ -113,7 +113,7 @@ function loadGLB(file: string): Promise<any> {
 export async function preloadModels(onProgress?: (done: number, total: number) => void): Promise<void> {
   const files = new Set<string>();
   for (const t in MODEL_DEFS) files.add(MODEL_DEFS[t].file);
-  for (const f of ['oilfield', 'factory', 'refinery', 'airfield']) files.add(f);
+  for (const f of ['oilfield', 'factory', 'refinery', 'airfield', 'barracks', 'wall', 'radar']) files.add(f);
   const list = [...files]; let done = 0;
   onProgress?.(0, list.length);
   await Promise.all(list.map(f => loadGLB(f).catch(() => null).then(() => { onProgress?.(++done, list.length); })));
@@ -1193,7 +1193,10 @@ export class Renderer {
     this.loadFactoryModel();
     this.loadBuildingModel('power', 'powerplant', 3.6);   // Power Plant GLB ("RTS Military Building 1" by Sabri Ayeş, Sketchfab, CC-BY) — 50% larger footprint
     this.loadBuildingModel('refinery', 'refinery', 8.72); // Ore Refinery GLB (Sketchfab, CC-BY)
-    this.loadBuildingModel('airfield', 'airfield', 4.73);  // Airfield GLB (C&C-style building, Sketchfab, CC-BY)
+    this.loadBuildingModel('airfield', 'airfield', 4.73);  // Airfield GLB ("RTS Airport" by Sabri Ayeş, Sketchfab, CC-BY)
+    this.loadBuildingModel('barracks', 'barracks', 3.0);   // Barracks GLB ("RTS Barracks" by Sabri Ayeş, Sketchfab, CC-BY)
+    this.loadBuildingModel('radar', 'radar', 2.9);         // Radar Dome GLB ("RTS Radar Tower" by Sabri Ayeş, Sketchfab, CC-BY)
+    this.loadBuildingModel('wall', 'wall', 1.1);           // Wall GLB ("Concrete Barrier HQ" by Sabri Ayeş, Sketchfab, CC-BY)
     // Oil Rig reuses the oil-well "Oil Pump" model, 25% taller than the free well
     // (well is normalised to 2.0 tall in loadOilModel) so building one just enlarges it
     this.loadBuildingModel('oilrig', 'oilfield', 2.5, true);

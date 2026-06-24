@@ -29,7 +29,10 @@ CC-BY 3.0 / 4.0 (attribution required — used under these terms):
 - IFV ("M2 Bradley IFV") — 42manako (Sketchfab, CC-BY 4.0)
 - Ore Refinery ("Rare Earth Element Refinery") — novusod (Sketchfab, CC-BY 4.0)
 - Artillery ("Ha-to artillery") — Herdyn (Sketchfab, CC-BY 4.0)
-- Airfield ("Command and Conquer style building") — AwooSlayer (Sketchfab, CC-BY 4.0)
+- Airfield ("RTS Airport") — Sabri Ayeş (Sketchfab, CC-BY 4.0)
+- Barracks ("RTS Barracks") — Sabri Ayeş (Sketchfab, CC-BY 4.0)
+- Radar Dome ("RTS Radar Tower") — Sabri Ayeş (Sketchfab, CC-BY 4.0)
+- Wall ("Concrete Barrier HQ") — Sabri Ayeş (Sketchfab, CC-BY 4.0)
 - Patriot SAM ("MIM-104 Patriot Air Defense System") — Muhamad Mirza Arrafi (Sketchfab, CC-BY 4.0)
 - Flak Gun ("Type-625 Anti Aircraft Gun Missile System") — Muhamad Mirza Arrafi (Sketchfab, CC-BY 4.0)
 - Oil Field ("Oil pump") — Poly by Google
