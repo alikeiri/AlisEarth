@@ -2478,7 +2478,7 @@ export class Renderer {
   }
 
   // views: array of {i,o,t,b,x,z,h,m,pr,...}; selection: Set of ids
-  updateViews(views: any[], selection: Set<number>, dt: number) {
+  updateViews(views: any[], selection: Set<number>, dt: number, lowPowerOwners?: Set<number>) {
     const counts: Record<string, number> = {};
     for (const t in this.unitParts) counts[t] = 0;
     for (const t in this.posedParts) this.poseCounts[t] = this.posedParts[t].map(() => 0);
@@ -2548,9 +2548,11 @@ export class Renderer {
         // radar dish sweeps continuously (procedural building)
         const dish = rec.g.userData.spinDish as THREE.Mesh | undefined;
         if (dish) dish.rotation.z = this.time * 1.4;
-        // GLB models that ship their own animation clips (radar dish spin, etc.) — advance them
+        // GLB models that ship their own animation clips (radar dish spin, etc.) — advance
+        // them, but freeze when the owner is low on power or this building is shed (v.po):
+        // a stopped radar dish reads as the base browning out
         const mx = rec.g.userData.mixer as THREE.AnimationMixer | undefined;
-        if (mx) mx.update(dt);
+        if (mx && !v.po && !(lowPowerOwners && lowPowerOwners.has(v.o))) mx.update(dt);
         if (selection.has(v.i) && selN < MAX_INST) {
           this.dummy.position.set(v.x, y + 0.1, v.z);
           this.dummy.scale.setScalar((v.sz || 1) * 1.6);

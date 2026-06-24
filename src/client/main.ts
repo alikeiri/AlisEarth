@@ -2279,7 +2279,12 @@ class GameClient {
       this.renderer.refreshTerrain();
       this.game.map.heightDirty = false;
     }
-    prof.begin('render.scene'); this.renderer.updateViews(views, this.selection, dt); prof.end('render.scene');
+    // players whose stored battery is low (< 50, same threshold as the minimap):
+    // their buildings' animations freeze (radar dish stops, etc.) as a brownout cue
+    const lowPowerOwners = new Set<number>();
+    const pls = this.game.players();
+    for (let i = 0; i < pls.length; i++) if (((pls[i]?.pwr) ?? 999) < 50) lowPowerOwners.add(i);
+    prof.begin('render.scene'); this.renderer.updateViews(views, this.selection, dt, lowPowerOwners); prof.end('render.scene');
     const evs = this.game.drainEvents();
     this.renderer.addEvents(evs);
     for (const ev of evs) {
