@@ -2432,6 +2432,10 @@ export class Renderer {
     // short "drive down the ramp" descent (render-only, see the unit y below)
     const facFront: { x: number; z: number }[] = [];
     for (const v of views) if (v.b && v.t === 'factory') facFront.push({ x: v.x, z: v.z });
+    // wall cells (per owner) so each barrier can orient along its run into a
+    // continuous wall instead of a row of disconnected segments
+    const wallCells = new Set<string>();
+    for (const v of views) if (v.b && v.t === 'wall') wallCells.add(v.o + ':' + v.cx + ',' + v.cz);
     const curVeh = new Set<number>();
 
     for (const v of views) {
@@ -2458,6 +2462,14 @@ export class Renderer {
         const sc = 0.15 + 0.85 * Math.min(1, v.pr);
         const lvS = 1 + 0.06 * ((v.lv || 1) - 1); // upgraded buildings grow slightly
         rec.g.scale.set(lvS, sc * lvS, lvS);
+        // walls: rotate each barrier so its long axis follows the run (the model is
+        // longer in Z; an E-W row spans the cell only if turned 90°), making a row
+        // read as one continuous wall instead of disconnected segments
+        if (v.t === 'wall') {
+          const has = (dx: number, dz: number) => wallCells.has(v.o + ':' + (v.cx + dx) + ',' + (v.cz + dz));
+          const ew = has(-1, 0) || has(1, 0), ns = has(0, -1) || has(0, 1);
+          rec.g.rotation.y = (ew && !ns) ? Math.PI / 2 : 0;
+        }
         // turret gun tracks its last target
         const piv = rec.g.userData.pivot as THREE.Group | undefined;
         if (piv && rec.aim !== undefined) {
