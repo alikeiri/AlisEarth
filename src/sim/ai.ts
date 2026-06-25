@@ -44,6 +44,10 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
   if (pl.passive) return []; // tutorial practice target: never acts
   const cmds: Cmd[] = [];
   const L = LVL[Math.max(0, Math.min(3, pl.aiLvl ?? 1))];
+  // "Bomber Baron" doctrine (aiLvl 4): Brutal economy, a heavy turtle (cannons,
+  // SAMs, Iron Domes), and a mass bomber fleet — the human turtle-and-bomb playbook
+  // from replay mqtds0g6zlg6, generalised to any map.
+  const doctrine = (pl.aiLvl ?? 1) >= 4;
 
   // --- adaptive strategy: study the human's past games and counter them ---
   // escalate after losses, pre-empt habitual rushes, stock counters to the
@@ -307,6 +311,12 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
   // into a big army instead of banking it) and presses the attack
   if (pl.credits > 6000) { cap = Math.min(140, cap + 8 + Math.floor((pl.credits - 6000) / 3500)); waveEvery = Math.max(18, waveEvery - 6); }
   if (pl.credits < 1200 && underAttack) mem.nextWave = Math.max(mem.nextWave, sim.tickN + 10 * TICKS_PER_SEC); // hold
+  if (doctrine) {
+    cap = Math.max(cap, 96);        // a big standing force + room for the bomber fleet
+    sams = Math.max(sams, 10);      // a thick anti-air wall
+    turrets = Math.max(turrets, 4); // plus a Heavy Cannon line (built via the want chain)
+    prefAir = true;                 // every air decision leans toward bombers
+  }
 
   // once a solid ground force and a defensive line stand, every AI graduates to
   // drones and aircraft (not just the top difficulties) — air is the follow-up
@@ -318,7 +328,7 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
   // has a real AA wall — except on islands, where air is the only way to reach them —
   // and let the budget flow to ground armor + siege instead.
   const airWall = (mem.enemyAA || 0) >= 5;
-  const goAir = island || ((L.air || dirAir || prefAir || groundCore) && !airWall);
+  const goAir = doctrine || island || ((L.air || dirAir || prefAir || groundCore) && !airWall);
   // crack a turtle (heavy enemy defenses, or air shut down) with massed siege
   const siege = airWall || (mem.enemyBuildings || 0) >= 9;
 
@@ -353,6 +363,14 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
   // (islanders keep ONE factory and ONE barracks: ground forces can't leave)
   else if (nB('factory') < (island ? 1 : L.factories) && pl.credits > 1900) want = 'factory';
   else if (pl.aiLvl >= 1 && !nB('radar') && nB('factory') && pl.credits > 1400) want = 'radar';
+  // Bomber Baron: once the economy is booted, tech to air fast (airforce + up to 4
+  // airfields = ~40 bomber slots) and thicken the turtle — a Heavy Cannon line, a
+  // SAM wall, and Iron Domes — even with no enemy missiles yet.
+  else if (doctrine && econBoot && goAir && !nB('airforce') && nB('factory') && pl.credits > 2400) want = 'airforce';
+  else if (doctrine && econBoot && nB('airforce') && nB('airfield') < 4 && pl.credits > 1500) want = 'airfield';
+  else if (doctrine && econBoot && nB('cannon') < 6 && pl.credits > 2000) want = 'cannon';
+  else if (doctrine && econBoot && nB('sam') < sams && nB('factory') && pl.credits > 1500) want = 'sam';
+  else if (doctrine && econBoot && nB('radar') && nB('irondome') < 2 && pl.credits > 2600) want = 'irondome';
   else if (econBoot && nB('turret') < turrets) want = 'turret';
   else if (nB('barracks') < (island ? 1 : L.barracks) && pl.credits > 1200) want = 'barracks';
   // stranded on an island: drone works, air force and shipyard come early
@@ -522,7 +540,14 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
     // level the base; vs an air-heavy enemy build interceptors; else a mix
     const enemyCrippled = (mem.enemyCombat ?? 99) <= 3 && (mem.enemyBuildings ?? 0) > 0;
     const bigMass = (mem.enemyCombat ?? 0) >= 10; // enemy is death-balling → answer with bombers
-    const t = (enemyCrippled && pl.credits > 2000) ? (r < 0.6 ? 'bomber' : r < 0.85 ? 'dbomber' : 'heli')
+    let t: string;
+    if (doctrine) {
+      // mass bombers, capped to airfield parking capacity (~10/field) so overflow
+      // doesn't crash-land; a few fighters as escorts and over-cap overflow
+      const bcap = Math.max(2, (nB('airfield') || 0) * 10);
+      const haveB = nU('bomber') + nU('dbomber');
+      t = haveB < bcap ? (r < 0.8 ? 'bomber' : r < 0.93 ? 'dbomber' : 'fighter') : 'fighter';
+    } else t = (enemyCrippled && pl.credits > 2000) ? (r < 0.6 ? 'bomber' : r < 0.85 ? 'dbomber' : 'heli')
       : antiAir ? (r < 0.6 ? 'fighter' : r < 0.85 ? 'heli' : 'helidrone')
       : bigMass ? (r < 0.55 ? 'bomber' : r < 0.8 ? 'dbomber' : 'fighter')
       : island && r < 0.35 ? 'bomber'

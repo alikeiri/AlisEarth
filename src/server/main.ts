@@ -766,14 +766,14 @@ function startRoom(room: Room) {
     room.clients.map((c, i) => ({ name: c.name, faction: c.faction, team: (room.teams && room.teams[i]) || (i + 1) }));
   room.aiSlots = [];
   const facs = Object.keys(FACTIONS);
-  const lvlName = (lv: number) => ['Easy', 'Normal', 'Hard', 'Brutal'][lv] || 'Normal';
+  const lvlName = (lv: number) => ['Easy', 'Normal', 'Hard', 'Brutal', 'Bomber Baron'][lv] || 'Normal';
   const usedFac = new Set(specs.map(s => s.faction));
   // host-configured AI fill (lobby)
   for (const a of (room.ai || []).slice(0, 3)) {
     let f = a.faction && FACTIONS[a.faction] ? a.faction : facs[(Math.random() * facs.length) | 0];
     let guard = 0; while (usedFac.has(f) && guard++ < 16) f = facs[(Math.random() * facs.length) | 0];
     usedFac.add(f);
-    const lv = Math.max(0, Math.min(3, a.lvl | 0));
+    const lv = Math.max(0, Math.min(4, a.lvl | 0));
     room.aiSlots.push(specs.length);
     specs.push({ name: `AI ${FACTIONS[f].name} (${lvlName(lv)})`, faction: f, isAI: true, aiLvl: lv, team: Math.min(8, Math.max(1, a.team | 0)) || 2 });
   }
@@ -932,7 +932,7 @@ wss.on('connection', ws => {
       room = {
         code, clients: [me], started: false, sim: null, timer: null, cmdQ: [], aiSlots: [],
         size: [96, 128, 160, 192].includes(m.size) ? m.size : 96,
-        diff: Number.isInteger(m.diff) && m.diff >= 0 && m.diff <= 3 ? m.diff : 1,
+        diff: Number.isInteger(m.diff) && m.diff >= 0 && m.diff <= 4 ? m.diff : 1,
         islands: !!m.islands,
         urban: !!m.urban,
         flat: !!m.flat,
@@ -984,7 +984,7 @@ wss.on('connection', ws => {
       }
       if (m.oreLevel !== undefined) room.oreLevel = (m.oreLevel | 0) & 3;
       if (typeof m.fog === 'boolean') room.fog = m.fog;
-      if (Array.isArray(m.ai)) room.ai = m.ai.slice(0, 3).map((a: any) => ({ lvl: Math.max(0, Math.min(3, a.lvl | 0)), team: Math.min(8, Math.max(1, a.team | 0)) || 2 }));
+      if (Array.isArray(m.ai)) room.ai = m.ai.slice(0, 3).map((a: any) => ({ lvl: Math.max(0, Math.min(4, a.lvl | 0)), team: Math.min(8, Math.max(1, a.team | 0)) || 2 }));
       if (Array.isArray(m.teams)) room.teams = m.teams.slice(0, room.clients.length).map((t: any) => Math.min(8, Math.max(1, t | 0)) || 1);
       sendRoom(room);
       broadcastLobby();

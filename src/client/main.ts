@@ -176,7 +176,7 @@ class LocalGame implements GameLike {
     if (steelEnabled) seed |= 0x08000000;
     if (metalEnabled) seed |= 0x04000000;
     seed |= (oreLevelSel & 3) << 24;
-    const LVL_NAMES = ['Easy', 'Normal', 'Hard', 'Brutal'];
+    const LVL_NAMES = ['Easy', 'Normal', 'Hard', 'Brutal', 'Bomber Baron'];
     const pickFacs = (avoid: string[], n: number) => {
       const pool = Object.keys(FACTIONS).filter(f => !avoid.includes(f));
       const out: string[] = [];
@@ -3048,7 +3048,7 @@ function renderAiList() {
   list.innerHTML = aiList.map((ai, i) => {
     const dot = `<span style="width:10px;height:10px;border-radius:50%;flex:0 0 auto;background:${TEAM_TINT[(ai.team - 1) % 4]}"></span>`;
     const lvl = `<select data-i="${i}" class="aiLvl" style="${selStyle};flex:1">` +
-      ['Easy', 'Normal', 'Hard', 'Brutal'].map((n, v) => `<option value="${v}" ${v === ai.lvl ? 'selected' : ''}>${n}</option>`).join('') + '</select>';
+      ['Easy', 'Normal', 'Hard', 'Brutal', 'Bomber Baron'].map((n, v) => `<option value="${v}" ${v === ai.lvl ? 'selected' : ''}>${n}</option>`).join('') + '</select>';
     const team = `<select data-i="${i}" class="aiTeam" style="${selStyle};flex:1">` +
       [1, 2, 3, 4].map(t => `<option value="${t}" ${t === ai.team ? 'selected' : ''}>${t === 1 ? '🤝 Your team' : '⚔ Enemy ' + t}</option>`).join('') + '</select>';
     return `<div style="display:flex;gap:6px;align-items:center">${dot}` +
