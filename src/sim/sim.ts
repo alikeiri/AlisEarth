@@ -26,6 +26,7 @@ export interface Entity {
   cd: number; mt: number; cargo: number; cargoVal: number; repath: number;
   wx: number; wz: number; stuckT: number; mvi: number; pathFail: number; // stuck/unreachable detection
   ammo: number; // bombers: shots left this sortie (-1 = unlimited)
+  grounded?: boolean; // flyer parked/landed on an airfield (render sits it on the pad)
   mag?: number; // missile units: rounds left in the current magazine (refills to def.capacity after reload)
   stance: number; // 0 aggressive (default), 1 hold position
   lastHitBy: number; lastHitT: number; reactCd: number; // return-fire / flee reactions
@@ -1594,6 +1595,14 @@ export class Sim {
     const def = UNITS[u.type];
     u.cd -= TICK;
 
+    // aircraft basing: a bomber (limited-ammo flyer) with nothing to do flies to an
+    // airfield and lands on it instead of hovering over the factory. grounded is
+    // recomputed each tick by the park/rtb handlers when it's actually sitting on a pad.
+    if (def.fly) {
+      u.grounded = false;
+      if (def.payload && u.orders.length === 0) u.orders.push({ k: 'park' });
+    }
+
     // naval self-rescue: a ship that ends up on a non-water cell (shoved into the
     // coast, or spawned at a tight shore) can't path out under sea rules — ease it
     // straight back to the nearest open water before doing anything else
@@ -2045,6 +2054,7 @@ export class Sim {
       if (d > 1.8) { u.mt = 0; this.moveToward(u, pad.x, pad.z, def); }
       else {
         u.path = null;
+        u.grounded = true;        // landed on the pad, rearming
         u.mt += TICK;
         if (u.mt >= 6) { // rearm complete
           u.mt = 0;
@@ -2052,6 +2062,22 @@ export class Sim {
           u.orders.shift();
         }
       }
+    } else if (ord.k === 'park') {
+      // sit on the nearest friendly airfield (the airplane factory is a fallback)
+      // until re-tasked — new bombers and idle bombers land here instead of hovering
+      let pad: Entity | null = null, bs = 1e9;
+      for (const e of this.ents.values()) {
+        if (!e.b || e.owner !== u.owner || e.progress < e.total) continue;
+        if (e.type !== 'airfield' && e.type !== 'airforce') continue;
+        const score = this.distToEnt(u.x, u.z, e) + (e.type === 'airforce' ? 1000 : 0);
+        if (score < bs) { bs = score; pad = e; }
+      }
+      if (!pad) { u.path = null; return; } // no pad yet — hover where built
+      // spread parked planes around the pad so they don't pile on one point
+      const ang = (u.id % 8) * (Math.PI / 4), rr = 1.2 + ((u.id >> 3) % 3) * 0.7;
+      const px = pad.x + Math.cos(ang) * rr, pz = pad.z + Math.sin(ang) * rr;
+      if (Math.hypot(u.x - px, u.z - pz) > 0.6) this.moveToward(u, px, pz, def);
+      else { u.path = null; u.grounded = true; } // landed on its spot
     } else if (ord.k === 'patrol') {
       // defensive stance: engage anything in this unit's vicinity, resume after
       if (def.dmg > 0 && this.tickN % 5 === u.id % 5) {
@@ -2808,6 +2834,7 @@ export class Sim {
         if (e.holdFire) v.hf = 1;                       // defensive building on weapons-hold
       } else {
         if (e.stance) v.st = e.stance;
+        if (UNITS[e.type]?.fly && e.grounded) v.gr = 1; // bomber landed/parked on an airfield
         if (e.fortified) v.fo = 1;
         if (e.fortT > 0) v.ft = e.fortGoal ? 1 : 2; // 1 = digging in, 2 = packing up
         if (UNITS[e.type]?.cloak || (UNITS[e.type]?.stealthTech && this.players[e.owner]?.tech?.stealth)) v.ck = 1;

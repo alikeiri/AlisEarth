@@ -1035,6 +1035,7 @@ export class Renderer {
   bldgFoot: Record<string, number> = {};           // GLB building model footprint half-extent (world units) — for picking + foundation
   private cruiseY = 12; // constant flight altitude (set from the map's tallest terrain in buildTerrain)
   private rampAnim = new Map<number, number>();     // unit id → seconds left of the "drive down the ramp" descent
+  private flyAlt = new Map<number, number>();        // flyer id → altitude factor (0 = landed on pad, 1 = cruise) for smooth take-off/landing
   private prevVeh = new Set<number>();              // ground-vehicle ids seen last frame (to detect freshly-built ones)
   private fogTex: THREE.DataTexture | null = null;
   private fogMesh: THREE.Mesh | null = null;
@@ -2700,7 +2701,17 @@ export class Renderer {
       }
       let gy = this.map.heightAt(v.x, v.z);
       let y: number;
-      if (md?.fly) { y = this.flyY(v.x, v.z, md.alt || 2.3) + Math.sin(this.time * 2.5 + v.i * 1.7) * 0.12; v.fy = y; } // level cruise; v.fy = absolute height for the overlay (HP bar) and selection ring
+      if (md?.fly) {
+        // level cruise altitude, but a grounded (parked/rearming) flyer eases down onto
+        // the pad and back up on take-off. v.fy = absolute height for overlay/selection ring.
+        const cruise = this.flyY(v.x, v.z, md.alt || 2.3);
+        const padY = Math.max(gy, SEA) + 0.55;            // sit just on the airfield surface
+        const tgt = v.gr ? 0 : 1;
+        let f = this.flyAlt.get(v.i); if (f === undefined) f = tgt;
+        f += (tgt - f) * Math.min(1, dt * 1.8); this.flyAlt.set(v.i, f);
+        y = padY + (cruise - padY) * f + Math.sin(this.time * 2.5 + v.i * 1.7) * 0.12 * f; // bob only while airborne
+        v.fy = y;
+      }
       else if (md?.move === 'sea') {
         y = SEA + (v.t === 'sub' ? -0.08 : 0.02) + Math.sin(this.time * 1.6 + v.i) * 0.03;
         gy = SEA; // selection ring floats on the water
@@ -2852,6 +2863,7 @@ export class Renderer {
     }
     if (this.facing.size > 1200) {
       for (const id of this.facing.keys()) if (!seen.has(id)) this.facing.delete(id);
+      for (const id of this.flyAlt.keys()) if (!seen.has(id)) this.flyAlt.delete(id);
     }
     this.prevVeh = curVeh; // for next frame's "freshly-built vehicle" detection
 
