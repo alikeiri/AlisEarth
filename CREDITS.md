@@ -67,6 +67,8 @@ NOTE: the Pixabay Content License and Mixkit Free License are royalty-free but *
 - Construction Yard (`public/models/conyard.glb`) — generated from a Google Gemini
   reference image via Tripo3D (studio.tripo3d.ai). Project-owned, usable per Gemini +
   Tripo3D terms; not CC0.
+- Bulldozer (`public/models/bulldozer.glb`) — IDF-style armored bulldozer, generated
+  from a Google Gemini reference image via Tripo3D. Project-owned; not CC0.
 
 ## Hero / marketing art
 - `public/hero.jpg` — generated with Google Gemini. AI-generated imagery: usable per

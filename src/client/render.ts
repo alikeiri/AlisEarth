@@ -33,7 +33,7 @@ const MODEL_DEFS: Record<string, { file: string; size: number; axis: 'l' | 'h'; 
   harv:      { file: 'harv',      size: 1.70, axis: 'l', ry: Math.PI },
   engineer:  { file: 'engineer',  size: 1.35, axis: 'l', ry: Math.PI },
   mcv:       { file: 'harv',      size: 1.90, axis: 'l', ry: Math.PI, tint: 0x4a7ab0 }, // big blue construction rig
-  dozer:     { file: 'harv',      size: 1.55, axis: 'l', ry: Math.PI, tint: 0xe0a526 }, // yellow bulldozer
+  dozer:     { file: 'bulldozer', size: 1.7,  axis: 'l', ry: 0 }, // IDF-style armored bulldozer (Gemini + Tripo3D); own textures, no tint
   recon:     { file: 'drone',     size: 0.90, axis: 'l', ry: 0 },
   strike:    { file: 'drone',     size: 1.25, axis: 'l', ry: 0 },
   msldrone:  { file: 'drone',     size: 1.60, axis: 'l', ry: 0 },
