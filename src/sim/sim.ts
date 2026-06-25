@@ -110,6 +110,9 @@ const HG_BASE = SEA + 1.15;  // flat land level — no height bonus at or below 
 const HG_SPAN = 4.0;         // height above HG_BASE that earns the FULL bonus
 const HG_RANGE_MAX = 0.25;   // peak terrain: up to +25% attack range (gradient from 0)
 const INF_CLIFF_SPEED = 0.4; // infantry climb cliffs at 40% speed
+// per-shot chance a dedicated interceptor actually downs a (manned) bomber. dmgMul()
+// already zeroes everyone else, so only these types ever reach the roll. low/med/high.
+const INTERCEPT_BOMBER: Record<string, number> = { rocket: 0.2, fighter: 0.5, sam: 0.5, aatank: 0.5, flakship: 0.5, patriot: 0.85 };
 const MISSILE_CAP = 25;     // max armed missiles a single silo can stockpile
 const CARRY_VEH = 10;       // transport ship capacity: vehicles
 const CARRY_INF = 30;       // transport ship capacity: infantry
@@ -1252,6 +1255,8 @@ export class Sim {
     // missiles) — never land units or aircraft
     if (UNITS[att.type]?.cloak && UNITS[att.type]?.move === 'sea' && !tgt.b && UNITS[tgt.type]?.kind !== 'sea') return;
     let mul = dmgMul(att.type, tgt.b, tgt.b ? 'b' : UNITS[tgt.type].kind, tgt.b ? undefined : tgt.type);
+    // bombers: even an allowed interceptor only connects by chance (else the shot misses)
+    if (!tgt.b && tgt.type === 'bomber' && mul > 0 && this.rng.next() >= (INTERCEPT_BOMBER[att.type] ?? 0)) mul = 0;
     if (!tgt.b) {
       if (tgt.fortT > 0) mul *= FORT_DEPLOY_VULN;        // exposed while digging in / packing up
       else if (tgt.fortified) {
