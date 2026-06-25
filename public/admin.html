@@ -149,6 +149,7 @@
             <th data-k="matchesMP" class="num">MP</th>
             <th data-k="ip">IP</th>
             <th data-k="geo">Location</th>
+            <th data-k="offline" class="num">Offline AI</th>
           </tr></thead>
           <tbody id="rows"></tbody>
         </table>
@@ -186,6 +187,18 @@
   }
   $('tabRoadmap').addEventListener('click', () => showTab('roadmap'));
   $('tabUsers').addEventListener('click', () => showTab('users'));
+
+  // toggle a user's offline-play (PWA) entitlement (delegated — rows are re-rendered)
+  $('rows').addEventListener('click', async (e) => {
+    const btn = e.target.closest('.offBtn'); if (!btn) return;
+    const email = btn.dataset.email, on = btn.dataset.on !== '1';
+    btn.disabled = true;
+    try {
+      await post('/admin/users', { action: 'setOffline', email, on });
+      const u = DATA.find(x => x.email === email); if (u) u.offline = on;
+      renderUsers();
+    } catch (err) { alert('Failed: ' + err.message); btn.disabled = false; }
+  });
 
   /* ---------------- ROADMAP ---------------- */
   let RM = [], rmStatuses = ['backlog','ready_build','in_progress','not_fixed','ready_test','ready_prod'];
@@ -328,7 +341,8 @@
       <td class="num">${u.matchesMP||0}</td>
       <td class="mono">${esc(u.ip)}</td>
       <td>${esc(u.geo) || '<span class="muted">—</span>'}</td>
-    </tr>`).join('') || '<tr><td colspan="10" class="muted" style="padding:20px">No users yet.</td></tr>';
+      <td class="num"><button class="offBtn" data-email="${esc(u.email)}" data-on="${u.offline?1:0}" style="cursor:pointer;border:0;border-radius:10px;padding:3px 10px;font:inherit;font-size:12px;color:#fff;background:${u.offline?'#2e8b57':'#555c66'}">${u.offline?'ON':'off'}</button></td>
+    </tr>`).join('') || '<tr><td colspan="11" class="muted" style="padding:20px">No users yet.</td></tr>';
   }
   document.querySelectorAll('th[data-k]').forEach(th => th.addEventListener('click', () => {
     const k = th.getAttribute('data-k');

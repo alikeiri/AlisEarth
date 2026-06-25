@@ -287,9 +287,9 @@ export class UI {
 
   constructor(
     private onBuild: (t: string) => void,
-    private onTrain: (t: string) => void,
+    private onTrain: (t: string, bulk?: boolean) => void,
     private onMinimapJump: (x: number, z: number) => void,
-    private onCancelTrain: (t: string) => void = () => {},
+    private onCancelTrain: (t: string, bulk?: boolean) => void = () => {},
     private onUpgrade: (bid: number) => void = () => {},
     private onRepeat: (bid: number, on: boolean) => void = () => {},
     private onFilterType: (t: string) => void = () => {},
@@ -348,7 +348,7 @@ export class UI {
       if (tip) this.btns[t].title = tip;
     }
     for (const t of U_LIST) {
-      gu.appendChild(this.makeBtn(t, UNITS[t].name, U_ICONS[t], () => this.onTrain(t), () => this.onCancelTrain(t)));
+      gu.appendChild(this.makeBtn(t, UNITS[t].name, U_ICONS[t], e => this.onTrain(t, e.ctrlKey || e.metaKey), e => this.onCancelTrain(t, e.ctrlKey || e.metaKey)));
       const tip = counterTip(t);
       if (tip) this.btns[t].title = tip;
     }
@@ -379,7 +379,7 @@ export class UI {
   private cleanups: (() => void)[] = [];
   destroy() { for (const c of this.cleanups) c(); }
 
-  private makeBtn(key: string, name: string, icon: string, fn: () => void, ctxFn?: () => void): HTMLElement {
+  private makeBtn(key: string, name: string, icon: string, fn: (e: MouseEvent) => void, ctxFn?: (e: MouseEvent) => void): HTMLElement {
     const b = document.createElement('div');
     b.className = 'bbtn';
     b.id = 'btn_' + key;
@@ -388,7 +388,7 @@ export class UI {
     const flag = facId && FACTIONS[facId] ? `<span class="facflag">${twemojify(FACTIONS[facId].flag)}</span>` : '';
     b.innerHTML = `${flag}<span class="ico">${twemojify(icon)}</span>${name}<span class="cost"></span><span class="badge hidden"></span><div class="prog"></div>`;
     b.addEventListener('click', fn);
-    if (ctxFn) b.addEventListener('contextmenu', e => { e.preventDefault(); ctxFn(); });
+    if (ctxFn) b.addEventListener('contextmenu', e => { e.preventDefault(); ctxFn(e); });
     this.btns[key] = b;
     return b;
   }
@@ -981,6 +981,23 @@ export class UI {
         ctx.fillStyle = '#3da5ff';
         ctx.fillRect(p.x - w / 2, p.y + 3, w * Math.min(1, v.pr), 2);
       }
+    }
+    // ammo / mine load: a row of small pips just under the HP bar (a bomber's bombs,
+    // an engineer's mines) — shown when selected or partly spent, so you can see at a
+    // glance what's left and when to rearm
+    for (const v of views) {
+      if (v.o !== me) continue;
+      const isAmmo = v.am !== undefined;
+      const have = isAmmo ? v.am : v.mn;
+      if (have === undefined) continue;
+      const max = isAmmo ? (UNITS[v.t]?.payload || 0) : (UNITS[v.t]?.mines || 0);
+      if (!max) continue;
+      if (!selection.has(v.i) && have >= max) continue;   // full + unselected → no clutter
+      const p = v.fy !== undefined ? projectY(v.x, v.fy + 1.0, v.z) : project(v.x, v.z, 1.25);
+      if (!p.ok) continue;
+      const n = Math.min(max, 8), pw = 4, gap = 1, tw = n * pw + (n - 1) * gap;
+      let x = p.x - tw / 2; const y = p.y + 2;
+      for (let i = 0; i < n; i++) { ctx.fillStyle = i < have ? (isAmmo ? '#ffd166' : '#9fd0ff') : 'rgba(0,0,0,0.55)'; ctx.fillRect(x, y, pw, 3); x += pw + gap; }
     }
     // cargo progress bar above my harvesters / oil miners while they're working —
     // fills (gold) as they gather, turns green when full, empties on unload

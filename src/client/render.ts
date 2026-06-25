@@ -113,7 +113,7 @@ function loadGLB(file: string): Promise<any> {
 export async function preloadModels(onProgress?: (done: number, total: number) => void): Promise<void> {
   const files = new Set<string>();
   for (const t in MODEL_DEFS) files.add(MODEL_DEFS[t].file);
-  for (const f of ['oilfield', 'powerplant', 'ammobox', 'refinery', 'airfield', 'barracks', 'wall', 'radar', 'lab', 'sam']) files.add(f);
+  for (const f of ['oilfield', 'powerplant', 'ammobox', 'refinery', 'airfield', 'barracks', 'wall', 'radar', 'lab', 'sam', 'railgun']) files.add(f);
   const list = [...files]; let done = 0;
   onProgress?.(0, list.length);
   await Promise.all(list.map(f => loadGLB(f).catch(() => null).then(() => { onProgress?.(++done, list.length); })));
@@ -327,6 +327,29 @@ function armorTex(): THREE.CanvasTexture {
   ARMOR.wrapS = ARMOR.wrapT = THREE.RepeatWrapping;
   ARMOR.colorSpace = THREE.SRGBColorSpace;
   return ARMOR;
+}
+
+// defensive buildings that go dark on low power and show the flashing no-power badge
+const NOPOWER_ICON_TYPES = new Set(['sam', 'cannon', 'turret', 'tesla', 'irondome']);
+// turrets whose GLB ships a looping "showcase" spin we don't want — they orient via the
+// aim pivot instead, so don't auto-play their animation
+const BLDG_NO_AUTOANIM = new Set(['cannon']);
+// remove a model's built-in base/footing mesh (regex on node name) for these types
+const BLDG_HIDE_MESH: Record<string, RegExp> = { cannon: /^Base_01/ };
+// "no power" badge: a yellow bolt under a red no-entry ring + slash, on a dark disc
+let NOPWR_TEX: THREE.CanvasTexture | null = null;
+function noPowerIconTex(): THREE.CanvasTexture {
+  if (NOPWR_TEX) return NOPWR_TEX;
+  const cv = document.createElement('canvas'); cv.width = cv.height = 64;
+  const g = cv.getContext('2d')!;
+  g.fillStyle = 'rgba(14,17,21,0.80)'; g.beginPath(); g.arc(32, 32, 30, 0, Math.PI * 2); g.fill();
+  g.fillStyle = '#ffd23a';                                   // lightning bolt
+  g.beginPath(); g.moveTo(37, 12); g.lineTo(20, 36); g.lineTo(30, 36); g.lineTo(27, 52); g.lineTo(46, 27); g.lineTo(34, 27); g.closePath(); g.fill();
+  g.strokeStyle = '#ff3b30'; g.lineWidth = 5; g.lineCap = 'round'; // red no-entry ring + slash
+  g.beginPath(); g.arc(32, 32, 27, 0, Math.PI * 2); g.stroke();
+  g.beginPath(); g.moveTo(14, 14); g.lineTo(50, 50); g.stroke();
+  NOPWR_TEX = new THREE.CanvasTexture(cv); NOPWR_TEX.colorSpace = THREE.SRGBColorSpace;
+  return NOPWR_TEX;
 }
 
 // rounded, beveled base slab for buildings
@@ -926,7 +949,8 @@ function buildingGroup(type: string, teamColor: number): THREE.Group {
 
 interface FxTracer { x1: number; y1: number; z1: number; x2: number; y2: number; z2: number; t: number }
 interface FxPart { x: number; y: number; z: number; vx: number; vy: number; vz: number; life: number; max: number; s: number }
-interface FxRocket { x0: number; y0: number; z0: number; x1: number; y1: number; z1: number; t: number; delay: number; dur: number; arc: number; noSmoke?: boolean; scale?: number; mid?: number }
+interface FxRocket { x0: number; y0: number; z0: number; x1: number; y1: number; z1: number; t: number; delay: number; dur: number; arc: number; noSmoke?: boolean; scale?: number; mid?: number; burst?: number }
+interface FxBomb { x: number; z: number; y0: number; gy: number; t: number; dur: number } // a bomb falling straight down at (x,z) from y0 to ground gy
 
 // graphics quality presets. Everything renders at NATIVE resolution (pr 1.0) so
 // the world is always crisp — earlier sub-native scaling looked blurry. The
@@ -974,6 +998,8 @@ export class Renderer {
   private healMesh!: THREE.InstancedMesh;
   private healParts: FxPart[] = [];
   private rocketMesh!: THREE.InstancedMesh;
+  private bombs: FxBomb[] = [];
+  private bombMesh!: THREE.InstancedMesh;
   private rockets: FxRocket[] = [];
   private smokeMesh!: THREE.InstancedMesh;
   private smokeParts: FxPart[] = [];
@@ -1007,8 +1033,12 @@ export class Renderer {
   private factoryProto: THREE.Group | null = null; // War Factory GLB (poly.pizza), cloned per building
   private factoryTop = 2.6;                         // scaled model height (team band sits here)
   private bldgProtos: Record<string, THREE.Group> = {}; // other GLB building models, cloned per building
+  private bldgAnims: Record<string, THREE.AnimationClip[]> = {}; // GLB clips (e.g. radar dish spin), played live per instance
+  private bldgAimOff: Record<string, number> = {};  // yaw offset (rad) for aimable GLB turrets so they face their target
+  bldgFoot: Record<string, number> = {};           // GLB building model footprint half-extent (world units) — for picking + foundation
   private cruiseY = 12; // constant flight altitude (set from the map's tallest terrain in buildTerrain)
   private rampAnim = new Map<number, number>();     // unit id → seconds left of the "drive down the ramp" descent
+  private flyAlt = new Map<number, number>();        // flyer id → altitude factor (0 = landed on pad, 1 = cruise) for smooth take-off/landing
   private prevVeh = new Set<number>();              // ground-vehicle ids seen last frame (to detect freshly-built ones)
   private fogTex: THREE.DataTexture | null = null;
   private fogMesh: THREE.Mesh | null = null;
@@ -1193,15 +1223,16 @@ export class Renderer {
     // War Factory now wears the former Power Plant model ("RTS Military Building 1"),
     // same 3.6 sizing — generic loader, so makeBuildingGroup uses bldgProtos['factory']
     // (factoryProto stays null, the old poly.pizza factory is retired)
-    this.loadBuildingModel('factory', 'powerplant', 3.6); // ("RTS Military Building 1" by Sabri Ayeş, Sketchfab, CC-BY)
-    this.loadBuildingModel('power', 'ammobox', 4.8);       // Power Plant GLB ("RTS Ammo Box" by Sabri Ayeş, Sketchfab, CC-BY) — 2x the original 2.4 default
-    this.loadBuildingModel('refinery', 'refinery', 8.72); // Ore Refinery GLB (Sketchfab, CC-BY)
+    this.loadBuildingModel('factory', 'powerplant', 5.4); // ("RTS Military Building 1" by Sabri Ayeş, Sketchfab, CC-BY) — War Factory 50% larger (3.6 -> 5.4)
+    this.loadBuildingModel('power', 'ammobox', 2.4);       // Power Plant GLB ("RTS Ammo Box" by Sabri Ayeş, Sketchfab, CC-BY) — 50% smaller (4.8 -> 2.4)
+    this.loadBuildingModel('refinery', 'refinery', 6.1); // Ore Refinery GLB (Sketchfab, CC-BY) — 30% smaller (8.72 -> 6.1)
     this.loadBuildingModel('airfield', 'airfield', 8.28);  // Airfield GLB ("RTS Airport" by Sabri Ayeş, Sketchfab, CC-BY) — 75% larger
     this.loadBuildingModel('barracks', 'barracks', 4.5);   // Barracks GLB ("RTS Barracks" by Sabri Ayeş, Sketchfab, CC-BY) — 50% larger
-    this.loadBuildingModel('radar', 'radar', 4.35);        // Radar Dome GLB ("RTS Radar Tower" by Sabri Ayeş, Sketchfab, CC-BY) — 50% larger
+    this.loadBuildingModel('radar', 'radar', 2.83);        // Radar Dome GLB ("RTS Radar Tower" by Sabri Ayeş, Sketchfab, CC-BY) — 30% larger (2.18 -> 2.83)
     this.loadBuildingModel('wall', 'wall', 1.65);          // Wall GLB ("Concrete Barrier HQ" by Sabri Ayeş, Sketchfab, CC-BY) — 50% larger
-    this.loadBuildingModel('lab', 'lab', 3.2);             // Research Lab GLB ("ResearchCenter_Building001" by Christian Rudorff, Sketchfab, CC-BY)
+    this.loadBuildingModel('lab', 'lab', 3.6);             // Research Lab GLB ("ResearchCenter_Building001" by Christian Rudorff, Sketchfab, CC-BY) — 25% smaller (4.8 -> 3.6)
     this.loadBuildingModel('sam', 'sam', 1.9);             // Missile Battery GLB ("MissileTower_Building002" by Christian Rudorff, Sketchfab, CC-BY) — AA missile tower
+    this.loadBuildingModel('cannon', 'railgun', 2.4);      // Heavy Cannon GLB ("Railgun Turret" by Yudha Mfr, Sketchfab, CC-BY) — animated; falls back to procedural until railgun.glb is present
     // Oil Rig reuses the oil-well "Oil Pump" model, 25% taller than the free well
     // (well is normalised to 2.0 tall in loadOilModel) so building one just enlarges it
     this.loadBuildingModel('oilrig', 'oilfield', 2.5, true);
@@ -1297,6 +1328,17 @@ export class Renderer {
     this.rocketMesh.frustumCulled = false;
     this.rocketMesh.count = 0;
     this.scene.add(this.rocketMesh);
+    // falling bombs (bombers): a dark teardrop ordnance, nose-down along -Y
+    const bGeo = new THREE.CylinderGeometry(0.05, 0.13, 0.5, 8);
+    this.bombMesh = new THREE.InstancedMesh(
+      bGeo,
+      new THREE.MeshStandardMaterial({ color: 0x23262b, roughness: 0.55, metalness: 0.45 }),
+      64,
+    );
+    this.bombMesh.frustumCulled = false;
+    this.bombMesh.count = 0;
+    this.bombMesh.castShadow = true;
+    this.scene.add(this.bombMesh);
     this.smokeMesh = new THREE.InstancedMesh(
       new THREE.SphereGeometry(0.08, 6, 5),
       new THREE.MeshBasicMaterial({ color: 0x9aa0a4, transparent: true, opacity: 0.42, depthWrite: false }),
@@ -1698,6 +1740,7 @@ export class Renderer {
   // its cell footprint) and cache a prototype cloned per building in makeBuildingGroup.
   private loadBuildingModel(type: string, file: string, target: number, byHeight = false) {
     loadGLB(file).then(gltf => {
+      if (gltf.animations && gltf.animations.length) this.bldgAnims[type] = gltf.animations; // keep clips (radar dish spin, etc.)
       const src = gltf.scene.clone(true); src.updateMatrixWorld(true); // clone: we mutate transforms
       const box = new THREE.Box3().setFromObject(src);
       const size = new THREE.Vector3(); box.getSize(size);
@@ -1706,8 +1749,36 @@ export class Renderer {
       const s = target / Math.max(0.001, byHeight ? size.y : Math.max(size.x, size.z));
       src.position.set(-ctr.x, -box.min.y, -ctr.z);
       src.traverse(o => { const m = o as any; if (m.isMesh) { m.castShadow = true; m.receiveShadow = true; } });
+      const hideRe = BLDG_HIDE_MESH[type];   // strip a model's built-in concrete footing/base mesh
+      if (hideRe) src.traverse(o => { if ((o as any).isMesh && o.name && hideRe.test(o.name)) o.visible = false; });
       const inner = new THREE.Group(); inner.add(src); inner.scale.setScalar(s);
-      const proto = new THREE.Group(); proto.add(inner);
+      const proto = new THREE.Group();
+      // aimable turrets (Missile Battery, Heavy Cannon): wrap the model in a yaw pivot
+      // so it can turn to face its target. The foundation stays on proto (doesn't turn).
+      // The number is a per-model facing offset (the model's "forward" axis) — tune visually.
+      const AIMABLE: Record<string, number> = { sam: Math.PI, cannon: Math.PI }; // facing offset: these models' front is -Z, so +PI points them at the target
+      const aimable = type in AIMABLE;
+      if (aimable) {
+        const pivot = new THREE.Group(); pivot.name = '__aimPivot'; pivot.add(inner); proto.add(pivot);
+        this.bldgAimOff[type] = AIMABLE[type];
+      } else {
+        proto.add(inner);
+      }
+      this.bldgFoot[type] = Math.max(size.x, size.z) * s / 2; // scaled half-footprint
+      // concrete foundation skirt: a dark slab under the model that extends below
+      // the base, so on sloped/bumpy ground the building reads as sitting on a pad
+      // instead of floating or sinking into the terrain. Skipped for aimable turrets —
+      // the model turns, and a fixed slab under a rotating launcher reads wrong.
+      if (!aimable) {
+        const fw = Math.max(size.x, size.z) * s * 0.96;
+        const found = new THREE.Mesh(
+          new THREE.BoxGeometry(fw, 1.4, fw),
+          new THREE.MeshStandardMaterial({ color: 0x6b6f73, roughness: 0.95, metalness: 0.05 }),
+        );
+        found.position.y = -1.4 / 2 + 0.06; // top just above ground, body sunk to fill slope gaps
+        found.castShadow = false; found.receiveShadow = true;
+        proto.add(found);
+      }
       this.bldgProtos[type] = proto;
       this.refreshBuildingModel(type); // swap any already-placed buildings (e.g. the starting refinery)
     }).catch(() => { /* missing model — keep the procedural building */ });
@@ -1727,7 +1798,35 @@ export class Renderer {
     // the GLB models speak for themselves; ownership reads via the selection ring,
     // minimap and HUD.
     if (type === 'factory' && this.factoryProto) return this.factoryProto.clone(true);
-    if (this.bldgProtos[type]) return this.bldgProtos[type].clone(true);
+    if (this.bldgProtos[type]) {
+      const g = this.bldgProtos[type].clone(true);
+      const piv = g.getObjectByName('__aimPivot');   // aimable GLB turret → expose its yaw pivot
+      if (piv) g.userData.pivot = piv;
+      const clips = this.bldgAnims[type];
+      if (clips && clips.length && !BLDG_NO_AUTOANIM.has(type)) {
+        // the GLB ships its own animation (e.g. the radar dish spinning) — play it
+        // live on this instance. Cheap: buildings are individual clones, not instanced.
+        const mixer = new THREE.AnimationMixer(g);
+        for (const clip of clips) {
+          const act = mixer.clipAction(clip);
+          // loop continuous motion (dishes, antennae); one-shot deploy/door clips play
+          // once on build and clamp at their end pose instead of cycling forever
+          if (/door|open|close|activ|deploy|fire|shoot|launch|explo/i.test(clip.name)) {
+            act.setLoop(THREE.LoopOnce, 1); act.clampWhenFinished = true;
+          }
+          act.play();
+        }
+        g.userData.mixer = mixer;
+      }
+      if (NOPOWER_ICON_TYPES.has(type)) {                    // flashing "no power" badge (toggled in updateViews)
+        const bb = new THREE.Box3().setFromObject(g);        // sit just above the model's actual top
+        const topY = isFinite(bb.max.y) ? bb.max.y : 2;
+        const spr = new THREE.Sprite(new THREE.SpriteMaterial({ map: noPowerIconTex(), transparent: true, depthTest: false, depthWrite: false }));
+        spr.name = '__noPower'; spr.scale.setScalar(0.8); spr.position.y = topY + 0.35; spr.renderOrder = 999; spr.visible = false;
+        g.add(spr); g.userData.noPowerIcon = spr;
+      }
+      return g;
+    }
     return buildingGroupPro(type, col);
   }
 
@@ -2303,11 +2402,15 @@ export class Renderer {
           this.spawnParts(ev.tx, wy, ev.tz, 4, false); // impact splash
         } else if (ev.w === 9) {
           // Heavy Cannon emplacement: muzzle flash + a fast shell that arcs to the
-          // target and auto-detonates (the rockets updater spawns the impact burst)
-          this.spawnParts(ev.x, y1 + 0.8, ev.z, 4, false);
+          // target and auto-detonates (the rockets updater spawns the impact burst).
+          // Fire from the barrel muzzle (out front, toward the target it faces), not
+          // the building centre — otherwise the shell looked like it came from behind.
           const dist = Math.hypot(ev.tx - ev.x, ev.tz - ev.z);
+          const ang = Math.atan2(ev.tx - ev.x, ev.tz - ev.z);
+          const mx = ev.x + Math.sin(ang) * 1.6, mz = ev.z + Math.cos(ang) * 1.6;
+          this.spawnParts(mx, y1 + 0.9, mz, 4, false);
           if (this.rockets.length < 64) this.rockets.push({
-            x0: ev.x, y0: y1 + 0.8, z0: ev.z, x1: ev.tx, y1: y2, z1: ev.tz,
+            x0: mx, y0: y1 + 0.9, z0: mz, x1: ev.tx, y1: y2, z1: ev.tz,
             t: 0, delay: 0, dur: Math.max(0.16, dist * 0.022), arc: 0.5 + dist * 0.1,
           });
         } else if (ev.w === 10) {
@@ -2340,6 +2443,25 @@ export class Renderer {
               t: 0, delay: 0, dur: Math.max(0.07, dist * 0.012), arc: 0.05, noSmoke: true, scale: 0.55,
             });
           }
+        } else if (ev.w === 12) {
+          // Missile Battery (SAM): a pair of guided AA missiles streaking up to the
+          // aircraft's altitude (y2 = flyer cruise height via ev.tf), each trailing
+          // smoke; the rockets updater spawns the impact burst on arrival at the target.
+          // Launch from the FRONT of the launcher (toward the target, which it faces),
+          // raised to the rails — not from the building centre/back.
+          const dist = Math.hypot(ev.tx - ev.x, ev.tz - ev.z);
+          const ang = Math.atan2(ev.tx - ev.x, ev.tz - ev.z);
+          const fx = Math.sin(ang), fz = Math.cos(ang);                  // forward = toward target = the front
+          const lx = ev.x + fx * 1.2, lz = ev.z + fz * 1.2, ly = y1 + 1.2; // muzzle just ahead of the launcher, at rail height
+          for (let k = 0; k < 2 && this.rockets.length < 64; k++) {
+            const ox = (Math.random() - 0.5) * 0.4, oz = (Math.random() - 0.5) * 0.4;
+            this.rockets.push({
+              x0: lx, y0: ly, z0: lz,
+              x1: ev.tx + ox, y1: y2, z1: ev.tz + oz,
+              t: 0, delay: k * 0.12, dur: Math.max(0.28, dist * 0.025), arc: 0.6,
+            });
+          }
+          this.spawnParts(lx, ly, lz, 4, false); // launch flash at the muzzle
         } else {
           if (this.tracers.length < MAX_TRACER) this.tracers.push({ x1: ev.x, y1, z1: ev.z, x2: ev.tx, y2, z2: ev.tz, t: 0.1 });
           this.spawnParts(ev.tx, y2, ev.tz, 2, false);
@@ -2359,6 +2481,15 @@ export class Renderer {
         const yb = Math.max(this.map.heightAt(ev.x, ev.z), SEA) + 0.8;
         this.smokeParts.push({ x: ev.x, y: yb, z: ev.z, vx: 0, vy: 1.1, vz: 0, life: 0, max: 1.4, s: 2.2 });
         this.spawnParts(ev.x, yb, ev.z, 1, false);
+      } else if (ev.e === 'bombdrop') {
+        // bomber released its stick over the target: a few bomb-shaped objects fall
+        // straight down (gravity), each bursting on the ground on impact (bombs updater)
+        const gy = Math.max(this.map.heightAt(ev.tx, ev.tz), SEA);
+        const y0 = this.flyY(ev.tx, ev.tz, 2.3);   // release altitude = the bomber's cruise line over the target
+        for (let k = 0; k < 3 && this.bombs.length < 64; k++) {
+          const ox = (Math.random() - 0.5) * 1.4, oz = (Math.random() - 0.5) * 1.4;
+          this.bombs.push({ x: ev.tx + ox, z: ev.tz + oz, y0, gy: gy + 0.2, t: 0, dur: 0.55 + Math.random() * 0.12 });
+        }
       } else if (ev.e === 'boom') {
         const y = Math.max(this.map.heightAt(ev.x, ev.z), SEA) + 0.4;
         this.spawnParts(ev.x, y, ev.z, ev.big ? 26 : 12, ev.big);
@@ -2379,7 +2510,7 @@ export class Renderer {
         // catch the doomed warhead MID-AIR: find its in-flight rocket, take its
         // current position, delete it (so it never lands), then streak an interceptor
         // missile up from the battery to that point and burst it there
-        let cx = ev.tx, cz = ev.tz, cy = Math.max(this.map.heightAt(ev.tx, ev.tz), SEA) + 3.2;
+        let cx = ev.tx, cz = ev.tz, cy = Math.max(this.map.heightAt(ev.tx, ev.tz), SEA) + 12; // fallback well above ground
         if (ev.mid !== undefined) {
           const inc = this.rockets.find(r => r.mid === ev.mid);
           if (inc) {
@@ -2387,16 +2518,18 @@ export class Renderer {
             cx = inc.x0 + (inc.x1 - inc.x0) * q;
             cz = inc.z0 + (inc.z1 - inc.z0) * q;
             cy = inc.y0 + (inc.y1 - inc.y0) * q + Math.sin(Math.PI * q) * inc.arc;
-            this.rockets = this.rockets.filter(r => r !== inc); // warhead destroyed before impact
+            this.rockets = this.rockets.filter(r => r !== inc); // doomed warhead — remove so it never lands
           }
         }
-        const y1 = Math.max(this.map.heightAt(ev.x, ev.z), SEA) + 0.7;
-        const dist = Math.hypot(cx - ev.x, cz - ev.z);
+        // interceptor streaks UP from the dome's launch tubes to the warhead's mid-air
+        // position and detonates there in a big airburst (burst flag → larger impact)
+        const y1 = Math.max(this.map.heightAt(ev.x, ev.z), SEA) + 1.6;
+        const dist = Math.hypot(cx - ev.x, cz - ev.z) + Math.abs(cy - y1);
+        this.spawnParts(ev.x, y1, ev.z, 5, false); // launch flash at the dome
         if (this.rockets.length < 64) this.rockets.push({ // interceptor missile from the battery
           x0: ev.x, y0: y1, z0: ev.z, x1: cx, y1: cy, z1: cz,
-          t: 0, delay: 0, dur: Math.max(0.18, dist * 0.03), arc: 0.5,
+          t: 0, delay: 0, dur: Math.max(0.4, dist * 0.045), arc: 0.4, burst: 26,
         });
-        this.spawnParts(cx, cy, cz, 16, true); // mid-air airburst at the catch point
       } else if (ev.e === 'empfx') {
         // crackling blue arcs over a stunned unit
         const y = Math.max(this.map.heightAt(ev.x, ev.z), SEA) + 0.6;
@@ -2444,7 +2577,7 @@ export class Renderer {
   }
 
   // views: array of {i,o,t,b,x,z,h,m,pr,...}; selection: Set of ids
-  updateViews(views: any[], selection: Set<number>, dt: number) {
+  updateViews(views: any[], selection: Set<number>, dt: number, lowPowerOwners?: Set<number>) {
     const counts: Record<string, number> = {};
     for (const t in this.unitParts) counts[t] = 0;
     for (const t in this.posedParts) this.poseCounts[t] = this.posedParts[t].map(() => 0);
@@ -2478,9 +2611,19 @@ export class Renderer {
         }
         // the shipyard straddles the coast — float it at the water surface so it
         // sits on the water (on stilts), not sunk to the ocean floor
-        const y = v.t === 'shipyard'
-          ? Math.max(this.map.heightAt(v.x, v.z), SEA - 0.05)
-          : this.map.heightAt(v.x, v.z);
+        let y: number;
+        if (v.t === 'shipyard') {
+          y = Math.max(this.map.heightAt(v.x, v.z), SEA - 0.05);
+        } else {
+          // sit on the HIGHEST terrain under the footprint so the model never sinks
+          // into a rise; the foundation skirt fills the gap on the downhill side
+          const hf = this.bldgFoot[v.t] ?? ((v.sz || 1) / 2);
+          y = Math.max(
+            this.map.heightAt(v.x, v.z),
+            this.map.heightAt(v.x - hf, v.z - hf), this.map.heightAt(v.x + hf, v.z - hf),
+            this.map.heightAt(v.x - hf, v.z + hf), this.map.heightAt(v.x + hf, v.z + hf),
+          );
+        }
         rec.g.position.set(v.x, y, v.z);
         const sc = 0.15 + 0.85 * Math.min(1, v.pr);
         const lvS = 1 + 0.06 * ((v.lv || 1) - 1); // upgraded buildings grow slightly
@@ -2496,14 +2639,24 @@ export class Renderer {
         // turret gun tracks its last target
         const piv = rec.g.userData.pivot as THREE.Group | undefined;
         if (piv && rec.aim !== undefined) {
-          let da = rec.aim - piv.rotation.y;
+          const want = rec.aim + (this.bldgAimOff[rec.type] || 0); // model facing offset for GLB turrets
+          let da = want - piv.rotation.y;
           while (da > Math.PI) da -= Math.PI * 2;
           while (da < -Math.PI) da += Math.PI * 2;
           piv.rotation.y += da * Math.min(1, dt * 7);
         }
-        // radar dish sweeps continuously
+        // radar dish sweeps continuously (procedural building)
         const dish = rec.g.userData.spinDish as THREE.Mesh | undefined;
         if (dish) dish.rotation.z = this.time * 1.4;
+        // low power for this building's owner (shed this tick, or battery under 50)
+        const noPwr = !!v.po || !!(lowPowerOwners && lowPowerOwners.has(v.o));
+        // GLB models that ship their own animation clips (radar dish spin, etc.) — advance
+        // them, but freeze on low power: a stopped radar dish reads as the base browning out
+        const mx = rec.g.userData.mixer as THREE.AnimationMixer | undefined;
+        if (mx && !noPwr) mx.update(dt);
+        // defensive buildings go dark on low power → flash a "no power" badge over them
+        const npi = rec.g.userData.noPowerIcon as THREE.Sprite | undefined;
+        if (npi) npi.visible = noPwr && Math.sin(this.time * 6) > 0; // ~1 Hz blink
         if (selection.has(v.i) && selN < MAX_INST) {
           this.dummy.position.set(v.x, y + 0.1, v.z);
           this.dummy.scale.setScalar((v.sz || 1) * 1.6);
@@ -2575,7 +2728,17 @@ export class Renderer {
       }
       let gy = this.map.heightAt(v.x, v.z);
       let y: number;
-      if (md?.fly) { y = this.flyY(v.x, v.z, md.alt || 2.3) + Math.sin(this.time * 2.5 + v.i * 1.7) * 0.12; v.fy = y; } // level cruise; v.fy = absolute height for the overlay (HP bar) and selection ring
+      if (md?.fly) {
+        // level cruise altitude, but a grounded (parked/rearming) flyer eases down onto
+        // the pad and back up on take-off. v.fy = absolute height for overlay/selection ring.
+        const cruise = this.flyY(v.x, v.z, md.alt || 2.3);
+        const padY = Math.max(gy, SEA) + 0.55;            // sit just on the airfield surface
+        const tgt = v.gr ? 0 : 1;
+        let f = this.flyAlt.get(v.i); if (f === undefined) f = tgt;
+        f += (tgt - f) * Math.min(1, dt * 1.8); this.flyAlt.set(v.i, f);
+        y = padY + (cruise - padY) * f + Math.sin(this.time * 2.5 + v.i * 1.7) * 0.12 * f; // bob only while airborne
+        v.fy = y;
+      }
       else if (md?.move === 'sea') {
         y = SEA + (v.t === 'sub' ? -0.08 : 0.02) + Math.sin(this.time * 1.6 + v.i) * 0.03;
         gy = SEA; // selection ring floats on the water
@@ -2727,6 +2890,7 @@ export class Renderer {
     }
     if (this.facing.size > 1200) {
       for (const id of this.facing.keys()) if (!seen.has(id)) this.facing.delete(id);
+      for (const id of this.flyAlt.keys()) if (!seen.has(id)) this.flyAlt.delete(id);
     }
     this.prevVeh = curVeh; // for next frame's "freshly-built vehicle" detection
 
@@ -2820,7 +2984,7 @@ export class Renderer {
       const p = (r.t - r.delay) / r.dur;
       if (p < 0) return true;
       if (p >= 1) {
-        this.spawnParts(r.x1, r.y1 + 0.3, r.z1, 7, false); // impact
+        this.spawnParts(r.x1, r.y1 + 0.3, r.z1, r.burst || 7, !!r.burst); // impact (burst = larger airburst, e.g. Iron Dome catch)
         return false;
       }
       const at = (q: number) => ({
@@ -2845,6 +3009,23 @@ export class Renderer {
     });
     this.rocketMesh.count = rn;
     this.rocketMesh.instanceMatrix.needsUpdate = true;
+
+    // falling bombs: drop straight down (gravity accel) and burst on the ground
+    let bn = 0;
+    this.bombs = this.bombs.filter(b => {
+      b.t += dt;
+      const p = b.t / b.dur;
+      if (p >= 1) { this.spawnParts(b.x, b.gy + 0.3, b.z, 10, true); return false; } // ground explosion on impact
+      const y = b.y0 + (b.gy - b.y0) * (p * p);  // accelerate as it falls
+      this.dummy.position.set(b.x, y, b.z);
+      this.dummy.rotation.set(0, 0, 0);
+      this.dummy.scale.setScalar(1);
+      this.dummy.updateMatrix();
+      if (bn < 64) this.bombMesh.setMatrixAt(bn++, this.dummy.matrix);
+      return true;
+    });
+    this.bombMesh.count = bn;
+    this.bombMesh.instanceMatrix.needsUpdate = true;
 
     // satellite launches: a big rocket accelerates skyward, trailing fire + smoke
     this.satLaunches = this.satLaunches.filter(s => {

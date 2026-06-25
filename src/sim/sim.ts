@@ -14,6 +14,7 @@ export interface Order {
   pD?: number; pT?: number; // harvest approach progress watchdog
   r?: number; // force-fire barrage (Sperrfeuer): shells scatter randomly in this radius around x,z
   keep?: boolean; // attack: a player-issued order — stick to THIS target, no auto-switch
+  spd?: number; // move: cap travel to this base speed (group move = slowest member's speed)
 } // kinds: move attack harvest patrol rtb flee repair road
 
 export interface Entity {
@@ -25,6 +26,8 @@ export interface Entity {
   cd: number; mt: number; cargo: number; cargoVal: number; repath: number;
   wx: number; wz: number; stuckT: number; mvi: number; pathFail: number; // stuck/unreachable detection
   ammo: number; // bombers: shots left this sortie (-1 = unlimited)
+  grounded?: boolean; // flyer parked/landed on an airfield (render sits it on the pad)
+  crashT?: number;    // bomber aloft with no free airfield slot: seconds until it crash-lands
   mag?: number; // missile units: rounds left in the current magazine (refills to def.capacity after reload)
   stance: number; // 0 aggressive (default), 1 hold position
   lastHitBy: number; lastHitT: number; reactCd: number; // return-fire / flee reactions
@@ -109,6 +112,9 @@ const HG_BASE = SEA + 1.15;  // flat land level — no height bonus at or below 
 const HG_SPAN = 4.0;         // height above HG_BASE that earns the FULL bonus
 const HG_RANGE_MAX = 0.25;   // peak terrain: up to +25% attack range (gradient from 0)
 const INF_CLIFF_SPEED = 0.4; // infantry climb cliffs at 40% speed
+// per-shot chance a dedicated interceptor actually downs a (manned) bomber. dmgMul()
+// already zeroes everyone else, so only these types ever reach the roll. low/med/high.
+const INTERCEPT_BOMBER: Record<string, number> = { rocket: 0.2, fighter: 0.5, sam: 0.5, aatank: 0.5, flakship: 0.5, patriot: 0.85 };
 const MISSILE_CAP = 25;     // max armed missiles a single silo can stockpile
 const CARRY_VEH = 10;       // transport ship capacity: vehicles
 const CARRY_INF = 30;       // transport ship capacity: infantry
@@ -174,7 +180,7 @@ export class Sim {
   // per-AI-player ledgers (AI-vs-AI simulations study the winner's doctrine)
   private dealtP: Record<number, Record<string, number>> = {};
   private lostP: Record<number, Record<string, number>> = {};
-  private pendingBlasts: { t: number; x: number; z: number; type: string; owner: number; mid: number }[] = [];
+  private pendingBlasts: { t: number; t0: number; x: number; z: number; type: string; owner: number; mid: number }[] = [];
   private missileSeq = 0; // unique id per launched silo missile, so the renderer can cancel the right warhead when intercepted
   private firstHumanHit = -1;
   private reported = false;
@@ -678,7 +684,7 @@ export class Sim {
         const u = this.ents.get(c.ids[i]);
         if (!u || u.b || u.owner !== c.p) continue;
         if (c.xs?.[i] === undefined || c.zs?.[i] === undefined) continue;
-        const ord: Order = { k: 'move', x: c.xs[i], z: c.zs[i] };
+        const ord: Order = { k: 'move', x: c.xs[i], z: c.zs[i], spd: c.spd };
         if (c.q) u.orders.push(ord);
         else { u.orders = [ord]; u.path = null; }
       }
@@ -773,7 +779,7 @@ export class Sim {
       let ord: Order | null = null;
       if (c.k === 'move') {
         const o = FORM[Math.min(idx, FORM.length - 1)];
-        ord = { k: 'move', x: c.x + o.x, z: c.z + o.z };
+        ord = { k: 'move', x: c.x + o.x, z: c.z + o.z, spd: c.spd };
       } else if (c.k === 'attack') {
         // a human's direct attack order sticks to THIS target (no auto-switching
         // to whatever wanders into range); the AI keeps its fighting-advance
@@ -1251,6 +1257,8 @@ export class Sim {
     // missiles) — never land units or aircraft
     if (UNITS[att.type]?.cloak && UNITS[att.type]?.move === 'sea' && !tgt.b && UNITS[tgt.type]?.kind !== 'sea') return;
     let mul = dmgMul(att.type, tgt.b, tgt.b ? 'b' : UNITS[tgt.type].kind, tgt.b ? undefined : tgt.type);
+    // bombers: even an allowed interceptor only connects by chance (else the shot misses)
+    if (!tgt.b && tgt.type === 'bomber' && mul > 0 && this.rng.next() >= (INTERCEPT_BOMBER[att.type] ?? 0)) mul = 0;
     if (!tgt.b) {
       if (tgt.fortT > 0) mul *= FORT_DEPLOY_VULN;        // exposed while digging in / packing up
       else if (tgt.fortified) {
@@ -1321,7 +1329,8 @@ export class Sim {
       : att.type === 'rifle' || att.type === 'ifv' ? 0
       : att.type === 'sub' ? (tgt.b ? 8 : 7)                                 // sub: cruise missile vs buildings, torpedo vs ships
       : att.type === 'flak' ? 5                                              // pom-pom flak
-      : att.type === 'rocket' || att.type === 'sam' || att.type === 'aatank' ? 1
+      : att.type === 'sam' ? 12                                              // Missile Battery: guided AA missiles streaking up to the target
+      : att.type === 'rocket' || att.type === 'aatank' ? 1
       : att.type === 'mlrs' || att.type === 'msldrone' || att.type === 'mortar' || att.type === 'artillery' || att.type === 'artyship' ? 4
       : att.type === 'heli' || att.type === 'helidrone' ? (tgtInf ? 0 : 1)   // guns vs inf, rockets vs veh/bld
       : att.type === 'heavy' || att.type === 'destroyer' ? 6                 // heavy/naval gun
@@ -1539,6 +1548,9 @@ export class Sim {
     if (def.attack) {
       const ready = b.cd <= 0;                              // will this shot actually fire?
       b.cd -= TICK;
+      // not enough power → the gun goes offline (no acquire, no fire). Threshold matches
+      // the HUD/minimap low-power line; cd keeps ticking so it resumes the moment power returns.
+      if (this.players[b.owner].power < 50) return;
       const rng = def.attack.range + 0.8 * (b.lvl - 1);
       let tgt = this.findEnemy(b, rng, !!def.noAir);
       // force-fire: lock onto the commanded target (entity OR ground point) for a
@@ -1583,6 +1595,14 @@ export class Sim {
   private tickUnit(u: Entity) {
     const def = UNITS[u.type];
     u.cd -= TICK;
+
+    // aircraft basing: a bomber (limited-ammo flyer) with nothing to do flies to an
+    // airfield and lands on it instead of hovering over the factory. grounded is
+    // recomputed each tick by the park/rtb handlers when it's actually sitting on a pad.
+    if (def.fly) {
+      u.grounded = false;
+      if (def.payload && u.orders.length === 0) u.orders.push({ k: 'park' });
+    }
 
     // naval self-rescue: a ship that ends up on a non-water cell (shoved into the
     // coast, or spawned at a tight shore) can't path out under sea rules — ease it
@@ -2035,6 +2055,7 @@ export class Sim {
       if (d > 1.8) { u.mt = 0; this.moveToward(u, pad.x, pad.z, def); }
       else {
         u.path = null;
+        u.grounded = true;        // landed on the pad, rearming
         u.mt += TICK;
         if (u.mt >= 6) { // rearm complete
           u.mt = 0;
@@ -2042,6 +2063,33 @@ export class Sim {
           u.orders.shift();
         }
       }
+    } else if (ord.k === 'park') {
+      // each airfield holds AIRFIELD_PLANE planes on an even apron grid; fill one to
+      // capacity, then spill to the next airfield (by id). A bomber with no free slot
+      // (e.g. its airfield was destroyed) loiters and crash-lands after 30s.
+      const fields: Entity[] = [];
+      for (const e of this.ents.values())
+        if (e.b && e.owner === u.owner && e.type === 'airfield' && e.progress >= e.total) fields.push(e);
+      fields.sort((a, b) => a.id - b.id);
+      // deterministic slot index: this bomber's rank among the owner's parking aircraft
+      let rank = 0;
+      for (const e of this.ents.values())
+        if (!e.b && e.owner === u.owner && UNITS[e.type]?.fly && (UNITS[e.type]?.payload || 0) > 0 && e.id < u.id) rank++;
+      const S = AIRFIELD_PLANE;                          // slots per airfield = plane capacity
+      const fi = Math.floor(rank / S), si = rank % S;
+      if (fi >= fields.length) {                         // no apron free → crash-land after 30s aloft
+        u.crashT = (u.crashT || 0) + TICK;
+        if (u.crashT >= 30) { u.hp = 0; this.events.push({ e: 'boom', x: u.x, z: u.z }); }
+        return;
+      }
+      u.crashT = 0;
+      const f = fields[fi];
+      const cols = Math.max(1, Math.ceil(S / 2));        // a 2-deep parking apron, evenly spread
+      const col = si % cols, row = Math.floor(si / cols);
+      const px = f.x + (cols > 1 ? (col / (cols - 1) - 0.5) * 6.0 : 0); // ~6-wide apron, centred on the field
+      const pz = f.z + (row - 0.5) * 2.6;                // two rows ~2.6 apart
+      if (Math.hypot(u.x - px, u.z - pz) > 0.5) this.moveToward(u, px, pz, def);
+      else { u.path = null; u.grounded = true; }         // landed on its slot
     } else if (ord.k === 'patrol') {
       // defensive stance: engage anything in this unit's vicinity, resume after
       if (def.dmg > 0 && this.tickN % 5 === u.id % 5) {
@@ -2191,7 +2239,7 @@ export class Sim {
     const tx = Math.max(0, Math.min(W - 0.01, x)), tz = Math.max(0, Math.min(H - 0.01, z));
     const ft = Math.max(12, Math.round((hyp(tx - b.x, tz - b.z) / (mdef.speed || 7)) * 10));
     const mid = ++this.missileSeq;
-    this.pendingBlasts.push({ t: this.tickN + ft, x: tx, z: tz, type, owner: b.owner, mid });
+    this.pendingBlasts.push({ t: this.tickN + ft, t0: this.tickN, x: tx, z: tz, type, owner: b.owner, mid });
     this.events.push({ e: 'silo', x: b.x, z: b.z, tx, tz, ft, mid });
     b.lastMissile = type;
     b.storedMissile = stock[0] || null; // next armed missile (or empty)
@@ -2241,12 +2289,17 @@ export class Sim {
       const def: any = e.b ? BUILDINGS[e.type] : UNITS[e.type];
       if (!def?.intercept || e.hp <= 0) continue;
       if (e.b && e.progress < e.total) continue;            // still under construction
+      if (e.pOff || this.players[e.owner].power < 50) continue; // not enough power → interceptor offline
       if (e.icd && e.icd > 0) e.icd -= TICK;
       ints.push({ e, r2: def.intercept.range * def.intercept.range, cd: def.intercept.cd });
     }
     if (!ints.length || !this.pendingBlasts.length) return;
     const killed: typeof this.pendingBlasts = [];
     for (const bl of this.pendingBlasts) {
+      // let the warhead climb to altitude before intercepting, so the catch happens
+      // mid-air along its arc — not on the ground right as it leaves the silo
+      const ft = bl.t - bl.t0;
+      if (ft > 0 && this.tickN - bl.t0 < ft * 0.3) continue;
       let best: { e: Entity; r2: number; cd: number } | null = null, bd = 1e9;
       for (const it of ints) {
         if (it.e.icd && it.e.icd > 0) continue;             // reloading
@@ -2312,7 +2365,9 @@ export class Sim {
       this.dealDamage(u, e, total * (1 - 0.5 * (dist / R)));
     }
     u.ammo = 0;
-    this.events.push({ e: 'boom', x: tgt.x, z: tgt.z, big: true });
+    // bombs fall from the bomber (u) onto the target; the renderer drops the visible
+    // ordnance and bursts each one on the ground (damage above is applied immediately)
+    this.events.push({ e: 'bombdrop', x: u.x, z: u.z, tx: tgt.x, tz: tgt.z });
   }
 
   private tickHarvest(u: Entity, ord: Order, def: any) {
@@ -2518,7 +2573,11 @@ export class Sim {
   private moveToward(u: Entity, x: number, z: number, def: any): boolean {
     const d = Math.sqrt((u.x - x) * (u.x - x) + (u.z - z) * (u.z - z));
     if (d < 0.25) return true;
-    const speed = def.speed * this.players[u.owner].fac.speedMul;
+    // a group move caps everyone to the slowest member's base speed (ord.spd) so a
+    // mixed force advances together instead of fast units arriving alone and dying
+    const cap = u.orders[0]?.spd;
+    const baseSp = cap && cap > 0 ? Math.min(def.speed, cap) : def.speed;
+    const speed = baseSp * this.players[u.owner].fac.speedMul;
     if (def.fly) {
       // flyers travel in a straight line over anything
       const end = u.path?.[u.path.length - 1];
@@ -2789,6 +2848,7 @@ export class Sim {
         if (e.holdFire) v.hf = 1;                       // defensive building on weapons-hold
       } else {
         if (e.stance) v.st = e.stance;
+        if (UNITS[e.type]?.fly && e.grounded) v.gr = 1; // bomber landed/parked on an airfield
         if (e.fortified) v.fo = 1;
         if (e.fortT > 0) v.ft = e.fortGoal ? 1 : 2; // 1 = digging in, 2 = packing up
         if (UNITS[e.type]?.cloak || (UNITS[e.type]?.stealthTech && this.players[e.owner]?.tech?.stealth)) v.ck = 1;

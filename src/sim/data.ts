@@ -323,6 +323,19 @@ export const DRONE_TYPES = new Set(['recon', 'strike', 'msldrone', 'helidrone', 
 // Damage matrix: attacker type vs target class (tgtType refines air targets).
 export function dmgMul(attType: string, tgtIsBuilding: boolean, tgtKind: string, tgtType?: string): number {
   if (tgtKind === 'air') {
+    // (manned) BOMBERS can only be engaged by dedicated interceptors — Rocket Infantry,
+    // Patriot, Missile Battery (SAM), AA vehicles, fighters, and naval AA. Drones, flak
+    // guns, other ground units, buildings and general warships cannot touch them at all.
+    // A per-shot interception CHANCE (low/med/high) is rolled in sim.dealDamage.
+    if (tgtType === 'bomber') {
+      if (attType === 'fighter') return 3.2;
+      if (attType === 'patriot') return 3.4;
+      if (attType === 'sam') return 2.2;
+      if (attType === 'aatank') return 2.3;
+      if (attType === 'flakship') return 2.7;   // naval AA
+      if (attType === 'rocket') return 1.8;
+      return 0;                                  // everyone else: no effect on bombers
+    }
     // air superiority: fighters murder drones AND bombers (their whole job)
     if (attType === 'fighter') return tgtType && (tgtType === 'bomber' || tgtType === 'dbomber') ? 3.2 : 2.8;
     if (attType === 'sam') return 2.2;

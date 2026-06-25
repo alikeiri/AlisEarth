@@ -110,6 +110,9 @@ function simViews(sim: Sim, a: number): any[] {
       if (e.terraPath && e.terraPath.length) v.tf = 1; // bulldozer mid-terraform: ride the real ground, never float
       if (e.cargoUnits && e.cargoUnits.length) v.cu = e.cargoUnits.length; // transport: units aboard
       { const cap = UNITS[e.type]?.cargo; if (cap) v.cg = Math.max(0, Math.min(1, e.cargo / cap)); } // harvester/oil-miner fill %
+      if (e.ammo >= 0 && (UNITS[e.type]?.payload || 0) > 0) v.am = e.ammo;          // bomber bombs left this sortie
+      if (UNITS[e.type]?.fly && (e as any).grounded) v.gr = 1;                      // bomber landed/parked on an airfield (render sits it on the pad)
+      if (e.mineStock !== undefined && (UNITS[e.type]?.mines || 0) > 0) v.mn = e.mineStock; // engineer mines left
       if (e.wpLoop && e.wpLoop.length) v.lp = 1;                          // waypoint repeat on
       if (e.orders && e.orders.length) {                                  // remaining waypoints (for the path overlay)
         const wp: { x: number; z: number; a: number }[] = [];
@@ -313,6 +316,7 @@ class ReplayGame implements GameLike {
         if (e.holdFire) v.hf = 1;                       // defensive building on weapons-hold
       } else {
         if (e.fortified) v.fo = 1;
+        if (UNITS[e.type]?.fly && (e as any).grounded) v.gr = 1; // bomber landed/parked
         if (e.cd > 0 && UNITS[e.type]?.dmg > 0) {
           v.fr = 1;
           if (e.aimX !== undefined) { v.ax = e.aimX; v.az = e.aimZ; }
@@ -596,6 +600,7 @@ class GameClient {
   private loadHover = false; // hovering my transport with loadable units selected
   private garrisonHover = false; // hovering a garrisonable building with infantry selected
   private oilHover = false; // engineer selected + hovering a claimable oil well
+  private oilCell: { cx: number; cz: number } | null = null; // that well's cell, for the oil-rig ghost
   private tipEl: HTMLDivElement | null = null;  // delayed name+HP hover tooltip
   private tipEntId = -1;
   private tipSince = 0;
@@ -654,9 +659,9 @@ class GameClient {
 
     this.ui = new UI(
       t => { this.ui.setPlacing(this.ui.placing === t ? null : t); audio.play('click'); },
-      t => this.train(t),
+      (t, bulk) => this.train(t, bulk ? 5 : 1),       // Ctrl+click → queue 5 (sim caps to capacity)
       (x, z) => this.renderer.jumpCam(x, z),
-      t => this.cancelTrain(t),
+      (t, bulk) => this.cancelTrain(t, bulk ? 5 : 1), // Ctrl+right-click → drop 5 from the queue
       bid => { this.game.issue({ k: 'upg', p: this.game.me, bid }); audio.play('confirm'); },
       (bid, on) => { this.game.issue({ k: 'repeat', p: this.game.me, bid, on }); audio.play('click'); },
       t => { // chip click: narrow selection to one type
@@ -1146,32 +1151,39 @@ class GameClient {
     return best;
   }
 
-  private train(type: string) {
+  private train(type: string, count = 1) {
     const def = UNITS[type];
     if (!def) return;
     const canMake = (v: any) => v && v.b && v.o === this.game.me && v.pr >= 1 &&
       (v.t === def.builtAt || v.t === def.altBuiltAt);
-    // if a single matching production building is selected, queue on THAT one so
-    // twin factories can each build something different. Otherwise: a primary
-    // building (set via double-click) always wins; else the shortest queue.
+    // pick the production building: a single selected matching one wins (so twin
+    // factories can each build something different), else a primary (double-click) or
+    // the shortest queue. some units (MCV) can come from a second type too (altBuiltAt).
+    let bid = -1;
     if (this.selection.size === 1) {
       const sel = this.byId.get([...this.selection][0]);
-      if (canMake(sel)) { this.game.issue({ k: 'train', p: this.game.me, bid: sel.i, type }); audio.play('click'); return; }
+      if (canMake(sel)) bid = sel.i;
     }
-    // some units (MCV) can come from a second building type too (altBuiltAt)
-    let primary: any = null, best: any = null;
-    for (const v of this.lastViews) {
-      if (!canMake(v)) continue;
-      if (v.pm) primary = v;
-      if (!best || (v.qn || 0) < (best.qn || 0)) best = v;
+    if (bid < 0) {
+      let primary: any = null, best: any = null;
+      for (const v of this.lastViews) {
+        if (!canMake(v)) continue;
+        if (v.pm) primary = v;
+        if (!best || (v.qn || 0) < (best.qn || 0)) best = v;
+      }
+      const tgt = primary || best;
+      if (tgt) bid = tgt.i;
     }
-    const tgt = primary || best;
-    if (tgt) { this.game.issue({ k: 'train', p: this.game.me, bid: tgt.i, type }); audio.play('click'); }
+    if (bid < 0) return;
+    // Ctrl+click queues a batch; the sim validates/caps each one (airfield slots,
+    // 1-per-player heroes, tech/faction/credits), so it adds up to the capacity.
+    for (let i = 0; i < count; i++) this.game.issue({ k: 'train', p: this.game.me, bid, type });
+    audio.play('click');
   }
 
   // right-click a unit button: cancel one queued unit, preferring the SELECTED
   // production building so the queue badge the player is looking at always drops
-  private cancelTrain(type: string) {
+  private cancelTrain(type: string, count = 1) {
     const def = UNITS[type];
     if (!def) return;
     let bid = -1;
@@ -1179,7 +1191,7 @@ class GameClient {
       const sel = this.byId.get([...this.selection][0]);
       if (sel && sel.b && sel.o === this.game.me && (sel.t === def.builtAt || sel.t === def.altBuiltAt) && (sel.qn || 0) > 0) bid = sel.i;
     }
-    this.game.issue({ k: 'cancel', p: this.game.me, type, bid });
+    for (let i = 0; i < count; i++) this.game.issue({ k: 'cancel', p: this.game.me, type, bid }); // Ctrl+right-click drops a batch
     audio.play('cancel');
   }
 
@@ -1370,7 +1382,18 @@ class GameClient {
         : this.renderer.project(v.x, v.z, v.b ? 1 : 0.5);
       if (!p.ok) continue;
       const d = Math.hypot(p.x - sx, p.y - sy);
-      const r = v.b ? 14 + (v.sz || 1) * 7 : (ud?.fly ? 20 : 16); // a touch more slack for fast movers
+      let r: number;
+      if (v.b) {
+        // GLB building models can be much larger than their grid footprint (e.g. the
+        // airfield) — size the hit area to the model's on-screen footprint so clicking
+        // the visible model selects it, not just the ground beside it
+        const foot = this.renderer.bldgFoot[v.t];
+        if (foot) {
+          const e = this.renderer.project(v.x + foot, v.z, 0.5);
+          const px = e.ok ? Math.hypot(e.x - p.x, e.y - p.y) : 0;
+          r = Math.max(14 + (v.sz || 1) * 7, px + 12);
+        } else r = 14 + (v.sz || 1) * 7;
+      } else r = ud?.fly ? 20 : 16; // a touch more slack for fast movers
       if (d < r && d < bd) { bd = d; best = v; }
     }
     return best;
@@ -1956,8 +1979,16 @@ class GameClient {
       this.recordWp(g.x, g.z, false, queue);
       return;
     }
-    this.game.issue({ k: 'move', p: me, ids, x: g.x, z: g.z, q: queue });
+    this.game.issue({ k: 'move', p: me, ids, x: g.x, z: g.z, q: queue, spd: this.groupSpd(ids) });
     this.recordWp(g.x, g.z, false, queue);
+  }
+
+  // slowest base speed among the moving units (2+) so a mixed group advances
+  // together instead of fast units arriving alone; undefined for a lone unit
+  private groupSpd(ids: number[]): number | undefined {
+    let n = 0, mn = Infinity;
+    for (const id of ids) { const v = this.byId.get(id); const s = v && !v.b ? (UNITS[v.t]?.speed || 0) : 0; if (s > 0) { mn = Math.min(mn, s); n++; } }
+    return n > 1 ? mn : undefined;
   }
 
   // Distribute selected units evenly along the drawn path, assigning slots
@@ -1973,7 +2004,7 @@ class GameClient {
     }
     if (L < 1.5) { // too short to be a line — treat as a normal move
       const end = path[path.length - 1];
-      this.game.issue({ k: 'move', p: this.game.me, ids, x: end.x, z: end.z, q: queue });
+      this.game.issue({ k: 'move', p: this.game.me, ids, x: end.x, z: end.z, q: queue, spd: this.groupSpd(ids) });
       audio.play('confirm');
       return;
     }
@@ -2001,7 +2032,7 @@ class GameClient {
       xs.push(Math.round(slots[i].x * 100) / 100);
       zs.push(Math.round(slots[i].z * 100) / 100);
     });
-    this.game.issue({ k: 'form', p: this.game.me, ids: ordered, xs, zs, q: queue });
+    this.game.issue({ k: 'form', p: this.game.me, ids: ordered, xs, zs, q: queue, spd: this.groupSpd(ordered) });
     audio.play('confirm');
     audio.ack(this.dominantType(ordered), 'move');
   }
@@ -2257,7 +2288,12 @@ class GameClient {
       this.renderer.refreshTerrain();
       this.game.map.heightDirty = false;
     }
-    prof.begin('render.scene'); this.renderer.updateViews(views, this.selection, dt); prof.end('render.scene');
+    // players whose stored battery is low (< 50, same threshold as the minimap):
+    // their buildings' animations freeze (radar dish stops, etc.) as a brownout cue
+    const lowPowerOwners = new Set<number>();
+    const pls = this.game.players();
+    for (let i = 0; i < pls.length; i++) if (((pls[i]?.pwr) ?? 999) < 50) lowPowerOwners.add(i);
+    prof.begin('render.scene'); this.renderer.updateViews(views, this.selection, dt, lowPowerOwners); prof.end('render.scene');
     const evs = this.game.drainEvents();
     this.renderer.addEvents(evs);
     for (const ev of evs) {
@@ -2308,6 +2344,12 @@ class GameClient {
     } else if (this.ui.placing) {
       const gh = this.ghostAt(this.mouse.x, this.mouse.y);
       if (gh) { this.lastGhost = gh; this.renderer.setGhost(true, this.ui.placing, gh.cx, gh.cz, gh.ok); }
+    } else if (this.oilHover && this.oilCell) {
+      // engineer hovering a claimable oil well → preview the Oil Rig footprint there
+      this.lineCells = [];
+      this.lineStart = null;
+      this.lastGhost = null;
+      this.renderer.setGhost(true, 'oilrig', this.oilCell.cx, this.oilCell.cz, true);
     } else {
       this.lineCells = [];
       this.lineStart = null;
@@ -2409,9 +2451,10 @@ class GameClient {
         const gp = this.renderer.groundPoint(this.mouse.x / window.innerWidth, this.mouse.y / window.innerHeight);
         if (gp && gp.ok) {
           const ocx = Math.floor(gp.x), ocz = Math.floor(gp.z), m = this.game.map;
-          if (m.inB(ocx, ocz) && m.oil[ocz * W + ocx] === 1 && m.occ[ocz * W + ocx] === 0) oilH = true;
+          if (m.inB(ocx, ocz) && m.oil[ocz * W + ocx] === 1 && m.occ[ocz * W + ocx] === 0) { oilH = true; this.oilCell = { cx: ocx, cz: ocz }; }
         }
       }
+      if (!oilH) this.oilCell = null;
       this.oilHover = oilH;
       if (oilH) { hover = null; this.lastHover = null; }
     }
@@ -3772,7 +3815,35 @@ async function goOnline(): Promise<boolean> {
   }
 }
 
+// remember the start-screen selections between games (faction, size, map type,
+// ore level, fog, AI roster) so the player doesn't reselect every time
+function saveMenuPrefs() {
+  try {
+    safeLS.setItem('fe_menu', JSON.stringify({
+      faction: selFaction, size: selSize,
+      mapType: ($('mapType') as HTMLSelectElement)?.value || 'continent',
+      ore: oreLevelSel, fog: fogEnabled, ai: aiList,
+    }));
+  } catch { /* no storage */ }
+}
+function loadMenuPrefs() {
+  let p: any = null;
+  try { p = JSON.parse(safeLS.getItem('fe_menu') || 'null'); } catch { /* none */ }
+  if (!p) return;
+  if (typeof p.faction === 'string') selFaction = p.faction;
+  if (typeof p.size === 'number') selSize = p.size;
+  if (typeof p.ore === 'number') oreLevelSel = p.ore & 3;
+  if (typeof p.fog === 'boolean') fogEnabled = p.fog;
+  if (Array.isArray(p.ai) && p.ai.length)
+    aiList = p.ai.filter((a: any) => typeof a?.lvl === 'number' && typeof a?.team === 'number').map((a: any) => ({ lvl: a.lvl, team: a.team }));
+  const mt = $('mapType') as HTMLSelectElement | null;
+  if (mt && typeof p.mapType === 'string' && [...mt.options].some(o => o.value === p.mapType)) mt.value = p.mapType;
+  const oa = $('oreAmt') as HTMLSelectElement | null; if (oa) oa.value = String(oreLevelSel);
+  const fc = $('fogChk') as HTMLInputElement | null; if (fc) fc.checked = fogEnabled;
+}
+
 function initMenus() {
+  loadMenuPrefs();   // restore the player's last start-screen choices
   buildFactionCards();
   // audio must be unlocked by a user gesture; init is idempotent
   document.addEventListener('pointerdown', () => audio.init());
@@ -3844,6 +3915,7 @@ function initMenus() {
       return;
     }
     $('menuErr').textContent = '';
+    saveMenuPrefs();                                 // remember these choices for next time
     const levels = aiList.map(a => a.lvl);          // each AI's difficulty
     const teams = [1, ...aiList.map(a => a.team)];   // you are team 1; AIs follow
     startGame(new LocalGame(playerName(), selFaction, selDiff, selSize, null, levels, teams));
@@ -4068,6 +4140,16 @@ function initLanding() {
   // seed the register callsign from whatever's in the name box
   cs.value = ((document.getElementById('nameInput') as HTMLInputElement)?.value || '').trim();
 
+  // offline-play (PWA) entitlement: register a caching service worker for granted users
+  // so Skirmish vs AI launches with no network; revoked/guest → tear it down.
+  const applyOffline = (on: boolean) => {
+    if (!('serviceWorker' in navigator)) return;
+    if (on) { navigator.serviceWorker.register('/sw.js').catch(() => {}); return; }
+    navigator.serviceWorker.getRegistrations?.().then(rs => rs.forEach(r => {
+      try { r.active?.postMessage('fe-offline-off'); } catch { /* ignore */ }
+      r.unregister();
+    })).catch(() => {});
+  };
   const setLoggedIn = (callsign: string) => {
     if (!callsign) return;
     try { safeLS.setItem('fe_callsign', callsign); safeLS.setItem('fe_name', callsign.slice(0, 18)); } catch { /* no storage */ }
@@ -4080,6 +4162,7 @@ function initLanding() {
   };
   const setLoggedOut = () => {
     try { safeLS.removeItem('fe_token'); safeLS.removeItem('fe_callsign'); } catch { /* no storage */ }
+    applyOffline(false); // drop the offline cache/SW on logout
     const a = document.getElementById('lgNavAuth'); if (a) a.textContent = 'Log in';
     const b = document.getElementById('lgShowAuth'); if (b) b.textContent = 'Log in / Sign up';
     el('lgLogout').classList.add('hidden');
@@ -4101,6 +4184,7 @@ function initLanding() {
       if (!r.ok) { errEl.textContent = j.error || 'Something went wrong'; return; }
       try { safeLS.setItem('fe_token', j.token); } catch { /* no storage */ }
       setLoggedIn(j.callsign);
+      applyOffline(!!j.offline); // admin-granted offline play → install the caching SW
       msgEl.textContent = mode === 'register' ? 'Account created — you’re logged in!' : 'Welcome back, ' + j.callsign + '!';
       msgEl.classList.remove('hidden');
       setTimeout(closeAuth, 800);
@@ -4120,7 +4204,7 @@ function initLanding() {
     const tok = safeLS.getItem('fe_token');
     if (tok) {
       fetch('/auth/me', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token: tok }) })
-        .then(r => r.ok ? r.json() : null).then(j => { if (j && j.callsign) setLoggedIn(j.callsign); }).catch(() => { /* offline */ });
+        .then(r => r.ok ? r.json() : null).then(j => { if (j && j.callsign) { setLoggedIn(j.callsign); applyOffline(!!j.offline); } }).catch(() => { /* offline — a previously-installed SW still serves the cached game */ });
     }
   } catch { /* no storage */ }
 }
