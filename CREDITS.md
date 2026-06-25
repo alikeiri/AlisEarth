@@ -63,6 +63,11 @@ NOTE: the Pixabay Content License and Mixkit Free License are royalty-free but *
 - Emoji glyphs (`public/twemoji/`, 83 SVGs) are **Twemoji** by Twitter, licensed
   **CC-BY 4.0** (https://github.com/twitter/twemoji). Attribution required (this entry).
 
+## AI-generated 3D models
+- Construction Yard (`public/models/conyard.glb`) — generated from a Google Gemini
+  reference image via Tripo3D (studio.tripo3d.ai). Project-owned, usable per Gemini +
+  Tripo3D terms; not CC0.
+
 ## Hero / marketing art
 - `public/hero.jpg` — generated with Google Gemini. AI-generated imagery: usable per
   Google's generative-AI terms; no third-party copyright claimed, but it is not CC0.

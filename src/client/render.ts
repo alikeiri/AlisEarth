@@ -111,7 +111,7 @@ function loadGLB(file: string): Promise<any> {
 export async function preloadModels(onProgress?: (done: number, total: number) => void): Promise<void> {
   const files = new Set<string>();
   for (const t in MODEL_DEFS) files.add(MODEL_DEFS[t].file);
-  for (const f of ['oilfield', 'powerplant', 'ammobox', 'refinery', 'airfield', 'barracks', 'wall', 'radar', 'lab', 'sam', 'railgun']) files.add(f);
+  for (const f of ['oilfield', 'powerplant', 'ammobox', 'refinery', 'airfield', 'barracks', 'wall', 'radar', 'lab', 'sam', 'railgun', 'conyard']) files.add(f);
   const list = [...files]; let done = 0;
   onProgress?.(0, list.length);
   await Promise.all(list.map(f => loadGLB(f).catch(() => null).then(() => { onProgress?.(++done, list.length); })));
@@ -1231,6 +1231,7 @@ export class Renderer {
     this.loadBuildingModel('lab', 'lab', 3.6);             // Research Lab GLB ("ResearchCenter_Building001" by Christian Rudorff, Sketchfab, CC-BY) — 25% smaller (4.8 -> 3.6)
     this.loadBuildingModel('sam', 'sam', 1.9);             // Missile Battery GLB ("MissileTower_Building002" by Christian Rudorff, Sketchfab, CC-BY) — AA missile tower
     this.loadBuildingModel('cannon', 'railgun', 2.4);      // Heavy Cannon GLB ("Railgun Turret" by Yudha Mfr, Sketchfab, CC-BY) — animated; falls back to procedural until railgun.glb is present
+    this.loadBuildingModel('conyard', 'conyard', 6.5);     // Construction Yard GLB (AI-generated via Gemini + Tripo3D) — static fused mesh; crane overhangs the footprint
     // Oil Rig reuses the oil-well "Oil Pump" model, 25% taller than the free well
     // (well is normalised to 2.0 tall in loadOilModel) so building one just enlarges it
     this.loadBuildingModel('oilrig', 'oilfield', 2.5, true);
