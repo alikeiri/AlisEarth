@@ -363,11 +363,18 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
   // (islanders keep ONE factory and ONE barracks: ground forces can't leave)
   else if (nB('factory') < (island ? 1 : L.factories) && pl.credits > 1900) want = 'factory';
   else if (pl.aiLvl >= 1 && !nB('radar') && nB('factory') && pl.credits > 1400) want = 'radar';
-  // Bomber Baron: once the economy is booted, tech to air fast (airforce + up to 4
-  // airfields = ~40 bomber slots) and thicken the turtle — a Heavy Cannon line, a
-  // SAM wall, and Iron Domes — even with no enemy missiles yet.
+  // Bomber Baron build order: a survival core of defence FIRST — a few SAMs + cannons
+  // so it isn't overrun while teching [#2]; then the airforce + up to 4 airfields
+  // (~40 bomber slots); then convert a banked economy into production throughput — a
+  // 2nd airforce (doubles bomber output) + extra factories [#1] rather than hoarding;
+  // then finish the turtle (full SAM wall, cannon line, Iron Domes).
+  else if (doctrine && econBoot && nB('sam') < 3 && nB('factory') && pl.credits > 1300) want = 'sam';
+  else if (doctrine && econBoot && nB('cannon') < 2 && pl.credits > 1800) want = 'cannon';
   else if (doctrine && econBoot && goAir && !nB('airforce') && nB('factory') && pl.credits > 2400) want = 'airforce';
   else if (doctrine && econBoot && nB('airforce') && nB('airfield') < 4 && pl.credits > 1500) want = 'airfield';
+  else if (doctrine && econBoot && nB('airforce') < 2 && nB('airfield') >= 2 && pl.credits > 3000) want = 'airforce';
+  else if (doctrine && econBoot && nB('airforce') < 3 && nB('airfield') >= 4 && pl.credits > 5000) want = 'airforce';
+  else if (doctrine && econBoot && nB('factory') < 3 && pl.credits > 6000) want = 'factory';
   else if (doctrine && econBoot && nB('cannon') < 6 && pl.credits > 2000) want = 'cannon';
   else if (doctrine && econBoot && nB('sam') < sams && nB('factory') && pl.credits > 1500) want = 'sam';
   else if (doctrine && econBoot && nB('radar') && nB('irondome') < 2 && pl.credits > 2600) want = 'irondome';
@@ -686,6 +693,22 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
       const enemyAA = mem.enemyAA || 0;
       if (bombers.length >= 2 && (enemyAA <= 1 || bombers.length >= enemyAA * 2))
         cmds.push({ k: 'attack', p, ids: bombers.map(u => u.id), tgt: mass.unit.id, x: mass.unit.x, z: mass.unit.z });
+    }
+  }
+
+  // Bomber Baron #3: once the fleet is massed, stop turtling — carpet the enemy BASE
+  // (not just fielded armies) on a cooldown so the game actually closes out instead of
+  // stalemating to a draw. Bombers RTB to rearm between strikes (airfield parking).
+  if (doctrine) {
+    const fleet = [...(myU['bomber'] || []), ...(myU['dbomber'] || [])]
+      .filter(u => u.hp > 0 && (!u.orders.length || u.orders[0].k !== 'attack'));
+    const eAA = mem.enemyAA || 0;
+    if (fleet.length >= 12 && fleet.length >= eAA && sim.tickN >= (mem.fleetStrikeCd || 0)) {
+      const tgt = bestStrikeTarget(sim, p);
+      if (tgt) {
+        cmds.push({ k: 'attack', p, ids: fleet.map(u => u.id), tgt: tgt.id, x: tgt.x, z: tgt.z });
+        mem.fleetStrikeCd = sim.tickN + 25 * TICKS_PER_SEC; // regroup/rearm between strikes
+      }
     }
   }
 
