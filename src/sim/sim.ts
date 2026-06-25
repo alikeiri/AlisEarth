@@ -27,6 +27,7 @@ export interface Entity {
   wx: number; wz: number; stuckT: number; mvi: number; pathFail: number; // stuck/unreachable detection
   ammo: number; // bombers: shots left this sortie (-1 = unlimited)
   grounded?: boolean; // flyer parked/landed on an airfield (render sits it on the pad)
+  crashT?: number;    // bomber aloft with no free airfield slot: seconds until it crash-lands
   mag?: number; // missile units: rounds left in the current magazine (refills to def.capacity after reload)
   stance: number; // 0 aggressive (default), 1 hold position
   lastHitBy: number; lastHitT: number; reactCd: number; // return-fire / flee reactions
@@ -2063,21 +2064,32 @@ export class Sim {
         }
       }
     } else if (ord.k === 'park') {
-      // sit on the nearest friendly airfield (the airplane factory is a fallback)
-      // until re-tasked — new bombers and idle bombers land here instead of hovering
-      let pad: Entity | null = null, bs = 1e9;
-      for (const e of this.ents.values()) {
-        if (!e.b || e.owner !== u.owner || e.progress < e.total) continue;
-        if (e.type !== 'airfield' && e.type !== 'airforce') continue;
-        const score = this.distToEnt(u.x, u.z, e) + (e.type === 'airforce' ? 1000 : 0);
-        if (score < bs) { bs = score; pad = e; }
+      // each airfield holds AIRFIELD_PLANE planes on an even apron grid; fill one to
+      // capacity, then spill to the next airfield (by id). A bomber with no free slot
+      // (e.g. its airfield was destroyed) loiters and crash-lands after 30s.
+      const fields: Entity[] = [];
+      for (const e of this.ents.values())
+        if (e.b && e.owner === u.owner && e.type === 'airfield' && e.progress >= e.total) fields.push(e);
+      fields.sort((a, b) => a.id - b.id);
+      // deterministic slot index: this bomber's rank among the owner's parking aircraft
+      let rank = 0;
+      for (const e of this.ents.values())
+        if (!e.b && e.owner === u.owner && UNITS[e.type]?.fly && (UNITS[e.type]?.payload || 0) > 0 && e.id < u.id) rank++;
+      const S = AIRFIELD_PLANE;                          // slots per airfield = plane capacity
+      const fi = Math.floor(rank / S), si = rank % S;
+      if (fi >= fields.length) {                         // no apron free → crash-land after 30s aloft
+        u.crashT = (u.crashT || 0) + TICK;
+        if (u.crashT >= 30) { u.hp = 0; this.events.push({ e: 'boom', x: u.x, z: u.z }); }
+        return;
       }
-      if (!pad) { u.path = null; return; } // no pad yet — hover where built
-      // spread parked planes around the pad so they don't pile on one point
-      const ang = (u.id % 8) * (Math.PI / 4), rr = 1.2 + ((u.id >> 3) % 3) * 0.7;
-      const px = pad.x + Math.cos(ang) * rr, pz = pad.z + Math.sin(ang) * rr;
-      if (Math.hypot(u.x - px, u.z - pz) > 0.6) this.moveToward(u, px, pz, def);
-      else { u.path = null; u.grounded = true; } // landed on its spot
+      u.crashT = 0;
+      const f = fields[fi];
+      const cols = Math.max(1, Math.ceil(S / 2));        // a 2-deep parking apron, evenly spread
+      const col = si % cols, row = Math.floor(si / cols);
+      const px = f.x + (cols > 1 ? (col / (cols - 1) - 0.5) * 6.0 : 0); // ~6-wide apron, centred on the field
+      const pz = f.z + (row - 0.5) * 2.6;                // two rows ~2.6 apart
+      if (Math.hypot(u.x - px, u.z - pz) > 0.5) this.moveToward(u, px, pz, def);
+      else { u.path = null; u.grounded = true; }         // landed on its slot
     } else if (ord.k === 'patrol') {
       // defensive stance: engage anything in this unit's vicinity, resume after
       if (def.dmg > 0 && this.tickN % 5 === u.id % 5) {
