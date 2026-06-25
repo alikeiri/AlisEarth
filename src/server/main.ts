@@ -3,11 +3,11 @@
 // Run with: node server.mjs   (PORT env var optional, default 8080)
 
 import { createServer } from 'http';
-import { readFile } from 'fs/promises';
+import { readFile, stat } from 'fs/promises';
 import { readFileSync, writeFileSync, mkdirSync, unlinkSync, readdirSync } from 'fs';
 import { extname, join, normalize } from 'path';
 import { fileURLToPath } from 'url';
-import { randomBytes, scryptSync, createHmac, timingSafeEqual } from 'crypto';
+import { randomBytes, scryptSync, createHmac, timingSafeEqual, createHash } from 'crypto';
 import { WebSocketServer, WebSocket } from 'ws';
 import { performance } from 'perf_hooks';
 import { Sim } from '../sim/sim';
@@ -47,7 +47,28 @@ const MIME: Record<string, string> = {
   '.json': 'application/json',
   '.png': 'image/png', '.ico': 'image/x-icon', '.svg': 'image/svg+xml',
   '.wasm': 'application/wasm', '.map': 'application/json',
+  '.glb': 'model/gltf-binary', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+  '.mp3': 'audio/mpeg', '.ogg': 'audio/ogg', '.webp': 'image/webp', '.woff2': 'font/woff2',
 };
+
+// content-hash ETag, cached by path + mtime + size so a file is hashed only when it
+// actually changes. Lets browsers keep models/textures/audio across sessions and
+// revalidate cheaply: an unchanged file returns 304 (no re-download); only files whose
+// CONTENT changed re-download. Content-based, so a redeploy that touches mtimes alone
+// doesn't bust the cache.
+const etagCache = new Map<string, { key: string; etag: string }>();
+async function fileETag(file: string): Promise<{ etag: string; body?: Buffer } | null> {
+  let st;
+  try { st = await stat(file); } catch { return null; }
+  const key = st.mtimeMs + ':' + st.size;
+  const hit = etagCache.get(file);
+  if (hit && hit.key === key) return { etag: hit.etag };
+  let body: Buffer;
+  try { body = await readFile(file); } catch { return null; }
+  const etag = '"' + createHash('sha1').update(body).digest('base64url') + '"';
+  etagCache.set(file, { key, etag });
+  return { etag, body };
+}
 
 // Claude strategist proxy: the API key stays on the server (ADVISOR_KEY env
 // var); clients POST a battlefield summary and get back {stance, taunt}. The
@@ -458,22 +479,26 @@ const http = createServer(async (req, res) => {
       return;
     }
     if (p === '/') p = '/index.html';
-    const file = normalize(join(DIST, p));
+    let file = normalize(join(DIST, p));
     if (!file.startsWith(DIST)) { res.writeHead(403); res.end(); return; }
-    let body: Buffer;
-    try { body = await readFile(file); }
-    catch { body = await readFile(join(DIST, 'index.html')); p = '/index.html'; }
-    // Cache policy that kills stale builds: index.html is ALWAYS revalidated, so a
-    // reload always picks up the current build, which references the current
-    // content-hashed JS/CSS in /assets (those are immutable — safe to cache for a
-    // year). Other fixed-name assets (models/textures/audio) get a short cache.
+    let tag = await fileETag(file);
+    if (!tag) { p = '/index.html'; file = join(DIST, 'index.html'); tag = await fileETag(file); } // SPA fallback
+    // Cache policy: index.html ALWAYS revalidates (picks up the current build); the
+    // content-hashed JS/CSS in /assets are immutable (cache a year, no request); fixed-
+    // name models/textures/audio are kept by the browser and revalidated via ETag — an
+    // unchanged file is a tiny 304 (NO re-download), only changed/new files re-download.
     const ext = extname(p);
     const cache = ext === '.html'
       ? 'no-cache, must-revalidate'
       : p.startsWith('/assets/')
         ? 'public, max-age=31536000, immutable'
-        : 'public, max-age=600';
-    res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream', 'Cache-Control': cache });
+        : 'no-cache';
+    const etag = tag ? tag.etag : undefined;
+    if (etag && req.headers['if-none-match'] === etag) { // unchanged → 304, browser reuses its cached copy
+      res.writeHead(304, { 'Cache-Control': cache, ETag: etag }); res.end(); return;
+    }
+    const body = (tag && tag.body) || await readFile(file).catch(() => readFile(join(DIST, 'index.html')));
+    res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream', 'Cache-Control': cache, ...(etag ? { ETag: etag } : {}) });
     res.end(body);
   } catch {
     res.writeHead(500); res.end('server error');
