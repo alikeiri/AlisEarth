@@ -950,6 +950,7 @@ function buildingGroup(type: string, teamColor: number): THREE.Group {
 interface FxTracer { x1: number; y1: number; z1: number; x2: number; y2: number; z2: number; t: number }
 interface FxPart { x: number; y: number; z: number; vx: number; vy: number; vz: number; life: number; max: number; s: number }
 interface FxRocket { x0: number; y0: number; z0: number; x1: number; y1: number; z1: number; t: number; delay: number; dur: number; arc: number; noSmoke?: boolean; scale?: number; mid?: number; burst?: number }
+interface FxBomb { x: number; z: number; y0: number; gy: number; t: number; dur: number } // a bomb falling straight down at (x,z) from y0 to ground gy
 
 // graphics quality presets. Everything renders at NATIVE resolution (pr 1.0) so
 // the world is always crisp — earlier sub-native scaling looked blurry. The
@@ -997,6 +998,8 @@ export class Renderer {
   private healMesh!: THREE.InstancedMesh;
   private healParts: FxPart[] = [];
   private rocketMesh!: THREE.InstancedMesh;
+  private bombs: FxBomb[] = [];
+  private bombMesh!: THREE.InstancedMesh;
   private rockets: FxRocket[] = [];
   private smokeMesh!: THREE.InstancedMesh;
   private smokeParts: FxPart[] = [];
@@ -1325,6 +1328,17 @@ export class Renderer {
     this.rocketMesh.frustumCulled = false;
     this.rocketMesh.count = 0;
     this.scene.add(this.rocketMesh);
+    // falling bombs (bombers): a dark teardrop ordnance, nose-down along -Y
+    const bGeo = new THREE.CylinderGeometry(0.05, 0.13, 0.5, 8);
+    this.bombMesh = new THREE.InstancedMesh(
+      bGeo,
+      new THREE.MeshStandardMaterial({ color: 0x23262b, roughness: 0.55, metalness: 0.45 }),
+      64,
+    );
+    this.bombMesh.frustumCulled = false;
+    this.bombMesh.count = 0;
+    this.bombMesh.castShadow = true;
+    this.scene.add(this.bombMesh);
     this.smokeMesh = new THREE.InstancedMesh(
       new THREE.SphereGeometry(0.08, 6, 5),
       new THREE.MeshBasicMaterial({ color: 0x9aa0a4, transparent: true, opacity: 0.42, depthWrite: false }),
@@ -2467,6 +2481,15 @@ export class Renderer {
         const yb = Math.max(this.map.heightAt(ev.x, ev.z), SEA) + 0.8;
         this.smokeParts.push({ x: ev.x, y: yb, z: ev.z, vx: 0, vy: 1.1, vz: 0, life: 0, max: 1.4, s: 2.2 });
         this.spawnParts(ev.x, yb, ev.z, 1, false);
+      } else if (ev.e === 'bombdrop') {
+        // bomber released its stick over the target: a few bomb-shaped objects fall
+        // straight down (gravity), each bursting on the ground on impact (bombs updater)
+        const gy = Math.max(this.map.heightAt(ev.tx, ev.tz), SEA);
+        const y0 = this.flyY(ev.tx, ev.tz, 2.3);   // release altitude = the bomber's cruise line over the target
+        for (let k = 0; k < 3 && this.bombs.length < 64; k++) {
+          const ox = (Math.random() - 0.5) * 1.4, oz = (Math.random() - 0.5) * 1.4;
+          this.bombs.push({ x: ev.tx + ox, z: ev.tz + oz, y0, gy: gy + 0.2, t: 0, dur: 0.55 + Math.random() * 0.12 });
+        }
       } else if (ev.e === 'boom') {
         const y = Math.max(this.map.heightAt(ev.x, ev.z), SEA) + 0.4;
         this.spawnParts(ev.x, y, ev.z, ev.big ? 26 : 12, ev.big);
@@ -2986,6 +3009,23 @@ export class Renderer {
     });
     this.rocketMesh.count = rn;
     this.rocketMesh.instanceMatrix.needsUpdate = true;
+
+    // falling bombs: drop straight down (gravity accel) and burst on the ground
+    let bn = 0;
+    this.bombs = this.bombs.filter(b => {
+      b.t += dt;
+      const p = b.t / b.dur;
+      if (p >= 1) { this.spawnParts(b.x, b.gy + 0.3, b.z, 10, true); return false; } // ground explosion on impact
+      const y = b.y0 + (b.gy - b.y0) * (p * p);  // accelerate as it falls
+      this.dummy.position.set(b.x, y, b.z);
+      this.dummy.rotation.set(0, 0, 0);
+      this.dummy.scale.setScalar(1);
+      this.dummy.updateMatrix();
+      if (bn < 64) this.bombMesh.setMatrixAt(bn++, this.dummy.matrix);
+      return true;
+    });
+    this.bombMesh.count = bn;
+    this.bombMesh.instanceMatrix.needsUpdate = true;
 
     // satellite launches: a big rocket accelerates skyward, trailing fire + smoke
     this.satLaunches = this.satLaunches.filter(s => {

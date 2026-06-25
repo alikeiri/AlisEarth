@@ -2365,7 +2365,9 @@ export class Sim {
       this.dealDamage(u, e, total * (1 - 0.5 * (dist / R)));
     }
     u.ammo = 0;
-    this.events.push({ e: 'boom', x: tgt.x, z: tgt.z, big: true });
+    // bombs fall from the bomber (u) onto the target; the renderer drops the visible
+    // ordnance and bursts each one on the ground (damage above is applied immediately)
+    this.events.push({ e: 'bombdrop', x: u.x, z: u.z, tx: tgt.x, tz: tgt.z });
   }
 
   private tickHarvest(u: Entity, ord: Order, def: any) {
