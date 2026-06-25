@@ -657,9 +657,9 @@ class GameClient {
 
     this.ui = new UI(
       t => { this.ui.setPlacing(this.ui.placing === t ? null : t); audio.play('click'); },
-      t => this.train(t),
+      (t, bulk) => this.train(t, bulk ? 5 : 1),       // Ctrl+click → queue 5 (sim caps to capacity)
       (x, z) => this.renderer.jumpCam(x, z),
-      t => this.cancelTrain(t),
+      (t, bulk) => this.cancelTrain(t, bulk ? 5 : 1), // Ctrl+right-click → drop 5 from the queue
       bid => { this.game.issue({ k: 'upg', p: this.game.me, bid }); audio.play('confirm'); },
       (bid, on) => { this.game.issue({ k: 'repeat', p: this.game.me, bid, on }); audio.play('click'); },
       t => { // chip click: narrow selection to one type
@@ -1149,32 +1149,39 @@ class GameClient {
     return best;
   }
 
-  private train(type: string) {
+  private train(type: string, count = 1) {
     const def = UNITS[type];
     if (!def) return;
     const canMake = (v: any) => v && v.b && v.o === this.game.me && v.pr >= 1 &&
       (v.t === def.builtAt || v.t === def.altBuiltAt);
-    // if a single matching production building is selected, queue on THAT one so
-    // twin factories can each build something different. Otherwise: a primary
-    // building (set via double-click) always wins; else the shortest queue.
+    // pick the production building: a single selected matching one wins (so twin
+    // factories can each build something different), else a primary (double-click) or
+    // the shortest queue. some units (MCV) can come from a second type too (altBuiltAt).
+    let bid = -1;
     if (this.selection.size === 1) {
       const sel = this.byId.get([...this.selection][0]);
-      if (canMake(sel)) { this.game.issue({ k: 'train', p: this.game.me, bid: sel.i, type }); audio.play('click'); return; }
+      if (canMake(sel)) bid = sel.i;
     }
-    // some units (MCV) can come from a second building type too (altBuiltAt)
-    let primary: any = null, best: any = null;
-    for (const v of this.lastViews) {
-      if (!canMake(v)) continue;
-      if (v.pm) primary = v;
-      if (!best || (v.qn || 0) < (best.qn || 0)) best = v;
+    if (bid < 0) {
+      let primary: any = null, best: any = null;
+      for (const v of this.lastViews) {
+        if (!canMake(v)) continue;
+        if (v.pm) primary = v;
+        if (!best || (v.qn || 0) < (best.qn || 0)) best = v;
+      }
+      const tgt = primary || best;
+      if (tgt) bid = tgt.i;
     }
-    const tgt = primary || best;
-    if (tgt) { this.game.issue({ k: 'train', p: this.game.me, bid: tgt.i, type }); audio.play('click'); }
+    if (bid < 0) return;
+    // Ctrl+click queues a batch; the sim validates/caps each one (airfield slots,
+    // 1-per-player heroes, tech/faction/credits), so it adds up to the capacity.
+    for (let i = 0; i < count; i++) this.game.issue({ k: 'train', p: this.game.me, bid, type });
+    audio.play('click');
   }
 
   // right-click a unit button: cancel one queued unit, preferring the SELECTED
   // production building so the queue badge the player is looking at always drops
-  private cancelTrain(type: string) {
+  private cancelTrain(type: string, count = 1) {
     const def = UNITS[type];
     if (!def) return;
     let bid = -1;
@@ -1182,7 +1189,7 @@ class GameClient {
       const sel = this.byId.get([...this.selection][0]);
       if (sel && sel.b && sel.o === this.game.me && (sel.t === def.builtAt || sel.t === def.altBuiltAt) && (sel.qn || 0) > 0) bid = sel.i;
     }
-    this.game.issue({ k: 'cancel', p: this.game.me, type, bid });
+    for (let i = 0; i < count; i++) this.game.issue({ k: 'cancel', p: this.game.me, type, bid }); // Ctrl+right-click drops a batch
     audio.play('cancel');
   }
 
