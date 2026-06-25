@@ -1541,6 +1541,9 @@ export class Sim {
     if (def.attack) {
       const ready = b.cd <= 0;                              // will this shot actually fire?
       b.cd -= TICK;
+      // not enough power → the gun goes offline (no acquire, no fire). Threshold matches
+      // the HUD/minimap low-power line; cd keeps ticking so it resumes the moment power returns.
+      if (this.players[b.owner].power < 50) return;
       const rng = def.attack.range + 0.8 * (b.lvl - 1);
       let tgt = this.findEnemy(b, rng, !!def.noAir);
       // force-fire: lock onto the commanded target (entity OR ground point) for a
@@ -2243,6 +2246,7 @@ export class Sim {
       const def: any = e.b ? BUILDINGS[e.type] : UNITS[e.type];
       if (!def?.intercept || e.hp <= 0) continue;
       if (e.b && e.progress < e.total) continue;            // still under construction
+      if (e.pOff || this.players[e.owner].power < 50) continue; // not enough power → interceptor offline
       if (e.icd && e.icd > 0) e.icd -= TICK;
       ints.push({ e, r2: def.intercept.range * def.intercept.range, cd: def.intercept.cd });
     }

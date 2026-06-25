@@ -329,6 +329,24 @@ function armorTex(): THREE.CanvasTexture {
   return ARMOR;
 }
 
+// defensive buildings that go dark on low power and show the flashing no-power badge
+const NOPOWER_ICON_TYPES = new Set(['sam', 'cannon', 'turret', 'tesla', 'irondome']);
+// "no power" badge: a yellow bolt under a red no-entry ring + slash, on a dark disc
+let NOPWR_TEX: THREE.CanvasTexture | null = null;
+function noPowerIconTex(): THREE.CanvasTexture {
+  if (NOPWR_TEX) return NOPWR_TEX;
+  const cv = document.createElement('canvas'); cv.width = cv.height = 64;
+  const g = cv.getContext('2d')!;
+  g.fillStyle = 'rgba(14,17,21,0.80)'; g.beginPath(); g.arc(32, 32, 30, 0, Math.PI * 2); g.fill();
+  g.fillStyle = '#ffd23a';                                   // lightning bolt
+  g.beginPath(); g.moveTo(37, 12); g.lineTo(20, 36); g.lineTo(30, 36); g.lineTo(27, 52); g.lineTo(46, 27); g.lineTo(34, 27); g.closePath(); g.fill();
+  g.strokeStyle = '#ff3b30'; g.lineWidth = 5; g.lineCap = 'round'; // red no-entry ring + slash
+  g.beginPath(); g.arc(32, 32, 27, 0, Math.PI * 2); g.stroke();
+  g.beginPath(); g.moveTo(14, 14); g.lineTo(50, 50); g.stroke();
+  NOPWR_TEX = new THREE.CanvasTexture(cv); NOPWR_TEX.colorSpace = THREE.SRGBColorSpace;
+  return NOPWR_TEX;
+}
+
 // rounded, beveled base slab for buildings
 function roundedSlabGeo(w: number, d: number, h: number, r = 0.14): THREE.BufferGeometry {
   const s = new THREE.Shape();
@@ -1778,6 +1796,11 @@ export class Renderer {
         }
         g.userData.mixer = mixer;
       }
+      if (NOPOWER_ICON_TYPES.has(type)) {                    // flashing "no power" badge (toggled in updateViews)
+        const spr = new THREE.Sprite(new THREE.SpriteMaterial({ map: noPowerIconTex(), transparent: true, depthTest: false, depthWrite: false }));
+        spr.name = '__noPower'; spr.scale.setScalar(1.7); spr.position.y = 3.6; spr.renderOrder = 999; spr.visible = false;
+        g.add(spr); g.userData.noPowerIcon = spr;
+      }
       return g;
     }
     return buildingGroupPro(type, col);
@@ -2588,11 +2611,15 @@ export class Renderer {
         // radar dish sweeps continuously (procedural building)
         const dish = rec.g.userData.spinDish as THREE.Mesh | undefined;
         if (dish) dish.rotation.z = this.time * 1.4;
+        // low power for this building's owner (shed this tick, or battery under 50)
+        const noPwr = !!v.po || !!(lowPowerOwners && lowPowerOwners.has(v.o));
         // GLB models that ship their own animation clips (radar dish spin, etc.) — advance
-        // them, but freeze when the owner is low on power or this building is shed (v.po):
-        // a stopped radar dish reads as the base browning out
+        // them, but freeze on low power: a stopped radar dish reads as the base browning out
         const mx = rec.g.userData.mixer as THREE.AnimationMixer | undefined;
-        if (mx && !v.po && !(lowPowerOwners && lowPowerOwners.has(v.o))) mx.update(dt);
+        if (mx && !noPwr) mx.update(dt);
+        // defensive buildings go dark on low power → flash a "no power" badge over them
+        const npi = rec.g.userData.noPowerIcon as THREE.Sprite | undefined;
+        if (npi) npi.visible = noPwr && Math.sin(this.time * 6) > 0; // ~1 Hz blink
         if (selection.has(v.i) && selN < MAX_INST) {
           this.dummy.position.set(v.x, y + 0.1, v.z);
           this.dummy.scale.setScalar((v.sz || 1) * 1.6);
