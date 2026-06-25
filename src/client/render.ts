@@ -1742,7 +1742,7 @@ export class Renderer {
       // aimable turrets (Missile Battery, Heavy Cannon): wrap the model in a yaw pivot
       // so it can turn to face its target. The foundation stays on proto (doesn't turn).
       // The number is a per-model facing offset (the model's "forward" axis) — tune visually.
-      const AIMABLE: Record<string, number> = { sam: Math.PI, cannon: 0 }; // facing offset: sam model's front is -Z, so +PI points it at the target
+      const AIMABLE: Record<string, number> = { sam: Math.PI, cannon: Math.PI }; // facing offset: these models' front is -Z, so +PI points them at the target
       const aimable = type in AIMABLE;
       if (aimable) {
         const pivot = new THREE.Group(); pivot.name = '__aimPivot'; pivot.add(inner); proto.add(pivot);
@@ -2388,11 +2388,15 @@ export class Renderer {
           this.spawnParts(ev.tx, wy, ev.tz, 4, false); // impact splash
         } else if (ev.w === 9) {
           // Heavy Cannon emplacement: muzzle flash + a fast shell that arcs to the
-          // target and auto-detonates (the rockets updater spawns the impact burst)
-          this.spawnParts(ev.x, y1 + 0.8, ev.z, 4, false);
+          // target and auto-detonates (the rockets updater spawns the impact burst).
+          // Fire from the barrel muzzle (out front, toward the target it faces), not
+          // the building centre — otherwise the shell looked like it came from behind.
           const dist = Math.hypot(ev.tx - ev.x, ev.tz - ev.z);
+          const ang = Math.atan2(ev.tx - ev.x, ev.tz - ev.z);
+          const mx = ev.x + Math.sin(ang) * 1.6, mz = ev.z + Math.cos(ang) * 1.6;
+          this.spawnParts(mx, y1 + 0.9, mz, 4, false);
           if (this.rockets.length < 64) this.rockets.push({
-            x0: ev.x, y0: y1 + 0.8, z0: ev.z, x1: ev.tx, y1: y2, z1: ev.tz,
+            x0: mx, y0: y1 + 0.9, z0: mz, x1: ev.tx, y1: y2, z1: ev.tz,
             t: 0, delay: 0, dur: Math.max(0.16, dist * 0.022), arc: 0.5 + dist * 0.1,
           });
         } else if (ev.w === 10) {
