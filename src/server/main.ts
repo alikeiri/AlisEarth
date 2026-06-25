@@ -264,7 +264,9 @@ async function handleAuth(req: any, res: any, kind: 'register' | 'login' | 'me')
   if (!b) return json(400, { error: 'Bad request' });
   if (kind === 'me') {
     const p = verifyToken(b.token);
-    return p ? json(200, { email: p.email, callsign: p.callsign }) : json(401, { error: 'Invalid session' });
+    if (!p) return json(401, { error: 'Invalid session' });
+    const u = readUsers()[p.email];                       // expose the admin-granted offline-play entitlement
+    return json(200, { email: p.email, callsign: p.callsign, offline: !!(u && u.offline) });
   }
   const email = String(b.email || '').trim().toLowerCase();
   const pw = String(b.password || '');
@@ -301,7 +303,7 @@ async function handleAuth(req: any, res: any, kind: 'register' | 'login' | 'me')
   u.logins = (u.logins || 0) + 1; u.lastLogin = now; u.lastIp = ip;
   writeUsers(users);
   lookupGeo(ip, email);
-  return json(200, { token: signToken({ email, callsign: u.callsign, exp: now + TOKEN_TTL }), callsign: u.callsign, email });
+  return json(200, { token: signToken({ email, callsign: u.callsign, exp: now + TOKEN_TTL }), callsign: u.callsign, email, offline: !!u.offline });
 }
 
 // client reports a finished match: bump the account's play time + match counters.
@@ -326,11 +328,20 @@ async function handleAdminUsers(req: any, res: any) {
   const b = await readJsonBody(req);
   if (!ADVISOR_KEY || !b || b.key !== ADVISOR_KEY) { res.writeHead(403, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: 'Forbidden' })); return; }
   const users = readUsers();
+  // operator toggles the offline-play (PWA) entitlement for one user
+  if (b.action === 'setOffline') {
+    const em = String(b.email || '').trim().toLowerCase();
+    if (users[em]) { users[em].offline = !!b.on; writeUsers(users); }
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ ok: !!users[em], email: em, offline: !!(users[em] && users[em].offline) }));
+    return;
+  }
   const list = Object.entries(users).map(([email, u]: [string, any]) => ({
     email, callsign: u.callsign || '', created: u.created || 0,
     ip: u.lastIp || u.ip || '', geo: u.geo || '',
     logins: u.logins || 0, lastLogin: u.lastLogin || 0,
     minutesPlayed: u.minutesPlayed || 0, matchesMP: u.matchesMP || 0, matchesAI: u.matchesAI || 0,
+    offline: !!u.offline,
   })).sort((a, b) => (b.lastLogin || b.created) - (a.lastLogin || a.created));
   res.writeHead(200, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify({ users: list, count: list.length }));

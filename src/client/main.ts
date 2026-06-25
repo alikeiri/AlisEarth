@@ -4140,6 +4140,16 @@ function initLanding() {
   // seed the register callsign from whatever's in the name box
   cs.value = ((document.getElementById('nameInput') as HTMLInputElement)?.value || '').trim();
 
+  // offline-play (PWA) entitlement: register a caching service worker for granted users
+  // so Skirmish vs AI launches with no network; revoked/guest → tear it down.
+  const applyOffline = (on: boolean) => {
+    if (!('serviceWorker' in navigator)) return;
+    if (on) { navigator.serviceWorker.register('/sw.js').catch(() => {}); return; }
+    navigator.serviceWorker.getRegistrations?.().then(rs => rs.forEach(r => {
+      try { r.active?.postMessage('fe-offline-off'); } catch { /* ignore */ }
+      r.unregister();
+    })).catch(() => {});
+  };
   const setLoggedIn = (callsign: string) => {
     if (!callsign) return;
     try { safeLS.setItem('fe_callsign', callsign); safeLS.setItem('fe_name', callsign.slice(0, 18)); } catch { /* no storage */ }
@@ -4152,6 +4162,7 @@ function initLanding() {
   };
   const setLoggedOut = () => {
     try { safeLS.removeItem('fe_token'); safeLS.removeItem('fe_callsign'); } catch { /* no storage */ }
+    applyOffline(false); // drop the offline cache/SW on logout
     const a = document.getElementById('lgNavAuth'); if (a) a.textContent = 'Log in';
     const b = document.getElementById('lgShowAuth'); if (b) b.textContent = 'Log in / Sign up';
     el('lgLogout').classList.add('hidden');
@@ -4173,6 +4184,7 @@ function initLanding() {
       if (!r.ok) { errEl.textContent = j.error || 'Something went wrong'; return; }
       try { safeLS.setItem('fe_token', j.token); } catch { /* no storage */ }
       setLoggedIn(j.callsign);
+      applyOffline(!!j.offline); // admin-granted offline play → install the caching SW
       msgEl.textContent = mode === 'register' ? 'Account created — you’re logged in!' : 'Welcome back, ' + j.callsign + '!';
       msgEl.classList.remove('hidden');
       setTimeout(closeAuth, 800);
@@ -4192,7 +4204,7 @@ function initLanding() {
     const tok = safeLS.getItem('fe_token');
     if (tok) {
       fetch('/auth/me', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token: tok }) })
-        .then(r => r.ok ? r.json() : null).then(j => { if (j && j.callsign) setLoggedIn(j.callsign); }).catch(() => { /* offline */ });
+        .then(r => r.ok ? r.json() : null).then(j => { if (j && j.callsign) { setLoggedIn(j.callsign); applyOffline(!!j.offline); } }).catch(() => { /* offline — a previously-installed SW still serves the cached game */ });
     }
   } catch { /* no storage */ }
 }
