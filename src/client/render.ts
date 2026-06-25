@@ -1716,8 +1716,9 @@ export class Renderer {
       // aimable turrets (Missile Battery, Heavy Cannon): wrap the model in a yaw pivot
       // so it can turn to face its target. The foundation stays on proto (doesn't turn).
       // The number is a per-model facing offset (the model's "forward" axis) — tune visually.
-      const AIMABLE: Record<string, number> = { sam: 0, cannon: 0 };
-      if (type in AIMABLE) {
+      const AIMABLE: Record<string, number> = { sam: Math.PI, cannon: 0 }; // facing offset: sam model's front is -Z, so +PI points it at the target
+      const aimable = type in AIMABLE;
+      if (aimable) {
         const pivot = new THREE.Group(); pivot.name = '__aimPivot'; pivot.add(inner); proto.add(pivot);
         this.bldgAimOff[type] = AIMABLE[type];
       } else {
@@ -1726,15 +1727,18 @@ export class Renderer {
       this.bldgFoot[type] = Math.max(size.x, size.z) * s / 2; // scaled half-footprint
       // concrete foundation skirt: a dark slab under the model that extends below
       // the base, so on sloped/bumpy ground the building reads as sitting on a pad
-      // instead of floating or sinking into the terrain
-      const fw = Math.max(size.x, size.z) * s * 0.96;
-      const found = new THREE.Mesh(
-        new THREE.BoxGeometry(fw, 1.4, fw),
-        new THREE.MeshStandardMaterial({ color: 0x6b6f73, roughness: 0.95, metalness: 0.05 }),
-      );
-      found.position.y = -1.4 / 2 + 0.06; // top just above ground, body sunk to fill slope gaps
-      found.castShadow = false; found.receiveShadow = true;
-      proto.add(found);
+      // instead of floating or sinking into the terrain. Skipped for aimable turrets —
+      // the model turns, and a fixed slab under a rotating launcher reads wrong.
+      if (!aimable) {
+        const fw = Math.max(size.x, size.z) * s * 0.96;
+        const found = new THREE.Mesh(
+          new THREE.BoxGeometry(fw, 1.4, fw),
+          new THREE.MeshStandardMaterial({ color: 0x6b6f73, roughness: 0.95, metalness: 0.05 }),
+        );
+        found.position.y = -1.4 / 2 + 0.06; // top just above ground, body sunk to fill slope gaps
+        found.castShadow = false; found.receiveShadow = true;
+        proto.add(found);
+      }
       this.bldgProtos[type] = proto;
       this.refreshBuildingModel(type); // swap any already-placed buildings (e.g. the starting refinery)
     }).catch(() => { /* missing model — keep the procedural building */ });
@@ -2391,17 +2395,22 @@ export class Renderer {
         } else if (ev.w === 12) {
           // Missile Battery (SAM): a pair of guided AA missiles streaking up to the
           // aircraft's altitude (y2 = flyer cruise height via ev.tf), each trailing
-          // smoke; the rockets updater spawns the impact burst on arrival at the target
+          // smoke; the rockets updater spawns the impact burst on arrival at the target.
+          // Launch from the FRONT of the launcher (toward the target, which it faces),
+          // raised to the rails — not from the building centre/back.
           const dist = Math.hypot(ev.tx - ev.x, ev.tz - ev.z);
+          const ang = Math.atan2(ev.tx - ev.x, ev.tz - ev.z);
+          const fx = Math.sin(ang), fz = Math.cos(ang);                  // forward = toward target = the front
+          const lx = ev.x + fx * 1.2, lz = ev.z + fz * 1.2, ly = y1 + 1.2; // muzzle just ahead of the launcher, at rail height
           for (let k = 0; k < 2 && this.rockets.length < 64; k++) {
-            const ox = (Math.random() - 0.5) * 0.5, oz = (Math.random() - 0.5) * 0.5;
+            const ox = (Math.random() - 0.5) * 0.4, oz = (Math.random() - 0.5) * 0.4;
             this.rockets.push({
-              x0: ev.x, y0: y1 + 0.5, z0: ev.z,
+              x0: lx, y0: ly, z0: lz,
               x1: ev.tx + ox, y1: y2, z1: ev.tz + oz,
               t: 0, delay: k * 0.12, dur: Math.max(0.28, dist * 0.025), arc: 0.6,
             });
           }
-          this.spawnParts(ev.x, y1 + 0.6, ev.z, 4, false); // launch flash
+          this.spawnParts(lx, ly, lz, 4, false); // launch flash at the muzzle
         } else {
           if (this.tracers.length < MAX_TRACER) this.tracers.push({ x1: ev.x, y1, z1: ev.z, x2: ev.tx, y2, z2: ev.tz, t: 0.1 });
           this.spawnParts(ev.tx, y2, ev.tz, 2, false);
