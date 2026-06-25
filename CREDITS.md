@@ -22,7 +22,8 @@ CC-BY 3.0 / 4.0 (attribution required — used under these terms):
 - Recon/Strike/Missile Drone ("Drone") — NateGazzard
 - Fighter ("Lockheed Martin F-35 Lightning II") — andertan (Sketchfab, CC-BY 4.0)
 - Bomber / Drone Bomber ("Lowpoly B-2 Spirit bomber") — SIpriv (Sketchfab, CC-BY 4.0)
-- Helicopter ("Mi-24 Helicopter") — Quasar (Sketchfab, CC-BY 4.0)
+- Helicopter ("Low Poly Apache Gunship") — Duane's Mind (@duanesmind) (Sketchfab, CC-BY 4.0) — uses the model's own "Rotor Rotation" animation
+- (retired) Helicopter ("Mi-24 Helicopter") — Quasar (Sketchfab, CC-BY 4.0) — replaced by the Apache
 - Helidrone ("Helicopter") — Poly by Google
 - Gunboat / Naval Drone ("Military Boat") — Zsky
 - Destroyer ("1:1 Low poly US NAVY DDG-51 USS Arleigh Burke") — Yi Tsung Lee (Sketchfab, CC-BY 4.0)
