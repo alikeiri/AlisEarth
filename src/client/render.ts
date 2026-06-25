@@ -1804,8 +1804,10 @@ export class Renderer {
         g.userData.mixer = mixer;
       }
       if (NOPOWER_ICON_TYPES.has(type)) {                    // flashing "no power" badge (toggled in updateViews)
+        const bb = new THREE.Box3().setFromObject(g);        // sit just above the model's actual top
+        const topY = isFinite(bb.max.y) ? bb.max.y : 2;
         const spr = new THREE.Sprite(new THREE.SpriteMaterial({ map: noPowerIconTex(), transparent: true, depthTest: false, depthWrite: false }));
-        spr.name = '__noPower'; spr.scale.setScalar(1.7); spr.position.y = 3.6; spr.renderOrder = 999; spr.visible = false;
+        spr.name = '__noPower'; spr.scale.setScalar(0.8); spr.position.y = topY + 0.35; spr.renderOrder = 999; spr.visible = false;
         g.add(spr); g.userData.noPowerIcon = spr;
       }
       return g;
