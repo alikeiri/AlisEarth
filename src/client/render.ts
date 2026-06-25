@@ -331,6 +331,11 @@ function armorTex(): THREE.CanvasTexture {
 
 // defensive buildings that go dark on low power and show the flashing no-power badge
 const NOPOWER_ICON_TYPES = new Set(['sam', 'cannon', 'turret', 'tesla', 'irondome']);
+// turrets whose GLB ships a looping "showcase" spin we don't want — they orient via the
+// aim pivot instead, so don't auto-play their animation
+const BLDG_NO_AUTOANIM = new Set(['cannon']);
+// remove a model's built-in base/footing mesh (regex on node name) for these types
+const BLDG_HIDE_MESH: Record<string, RegExp> = { cannon: /^Base_01/ };
 // "no power" badge: a yellow bolt under a red no-entry ring + slash, on a dark disc
 let NOPWR_TEX: THREE.CanvasTexture | null = null;
 function noPowerIconTex(): THREE.CanvasTexture {
@@ -1729,6 +1734,8 @@ export class Renderer {
       const s = target / Math.max(0.001, byHeight ? size.y : Math.max(size.x, size.z));
       src.position.set(-ctr.x, -box.min.y, -ctr.z);
       src.traverse(o => { const m = o as any; if (m.isMesh) { m.castShadow = true; m.receiveShadow = true; } });
+      const hideRe = BLDG_HIDE_MESH[type];   // strip a model's built-in concrete footing/base mesh
+      if (hideRe) src.traverse(o => { if ((o as any).isMesh && o.name && hideRe.test(o.name)) o.visible = false; });
       const inner = new THREE.Group(); inner.add(src); inner.scale.setScalar(s);
       const proto = new THREE.Group();
       // aimable turrets (Missile Battery, Heavy Cannon): wrap the model in a yaw pivot
@@ -1781,7 +1788,7 @@ export class Renderer {
       const piv = g.getObjectByName('__aimPivot');   // aimable GLB turret → expose its yaw pivot
       if (piv) g.userData.pivot = piv;
       const clips = this.bldgAnims[type];
-      if (clips && clips.length) {
+      if (clips && clips.length && !BLDG_NO_AUTOANIM.has(type)) {
         // the GLB ships its own animation (e.g. the radar dish spinning) — play it
         // live on this instance. Cheap: buildings are individual clones, not instanced.
         const mixer = new THREE.AnimationMixer(g);
