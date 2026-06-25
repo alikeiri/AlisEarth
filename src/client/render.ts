@@ -926,7 +926,7 @@ function buildingGroup(type: string, teamColor: number): THREE.Group {
 
 interface FxTracer { x1: number; y1: number; z1: number; x2: number; y2: number; z2: number; t: number }
 interface FxPart { x: number; y: number; z: number; vx: number; vy: number; vz: number; life: number; max: number; s: number }
-interface FxRocket { x0: number; y0: number; z0: number; x1: number; y1: number; z1: number; t: number; delay: number; dur: number; arc: number; noSmoke?: boolean; scale?: number; mid?: number }
+interface FxRocket { x0: number; y0: number; z0: number; x1: number; y1: number; z1: number; t: number; delay: number; dur: number; arc: number; noSmoke?: boolean; scale?: number; mid?: number; burst?: number }
 
 // graphics quality presets. Everything renders at NATIVE resolution (pr 1.0) so
 // the world is always crisp — earlier sub-native scaling looked blurry. The
@@ -2450,7 +2450,7 @@ export class Renderer {
         // catch the doomed warhead MID-AIR: find its in-flight rocket, take its
         // current position, delete it (so it never lands), then streak an interceptor
         // missile up from the battery to that point and burst it there
-        let cx = ev.tx, cz = ev.tz, cy = Math.max(this.map.heightAt(ev.tx, ev.tz), SEA) + 3.2;
+        let cx = ev.tx, cz = ev.tz, cy = Math.max(this.map.heightAt(ev.tx, ev.tz), SEA) + 12; // fallback well above ground
         if (ev.mid !== undefined) {
           const inc = this.rockets.find(r => r.mid === ev.mid);
           if (inc) {
@@ -2458,16 +2458,18 @@ export class Renderer {
             cx = inc.x0 + (inc.x1 - inc.x0) * q;
             cz = inc.z0 + (inc.z1 - inc.z0) * q;
             cy = inc.y0 + (inc.y1 - inc.y0) * q + Math.sin(Math.PI * q) * inc.arc;
-            this.rockets = this.rockets.filter(r => r !== inc); // warhead destroyed before impact
+            this.rockets = this.rockets.filter(r => r !== inc); // doomed warhead — remove so it never lands
           }
         }
-        const y1 = Math.max(this.map.heightAt(ev.x, ev.z), SEA) + 0.7;
-        const dist = Math.hypot(cx - ev.x, cz - ev.z);
+        // interceptor streaks UP from the dome's launch tubes to the warhead's mid-air
+        // position and detonates there in a big airburst (burst flag → larger impact)
+        const y1 = Math.max(this.map.heightAt(ev.x, ev.z), SEA) + 1.6;
+        const dist = Math.hypot(cx - ev.x, cz - ev.z) + Math.abs(cy - y1);
+        this.spawnParts(ev.x, y1, ev.z, 5, false); // launch flash at the dome
         if (this.rockets.length < 64) this.rockets.push({ // interceptor missile from the battery
           x0: ev.x, y0: y1, z0: ev.z, x1: cx, y1: cy, z1: cz,
-          t: 0, delay: 0, dur: Math.max(0.18, dist * 0.03), arc: 0.5,
+          t: 0, delay: 0, dur: Math.max(0.4, dist * 0.045), arc: 0.4, burst: 26,
         });
-        this.spawnParts(cx, cy, cz, 16, true); // mid-air airburst at the catch point
       } else if (ev.e === 'empfx') {
         // crackling blue arcs over a stunned unit
         const y = Math.max(this.map.heightAt(ev.x, ev.z), SEA) + 0.6;
@@ -2907,7 +2909,7 @@ export class Renderer {
       const p = (r.t - r.delay) / r.dur;
       if (p < 0) return true;
       if (p >= 1) {
-        this.spawnParts(r.x1, r.y1 + 0.3, r.z1, 7, false); // impact
+        this.spawnParts(r.x1, r.y1 + 0.3, r.z1, r.burst || 7, !!r.burst); // impact (burst = larger airburst, e.g. Iron Dome catch)
         return false;
       }
       const at = (q: number) => ({
