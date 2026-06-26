@@ -12,7 +12,7 @@ import { safeLS } from './store';
 
 // CC0/CC-BY models from poly.pizza (credits in README). size = world units,
 // axis: 'l' scales by length (z after ry), 'h' by height. ry orients +Z forward.
-const MODEL_DEFS: Record<string, { file: string; size: number; axis: 'l' | 'h'; ry: number; y?: number; tint?: number }> = {
+const MODEL_DEFS: Record<string, { file: string; size: number; axis: 'l' | 'h'; ry: number; y?: number; tint?: number; spin?: number }> = {
   // all infantry share one rigged SWAT model (the only one with a full animation
   // set: run cycle + gun-pointing idle); type identity comes from the material
   // tint. Rifle Squad is left UNtinted so it shows the SWAT's native look; the
@@ -33,7 +33,7 @@ const MODEL_DEFS: Record<string, { file: string; size: number; axis: 'l' | 'h'; 
   harv:      { file: 'harv',      size: 1.70, axis: 'l', ry: Math.PI },
   engineer:  { file: 'engineer',  size: 1.35, axis: 'l', ry: Math.PI },
   mcv:       { file: 'harv',      size: 1.90, axis: 'l', ry: Math.PI, tint: 0x4a7ab0 }, // big blue construction rig
-  dozer:     { file: 'harv',      size: 1.55, axis: 'l', ry: Math.PI, tint: 0xe0a526 }, // yellow bulldozer
+  dozer:     { file: 'bulldozer', size: 1.7,  axis: 'l', ry: 0 }, // IDF-style armored bulldozer (Gemini + Tripo3D); own textures, no tint
   recon:     { file: 'drone',     size: 0.90, axis: 'l', ry: 0 },
   strike:    { file: 'drone',     size: 1.25, axis: 'l', ry: 0 },
   msldrone:  { file: 'drone',     size: 1.60, axis: 'l', ry: 0 },
@@ -42,7 +42,8 @@ const MODEL_DEFS: Record<string, { file: string; size: number; axis: 'l' | 'h'; 
   // the wings — quarter-turn nudge puts the prop forward
   bomber:    { file: 'bomber',    size: 2.10, axis: 'l', ry: -Math.PI / 2 },
   dbomber:   { file: 'bomber',    size: 2.40, axis: 'l', ry: -Math.PI / 2 },
-  heli:      { file: 'heli',      size: 1.70, axis: 'l', ry: 0 },
+  heli:      { file: 'apache',    size: 1.70, axis: 'l', ry: 0, spin: 8 }, // Apache Gunship; its own "Rotor Rotation" clip baked into an 8-frame spin
+  airtransport: { file: 'blackhawk', size: 2.10, axis: 'l', ry: 0 }, // UH-60 Black Hawk transport (static GLB — no rotor anim)
   helidrone: { file: 'helidrone', size: 1.20, axis: 'l', ry: 0 },
   gunboat:   { file: 'gunboat',   size: 1.90, axis: 'l', ry: 0 },
   navdrone:  { file: 'gunboat',   size: 1.20, axis: 'l', ry: 0 },
@@ -77,9 +78,7 @@ const MODEL_DEFS: Record<string, { file: string; size: number; axis: 'l' | 'h'; 
 // replaced by the measured model top once the GLB loads. nose props sit at the
 // front of the fuselage and spin around the forward axis.
 const ROTORS: Record<string, { y: number; r: number; speed: number; nose?: boolean; dy?: number }> = {
-  // Mi-24's modeled rotor is static (single-mesh GLB), so spin a procedural rotor
-  // over it. dy drops it from the model's top down onto the rotor mast.
-  heli:      { y: 0.62, r: 1.35, speed: 26, dy: -0.16 },
+  // (heli/Apache spins its OWN modeled rotor via the baked 'Rotor Rotation' clip — no procedural rotor)
   helidrone: { y: 0.80, r: 0.95, speed: 31 },
   recon:     { y: 0.55, r: 0.60, speed: 36 },
   strike:    { y: 0.70, r: 0.85, speed: 33 },
@@ -113,7 +112,7 @@ function loadGLB(file: string): Promise<any> {
 export async function preloadModels(onProgress?: (done: number, total: number) => void): Promise<void> {
   const files = new Set<string>();
   for (const t in MODEL_DEFS) files.add(MODEL_DEFS[t].file);
-  for (const f of ['oilfield', 'powerplant', 'ammobox', 'refinery', 'airfield', 'barracks', 'wall', 'radar', 'lab', 'sam', 'railgun']) files.add(f);
+  for (const f of ['oilfield', 'powerplant', 'ammobox', 'refinery', 'airfield', 'barracks', 'wall', 'radar', 'lab', 'sam', 'railgun', 'conyard']) files.add(f);
   const list = [...files]; let done = 0;
   onProgress?.(0, list.length);
   await Promise.all(list.map(f => loadGLB(f).catch(() => null).then(() => { onProgress?.(++done, list.length); })));
@@ -1225,14 +1224,15 @@ export class Renderer {
     // (factoryProto stays null, the old poly.pizza factory is retired)
     this.loadBuildingModel('factory', 'powerplant', 5.4); // ("RTS Military Building 1" by Sabri Ayeş, Sketchfab, CC-BY) — War Factory 50% larger (3.6 -> 5.4)
     this.loadBuildingModel('power', 'ammobox', 2.4);       // Power Plant GLB ("RTS Ammo Box" by Sabri Ayeş, Sketchfab, CC-BY) — 50% smaller (4.8 -> 2.4)
-    this.loadBuildingModel('refinery', 'refinery', 6.1); // Ore Refinery GLB (Sketchfab, CC-BY) — 30% smaller (8.72 -> 6.1)
-    this.loadBuildingModel('airfield', 'airfield', 8.28);  // Airfield GLB ("RTS Airport" by Sabri Ayeş, Sketchfab, CC-BY) — 75% larger
+    this.loadBuildingModel('refinery', 'refinery', 5.3); // Ore Refinery GLB (Sketchfab, CC-BY) — trimmed so it doesn't overhang the adjacent conyard
+    this.loadBuildingModel('airfield', 'airfield', 5.6);   // Airfield GLB ("RTS Airport" by Sabri Ayeş, Sketchfab, CC-BY) — sized to its 2-cell footprint (was an oversized 8.28 pad)
     this.loadBuildingModel('barracks', 'barracks', 4.5);   // Barracks GLB ("RTS Barracks" by Sabri Ayeş, Sketchfab, CC-BY) — 50% larger
     this.loadBuildingModel('radar', 'radar', 2.83);        // Radar Dome GLB ("RTS Radar Tower" by Sabri Ayeş, Sketchfab, CC-BY) — 30% larger (2.18 -> 2.83)
     this.loadBuildingModel('wall', 'wall', 1.65);          // Wall GLB ("Concrete Barrier HQ" by Sabri Ayeş, Sketchfab, CC-BY) — 50% larger
     this.loadBuildingModel('lab', 'lab', 3.6);             // Research Lab GLB ("ResearchCenter_Building001" by Christian Rudorff, Sketchfab, CC-BY) — 25% smaller (4.8 -> 3.6)
     this.loadBuildingModel('sam', 'sam', 1.9);             // Missile Battery GLB ("MissileTower_Building002" by Christian Rudorff, Sketchfab, CC-BY) — AA missile tower
     this.loadBuildingModel('cannon', 'railgun', 2.4);      // Heavy Cannon GLB ("Railgun Turret" by Yudha Mfr, Sketchfab, CC-BY) — animated; falls back to procedural until railgun.glb is present
+    this.loadBuildingModel('conyard', 'conyard', 4.0);     // Construction Yard GLB (AI-generated via Gemini + Tripo3D) — static fused mesh; trimmed so it sits within its cells and clears the adjacent refinery
     // Oil Rig reuses the oil-well "Oil Pump" model, 25% taller than the free well
     // (well is normalised to 2.0 tall in loadOilModel) so building one just enlarges it
     this.loadBuildingModel('oilrig', 'oilfield', 2.5, true);
@@ -1922,6 +1922,19 @@ export class Renderer {
       bakeAt(rest, rest.duration * 0.5);
       bakeAt(aim === rest ? rest : aim, aim.duration * 0.5);
       if (run) for (const f of [0, 0.25, 0.5, 0.75]) bakeAt(run, run.duration * f);
+    } else if (def.spin && clips.length) {
+      // bake the model's OWN spin clip (e.g. the Apache's "Rotor Rotation") into a
+      // cycle of frames; the render loops them continuously, so it's the model's real
+      // animated rotor — baked so the unit stays GPU-instanced (no live skeleton).
+      const clip = clips.find(c => /rotor|spin|prop/i.test(c.name)) || clips[0];
+      const mixer = new THREE.AnimationMixer(src);
+      for (let f = 0; f < def.spin; f++) {
+        mixer.stopAllAction();
+        mixer.clipAction(clip).reset().play();
+        mixer.setTime(Math.max(0.001, clip.duration * (f / def.spin)));
+        src.updateMatrixWorld(true);
+        poseSets.push(this.collectGeos(src));
+      }
     } else {
       poseSets.push(this.collectGeos(src));
     }
@@ -2701,11 +2714,17 @@ export class Renderer {
       const poses = this.posedParts[v.t];
       let idx: number;
       if (poses) {
-        // 0 = rest, 1 = aim (while firing), 2.. = run cycle
-        let pi = v.fr ? 1 : 0;
-        if (isMoving && poses.length > 2) {
-          const rf = poses.length - 2;
-          pi = 2 + ((Math.floor(this.time * 9) + v.i) % rf);
+        let pi: number;
+        if (MODEL_DEFS[v.t]?.spin) {
+          // rotor/prop spin: cycle through ALL baked frames continuously (always on)
+          pi = (Math.floor(this.time * 20) + v.i) % poses.length;
+        } else {
+          // 0 = rest, 1 = aim (while firing), 2.. = run cycle
+          pi = v.fr ? 1 : 0;
+          if (isMoving && poses.length > 2) {
+            const rf = poses.length - 2;
+            pi = 2 + ((Math.floor(this.time * 9) + v.i) % rf);
+          }
         }
         if (!(pi >= 0 && pi < poses.length)) pi = 0; // NaN / out-of-range safety → rest pose
         parts = poses[pi];

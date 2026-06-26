@@ -611,11 +611,23 @@ export class UI {
     // only units it can make. Picking a unit then queues it on THAT building, so
     // twin factories can each build something different. No selection → full menu.
     let prodFilter: string | null = null;
+    let selQ: Record<string, { n: number; prog: number }> | null = null;
     if (selection && selection.size === 1) {
       const v = views.find(x => x.i === [...selection][0]);
       if (v && v.b && v.o === me && v.pr >= 1 &&
-        ['barracks', 'factory', 'dronefac', 'airforce', 'shipyard', 'silo'].includes(v.t))
+        ['barracks', 'factory', 'dronefac', 'airforce', 'shipyard', 'silo'].includes(v.t)) {
         prodFilter = v.t;
+        // per-building queue: with one factory selected the badges show THAT factory's
+        // queue, not the merged total across all factories of the type — so each
+        // factory's queue reads independently (twin factories build different units)
+        selQ = {};
+        if (v.qq) v.qq.forEach((ty: string, qi: number) => {
+          const q = selQ![ty] || { n: 0, prog: 0 };
+          q.n++;
+          if (qi === 0) q.prog = Math.max(q.prog, v.qt || 0);
+          selQ![ty] = q;
+        });
+      }
     }
     const hdrB = document.getElementById('hdrB'), gridB = document.getElementById('gridB');
     const hdrU = document.getElementById('hdrU');
@@ -651,7 +663,7 @@ export class UI {
       const facHidden = !!def.faction && def.faction !== pl.f && !god;
       const filtHidden = !!prodFilter && def.builtAt !== prodFilter && def.altBuiltAt !== prodFilter;
       this.btns[t].classList.toggle('hidden', techHidden || facHidden || filtHidden);
-      const q = queueByUnit[t];
+      const q = (selQ || queueByUnit)[t]; // selected factory's own queue, else the merged total
       this.styleBtn(t, ok, credits >= cost, cost, q?.n || 0, q?.prog || 0);
       if (def.pad) {
         const tip = counterTip(t);

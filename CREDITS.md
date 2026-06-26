@@ -22,7 +22,8 @@ CC-BY 3.0 / 4.0 (attribution required — used under these terms):
 - Recon/Strike/Missile Drone ("Drone") — NateGazzard
 - Fighter ("Lockheed Martin F-35 Lightning II") — andertan (Sketchfab, CC-BY 4.0)
 - Bomber / Drone Bomber ("Lowpoly B-2 Spirit bomber") — SIpriv (Sketchfab, CC-BY 4.0)
-- Helicopter ("Mi-24 Helicopter") — Quasar (Sketchfab, CC-BY 4.0)
+- Helicopter ("Low Poly Apache Gunship") — Duane's Mind (@duanesmind) (Sketchfab, CC-BY 4.0) — uses the model's own "Rotor Rotation" animation
+- (retired) Helicopter ("Mi-24 Helicopter") — Quasar (Sketchfab, CC-BY 4.0) — replaced by the Apache
 - Helidrone ("Helicopter") — Poly by Google
 - Gunboat / Naval Drone ("Military Boat") — Zsky
 - Destroyer ("1:1 Low poly US NAVY DDG-51 USS Arleigh Burke") — Yi Tsung Lee (Sketchfab, CC-BY 4.0)
@@ -39,6 +40,7 @@ CC-BY 3.0 / 4.0 (attribution required — used under these terms):
 - Wall ("Concrete Barrier HQ") — Sabri Ayeş (Sketchfab, CC-BY 4.0)
 - Patriot SAM ("MIM-104 Patriot Air Defense System") — Muhamad Mirza Arrafi (Sketchfab, CC-BY 4.0)
 - Flak Gun ("Type-625 Anti Aircraft Gun Missile System") — Muhamad Mirza Arrafi (Sketchfab, CC-BY 4.0)
+- Air Transport ("Low Poly UH-60 Black Hawk") — SIpriv (@S1Priv) (Sketchfab, CC-BY 4.0)
 - Oil Field ("Oil pump") — Poly by Google
 - (retired) War Factory ("Factory") — Poly by Google — replaced by RTS Military Building 1
 
@@ -61,6 +63,13 @@ NOTE: the Pixabay Content License and Mixkit Free License are royalty-free but *
 ## UI icons
 - Emoji glyphs (`public/twemoji/`, 83 SVGs) are **Twemoji** by Twitter, licensed
   **CC-BY 4.0** (https://github.com/twitter/twemoji). Attribution required (this entry).
+
+## AI-generated 3D models
+- Construction Yard (`public/models/conyard.glb`) — generated from a Google Gemini
+  reference image via Tripo3D (studio.tripo3d.ai). Project-owned, usable per Gemini +
+  Tripo3D terms; not CC0.
+- Bulldozer (`public/models/bulldozer.glb`) — IDF-style armored bulldozer, generated
+  from a Google Gemini reference image via Tripo3D. Project-owned; not CC0.
 
 ## Hero / marketing art
 - `public/hero.jpg` — generated with Google Gemini. AI-generated imagery: usable per

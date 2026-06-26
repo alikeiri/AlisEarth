@@ -1,7 +1,7 @@
 // Authoritative game simulation. Fixed timestep (10 Hz), no rendering imports.
 // Runs in the browser for skirmish and on the Node server for multiplayer.
 
-import { TICK, UNITS, BUILDINGS, FACTIONS, Faction, dmgMul, AIRFIELD_HELI, AIRFIELD_PLANE, airSlotClass, UPG_MAX, upgCost, ORE_VALUE, START_CREDITS, ORE_REGEN, ORE_REGEN_CAP, TECHS, DRONE_TYPES } from './data';
+import { TICK, UNITS, BUILDINGS, FACTIONS, Faction, dmgMul, AIRFIELD_HELI, AIRFIELD_PLANE, airSlotClass, UPG_MAX, upgCost, ORE_VALUE, START_CREDITS, ORE_REGEN, ORE_REGEN_CAP, TECHS, DRONE_TYPES, SPACING_EXEMPT } from './data';
 import { hyp, dsin, dcos } from './dmath';
 import { GameMap, genMap, nearestPassable, nearestSea, W, H, SEA } from './map';
 import { findPath } from './path';
@@ -329,6 +329,19 @@ export class Sim {
         // harvesters trying to mine it (reported: AI harvesters getting stuck)
         if (this.map.ore[i] > 0) return false;
       }
+    // 1-tile spacing: economy/production buildings can't be placed directly touching
+    // another such building (their models overhang their footprint and overlap).
+    // Walls + defensive structures are exempt so they can still be packed.
+    if (!SPACING_EXEMPT.has(type)) {
+      for (let z = cz - 1; z <= cz + def.size; z++)
+        for (let x = cx - 1; x <= cx + def.size; x++) {
+          if (!this.map.inB(x, z)) continue;
+          const id = this.map.occ[z * W + x];
+          if (!id) continue;
+          const e = this.ents.get(id);
+          if (e && e.b && !SPACING_EXEMPT.has(e.type)) return false;
+        }
+    }
     // shipyards must straddle the coast: water in/around the footprint
     if (type === 'shipyard') {
       let wn = 0;
@@ -1385,17 +1398,15 @@ export class Sim {
     }
   }
 
-  // Mass-production bonus: if another finished building of the same type and owner
-  // is currently producing the same unit, both build 25% faster. Encourages
-  // splitting one unit across twin factories instead of stacking a single queue.
-  private coProdBonus(b: Entity, type: string): number {
-    for (const bb of this.ents.values()) {
-      if (bb === b || !bb.b || bb.owner !== b.owner || bb.type !== b.type) continue;
-      if (bb.progress < bb.total) continue;          // still under construction
-      const h = bb.queue[0];
-      if (h && h.type === type && h.paid !== false) return 1.25; // actively building same unit
-    }
-    return 1;
+  // Mass-production bonus: each ADDITIONAL finished building of the same type and
+  // owner speeds up production by 10%, capped at +50%. More factories = faster builds
+  // (no longer requires a twin to build the SAME unit). `type` is unused but kept for
+  // the call site.
+  private coProdBonus(b: Entity, _type: string): number {
+    let count = 0;
+    for (const bb of this.ents.values())
+      if (bb.b && bb.owner === b.owner && bb.type === b.type && bb.progress >= bb.total) count++;
+    return 1 + Math.min(0.5, 0.1 * Math.max(0, count - 1));
   }
 
   // ---------- buildings ----------
@@ -1482,30 +1493,38 @@ export class Sim {
         if (b.rpt)
           b.queue.push({ type: it.type, t: UNITS[it.type].buildTime, t0: UNITS[it.type].buildTime, paid: false });
       } else if (it.t <= 0) {
+        // units exit from the designated PRIMARY building of this type (double-click)
+        // so production from every factory of the type rallies out of one place;
+        // otherwise from the building that produced them. The queue + repeat stay on b.
+        let exit = b;
+        if (!b.primary) {
+          for (const e of this.ents.values())
+            if (e.b && e.owner === b.owner && e.type === b.type && e.primary && e.progress >= e.total) { exit = e; break; }
+        }
         const c = UNITS[it.type].move === 'sea'
-          ? nearestSea(this.map, b.cx + ((b.size / 2) | 0), b.cz + b.size, 8)
-          : nearestPassable(this.map, b.cx + ((b.size / 2) | 0), b.cz + b.size);
+          ? nearestSea(this.map, exit.cx + ((exit.size / 2) | 0), exit.cz + exit.size, 8)
+          : nearestPassable(this.map, exit.cx + ((exit.size / 2) | 0), exit.cz + exit.size);
         if (c) {
           const u = this.spawnUnit(b.owner, it.type, c.x + 0.5, c.z + 0.5);
           this.stats.builtU[b.owner]++;
-          if (!UNITS[it.type].cargo && b.patPts && b.patPts.length) {
+          if (!UNITS[it.type].cargo && exit.patPts && exit.patPts.length) {
             // building patrol route: new combat units walk the designated beat
-            this.assignPatrol([u], b.patPts, false);
-          } else if (b.rallyX >= 0) {
+            this.assignPatrol([u], exit.patPts, false);
+          } else if (exit.rallyX >= 0) {
             if (UNITS[it.type].cargo) {
               // rally on/near ore: new harvesters mine that field specifically
-              const ord: Order = { k: 'harvest', ox: Math.floor(b.rallyX), oz: Math.floor(b.rallyZ) };
+              const ord: Order = { k: 'harvest', ox: Math.floor(exit.rallyX), oz: Math.floor(exit.rallyZ) };
               const n = this.findOreNear(ord);
               if (n) { ord.ox = n.x; ord.oz = n.z; u.orders = [ord]; }
-              else u.orders = [{ k: 'move', x: b.rallyX, z: b.rallyZ }];
+              else u.orders = [{ k: 'move', x: exit.rallyX, z: exit.rallyZ }];
             } else {
-              u.orders = [{ k: 'move', x: b.rallyX, z: b.rallyZ }];
+              u.orders = [{ k: 'move', x: exit.rallyX, z: exit.rallyZ }];
             }
           } else if (!UNITS[it.type].cargo && !UNITS[it.type].fly && u.orders.length === 0) {
             // no rally/patrol set: drive a couple of cells clear of the building
             // so the new unit is visible instead of hidden in the doorway
             const sx = c.x + 0.5, sz = c.z + 0.5;
-            const dx = sx - b.x, dz = sz - b.z, dl = hyp(dx, dz) || 1;
+            const dx = sx - exit.x, dz = sz - exit.z, dl = hyp(dx, dz) || 1;
             u.orders = [{ k: 'move', x: sx + (dx / dl) * 2.5, z: sz + (dz / dl) * 2.5 }];
           }
           // volley units (Shahed): a single build order launches a whole swarm

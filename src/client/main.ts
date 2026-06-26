@@ -3,7 +3,7 @@
 
 import { Sim } from '../sim/sim';
 import { aiTick } from '../sim/ai';
-import { FACTIONS, BUILDINGS, UNITS, PLAYER_COLORS, SIM_VERSION, UPG_MAX } from '../sim/data';
+import { FACTIONS, BUILDINGS, UNITS, PLAYER_COLORS, SIM_VERSION, UPG_MAX, SPACING_EXEMPT } from '../sim/data';
 import { GameMap, genMap, setMapSize, W, H, MAXD, SEA } from '../sim/map';
 import { Renderer, gfxQuality, preloadModels } from './render';
 import { UI } from './ui';
@@ -176,7 +176,7 @@ class LocalGame implements GameLike {
     if (steelEnabled) seed |= 0x08000000;
     if (metalEnabled) seed |= 0x04000000;
     seed |= (oreLevelSel & 3) << 24;
-    const LVL_NAMES = ['Easy', 'Normal', 'Hard', 'Brutal'];
+    const LVL_NAMES = ['Easy', 'Normal', 'Hard', 'Brutal', 'Bomber Baron'];
     const pickFacs = (avoid: string[], n: number) => {
       const pool = Object.keys(FACTIONS).filter(f => !avoid.includes(f));
       const out: string[] = [];
@@ -548,6 +548,10 @@ function canPlaceClient(map: GameMap, views: any[], me: number, type: string, cx
   for (const v of views) {
     if (!v.b) continue;
     if (v.cx < cx + s && v.cx + v.sz > cx && v.cz < cz + s && v.cz + v.sz > cz) return false;
+    // 1-tile spacing: economy/production buildings can't be placed directly touching
+    // another such building (mirrors sim.canPlace). Walls + defenses are exempt.
+    if (!SPACING_EXEMPT.has(type) && !SPACING_EXEMPT.has(v.t) &&
+        v.cx < cx + s + 1 && v.cx + v.sz > cx - 1 && v.cz < cz + s + 1 && v.cz + v.sz > cz - 1) return false;
     // walls / tank barriers don't anchor placement — can't creep the base out
     // with a chain of cheap walls; a real structure must be within reach
     if (v.o === me && v.t !== 'wall' && v.t !== 'barrier') {
@@ -979,7 +983,9 @@ class GameClient {
     bar.classList.remove('hidden');
     const tap = (act: string, btn: HTMLElement) => {
       const ids = this.myUnitIds();
-      if (act === 'stop') this.issueToUnits({ k: 'stop' });
+      if (act === 'box') { this.touch.boxToggle = !this.touch.boxToggle; btn.classList.toggle('on', this.touch.boxToggle); }
+      else if (act === 'deselect') { this.selection.clear(); this.patrolMode = false; this.patrolDraw = null; this.ui.setPlacing(null); }
+      else if (act === 'stop') this.issueToUnits({ k: 'stop' });
       else if (act === 'hold') { if (ids.length) { const anyAgg = ids.some(id => !this.byId.get(id)?.st); this.game.issue({ k: 'stance', p: this.game.me, ids, stance: anyAgg ? 1 : 0 }); } }
       else if (act === 'holdfire') {
         if (ids.length) { const anyFiring = ids.some(id => !this.byId.get(id)?.hf); this.game.issue({ k: 'holdfire', p: this.game.me, ids, on: anyFiring }); }
@@ -2931,6 +2937,7 @@ function reportPlaystat() {
   }).catch(() => { /* offline — stats are best-effort */ });
 }
 let endReturnsToLobby = false; // a finished multiplayer match sends players back to the lobby
+let lastRoomCode = ''; // remember the current room so "back to lobby" can rejoin it after a match
 
 // One guided step. `target` is a CSS selector to spotlight; `done` is an optional
 // predicate over the live game that auto-advances when satisfied — every step
@@ -3048,7 +3055,7 @@ function renderAiList() {
   list.innerHTML = aiList.map((ai, i) => {
     const dot = `<span style="width:10px;height:10px;border-radius:50%;flex:0 0 auto;background:${TEAM_TINT[(ai.team - 1) % 4]}"></span>`;
     const lvl = `<select data-i="${i}" class="aiLvl" style="${selStyle};flex:1">` +
-      ['Easy', 'Normal', 'Hard', 'Brutal'].map((n, v) => `<option value="${v}" ${v === ai.lvl ? 'selected' : ''}>${n}</option>`).join('') + '</select>';
+      ['Easy', 'Normal', 'Hard', 'Brutal', 'Bomber Baron'].map((n, v) => `<option value="${v}" ${v === ai.lvl ? 'selected' : ''}>${n}</option>`).join('') + '</select>';
     const team = `<select data-i="${i}" class="aiTeam" style="${selStyle};flex:1">` +
       [1, 2, 3, 4].map(t => `<option value="${t}" ${t === ai.team ? 'selected' : ''}>${t === 1 ? '🤝 Your team' : '⚔ Enemy ' + t}</option>`).join('') + '</select>';
     return `<div style="display:flex;gap:6px;align-items:center">${dot}` +
@@ -3773,7 +3780,7 @@ function renderLcAi() {
 async function connectNet(): Promise<Net> {
   const n = new Net();
   await n.connect();
-  n.on('room', (m: any) => { renderRoom(m); show('lobby'); });
+  n.on('room', (m: any) => { if (m.code) lastRoomCode = m.code; renderRoom(m); show('lobby'); });
   n.on('start', (m: any) => {
     setMapSize(m.size || 96);
     if (typeof m.fog === 'boolean') fogEnabled = m.fog; // host's lobby fog choice applies to all
@@ -4054,12 +4061,26 @@ function initMenus() {
   // socket + fresh handlers); single-player/replay just reloads to the menu
   $('btnAgain').addEventListener('click', async () => {
     if (endReturnsToLobby) {
+      // multiplayer: ask the server to reset the room to a fresh lobby, then reconnect
+      // (for a clean socket + handlers) and REJOIN the same room — players land back in
+      // the lobby together and can immediately start another match
       endReturnsToLobby = false;
-      if (client) { client.destroy(); client = null; } // also closes the old socket
+      try { net?.send({ t: 'backToLobby' }); } catch { /* socket already gone */ }
+      if (client) { client.destroy(); client = null; } // closes the old socket
+      show('menu'); // transient; the 'room' event switches to the lobby on rejoin
+      try {
+        net = await connectNet();
+        net.send({ t: 'hello', name: playerName(), faction: selFaction });
+        if (lastRoomCode) net.send({ t: 'join', code: lastRoomCode });
+      } catch { location.reload(); }
+    } else {
+      // single-player / replay: tear down and return to the game MENU — NOT a full page
+      // reload, which would drop the player back on the landing page
+      if (client) { client.destroy(); client = null; }
+      simQueue = null;
+      if (tutCtl) { tutCtl.stop(); tutCtl = null; }
       show('menu');
-      try { net = await connectNet(); net.send({ t: 'hello', name: playerName(), faction: selFaction }); }
-      catch { location.reload(); }
-    } else location.reload();
+    }
   });
   // Exit → choice popup: Surrender (a defeat), Just Exit (no result), or Cancel
   const exitMenu = $('exitMenu');

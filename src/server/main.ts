@@ -3,11 +3,11 @@
 // Run with: node server.mjs   (PORT env var optional, default 8080)
 
 import { createServer } from 'http';
-import { readFile } from 'fs/promises';
+import { readFile, stat } from 'fs/promises';
 import { readFileSync, writeFileSync, mkdirSync, unlinkSync, readdirSync } from 'fs';
 import { extname, join, normalize } from 'path';
 import { fileURLToPath } from 'url';
-import { randomBytes, scryptSync, createHmac, timingSafeEqual } from 'crypto';
+import { randomBytes, scryptSync, createHmac, timingSafeEqual, createHash } from 'crypto';
 import { WebSocketServer, WebSocket } from 'ws';
 import { performance } from 'perf_hooks';
 import { Sim } from '../sim/sim';
@@ -47,7 +47,28 @@ const MIME: Record<string, string> = {
   '.json': 'application/json',
   '.png': 'image/png', '.ico': 'image/x-icon', '.svg': 'image/svg+xml',
   '.wasm': 'application/wasm', '.map': 'application/json',
+  '.glb': 'model/gltf-binary', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+  '.mp3': 'audio/mpeg', '.ogg': 'audio/ogg', '.webp': 'image/webp', '.woff2': 'font/woff2',
 };
+
+// content-hash ETag, cached by path + mtime + size so a file is hashed only when it
+// actually changes. Lets browsers keep models/textures/audio across sessions and
+// revalidate cheaply: an unchanged file returns 304 (no re-download); only files whose
+// CONTENT changed re-download. Content-based, so a redeploy that touches mtimes alone
+// doesn't bust the cache.
+const etagCache = new Map<string, { key: string; etag: string }>();
+async function fileETag(file: string): Promise<{ etag: string; body?: Buffer } | null> {
+  let st;
+  try { st = await stat(file); } catch { return null; }
+  const key = st.mtimeMs + ':' + st.size;
+  const hit = etagCache.get(file);
+  if (hit && hit.key === key) return { etag: hit.etag };
+  let body: Buffer;
+  try { body = await readFile(file); } catch { return null; }
+  const etag = '"' + createHash('sha1').update(body).digest('base64url') + '"';
+  etagCache.set(file, { key, etag });
+  return { etag, body };
+}
 
 // Claude strategist proxy: the API key stays on the server (ADVISOR_KEY env
 // var); clients POST a battlefield summary and get back {stance, taunt}. The
@@ -458,22 +479,26 @@ const http = createServer(async (req, res) => {
       return;
     }
     if (p === '/') p = '/index.html';
-    const file = normalize(join(DIST, p));
+    let file = normalize(join(DIST, p));
     if (!file.startsWith(DIST)) { res.writeHead(403); res.end(); return; }
-    let body: Buffer;
-    try { body = await readFile(file); }
-    catch { body = await readFile(join(DIST, 'index.html')); p = '/index.html'; }
-    // Cache policy that kills stale builds: index.html is ALWAYS revalidated, so a
-    // reload always picks up the current build, which references the current
-    // content-hashed JS/CSS in /assets (those are immutable — safe to cache for a
-    // year). Other fixed-name assets (models/textures/audio) get a short cache.
+    let tag = await fileETag(file);
+    if (!tag) { p = '/index.html'; file = join(DIST, 'index.html'); tag = await fileETag(file); } // SPA fallback
+    // Cache policy: index.html ALWAYS revalidates (picks up the current build); the
+    // content-hashed JS/CSS in /assets are immutable (cache a year, no request); fixed-
+    // name models/textures/audio are kept by the browser and revalidated via ETag — an
+    // unchanged file is a tiny 304 (NO re-download), only changed/new files re-download.
     const ext = extname(p);
     const cache = ext === '.html'
       ? 'no-cache, must-revalidate'
       : p.startsWith('/assets/')
         ? 'public, max-age=31536000, immutable'
-        : 'public, max-age=600';
-    res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream', 'Cache-Control': cache });
+        : 'no-cache';
+    const etag = tag ? tag.etag : undefined;
+    if (etag && req.headers['if-none-match'] === etag) { // unchanged → 304, browser reuses its cached copy
+      res.writeHead(304, { 'Cache-Control': cache, ETag: etag }); res.end(); return;
+    }
+    const body = (tag && tag.body) || await readFile(file).catch(() => readFile(join(DIST, 'index.html')));
+    res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream', 'Cache-Control': cache, ...(etag ? { ETag: etag } : {}) });
     res.end(body);
   } catch {
     res.writeHead(500); res.end('server error');
@@ -491,6 +516,7 @@ interface Room {
   dropVote?: { player: number; votes: Map<number, number> }; // lockstep: drop-tick consensus
   rec?: { seed: number; size: number; players: any[]; cmds: { k: number; c: any[] }[] };
   lastReport?: any; replaySaved?: boolean;
+  postGame?: boolean; // a match just finished: the room lingers (even if briefly empty) so players can rejoin the lobby for a rematch
 }
 const rooms = new Map<string, Room>();
 // valid map types (mirrors the client's Map Type dropdown). The client actually
@@ -735,20 +761,20 @@ function departMidGame(room: Room, leaverSlot: number) {
 
 function startRoom(room: Room) {
   if (room.started || !room.clients.length) return;
-  room.started = true;
+  room.started = true; room.postGame = false; // a live game: normal mid-game disconnect cleanup applies
   // humans first (carry their lobby-assigned team; FFA default = slot+1)
   const specs: { name: string; faction: string; isAI?: boolean; aiLvl?: number; team: number }[] =
     room.clients.map((c, i) => ({ name: c.name, faction: c.faction, team: (room.teams && room.teams[i]) || (i + 1) }));
   room.aiSlots = [];
   const facs = Object.keys(FACTIONS);
-  const lvlName = (lv: number) => ['Easy', 'Normal', 'Hard', 'Brutal'][lv] || 'Normal';
+  const lvlName = (lv: number) => ['Easy', 'Normal', 'Hard', 'Brutal', 'Bomber Baron'][lv] || 'Normal';
   const usedFac = new Set(specs.map(s => s.faction));
   // host-configured AI fill (lobby)
   for (const a of (room.ai || []).slice(0, 3)) {
     let f = a.faction && FACTIONS[a.faction] ? a.faction : facs[(Math.random() * facs.length) | 0];
     let guard = 0; while (usedFac.has(f) && guard++ < 16) f = facs[(Math.random() * facs.length) | 0];
     usedFac.add(f);
-    const lv = Math.max(0, Math.min(3, a.lvl | 0));
+    const lv = Math.max(0, Math.min(4, a.lvl | 0));
     room.aiSlots.push(specs.length);
     specs.push({ name: `AI ${FACTIONS[f].name} (${lvlName(lv)})`, faction: f, isAI: true, aiLvl: lv, team: Math.min(8, Math.max(1, a.team | 0)) || 2 });
   }
@@ -907,7 +933,7 @@ wss.on('connection', ws => {
       room = {
         code, clients: [me], started: false, sim: null, timer: null, cmdQ: [], aiSlots: [],
         size: [96, 128, 160, 192].includes(m.size) ? m.size : 96,
-        diff: Number.isInteger(m.diff) && m.diff >= 0 && m.diff <= 3 ? m.diff : 1,
+        diff: Number.isInteger(m.diff) && m.diff >= 0 && m.diff <= 4 ? m.diff : 1,
         islands: !!m.islands,
         urban: !!m.urban,
         flat: !!m.flat,
@@ -948,6 +974,20 @@ wss.on('connection', ws => {
         send(ws, lobbyState());
         broadcastLobby();
       }
+    } else if (m.t === 'backToLobby') {
+      // a finished match: reset the room to a fresh lobby (works for both snapshot and
+      // lockstep, which has no server sim) so the same players can start another game.
+      // Mark it postGame so it survives the brief empty window while everyone reconnects
+      // (back-to-lobby closes the game socket and rejoins by code).
+      if (room && me) {
+        if (room.timer) { clearInterval(room.timer); room.timer = null; }
+        room.started = false; room.sim = null; room.cmdQ = []; room.aiSlots = [];
+        room.rec = null; room.replaySaved = false; room.dropVote = undefined; room.postGame = true;
+        const rc = room.code;
+        setTimeout(() => { const r = rooms.get(rc); if (r && !r.clients.length) rooms.delete(rc); }, 90000);
+        sendRoom(room);
+        broadcastLobby();
+      }
     } else if (m.t === 'roomcfg') {
       // host configures the match in the lobby: map, fog, AI fill, teams
       if (!room || !me || me.slot !== 0 || room.started) return;
@@ -959,7 +999,7 @@ wss.on('connection', ws => {
       }
       if (m.oreLevel !== undefined) room.oreLevel = (m.oreLevel | 0) & 3;
       if (typeof m.fog === 'boolean') room.fog = m.fog;
-      if (Array.isArray(m.ai)) room.ai = m.ai.slice(0, 3).map((a: any) => ({ lvl: Math.max(0, Math.min(3, a.lvl | 0)), team: Math.min(8, Math.max(1, a.team | 0)) || 2 }));
+      if (Array.isArray(m.ai)) room.ai = m.ai.slice(0, 3).map((a: any) => ({ lvl: Math.max(0, Math.min(4, a.lvl | 0)), team: Math.min(8, Math.max(1, a.team | 0)) || 2 }));
       if (Array.isArray(m.teams)) room.teams = m.teams.slice(0, room.clients.length).map((t: any) => Math.min(8, Math.max(1, t | 0)) || 1);
       sendRoom(room);
       broadcastLobby();
@@ -1031,7 +1071,8 @@ wss.on('connection', ws => {
       if (room.started && room.sim && !room.sim.done) {
         if (room.sim.tickN > 600 && !room.sim.cheated) saveReplay(room);
       }
-      rooms.delete(room.code);
+      if (!room.postGame) rooms.delete(room.code); // a post-game room lingers ~90s so players can reconnect and rejoin for a rematch
+      else if (room.timer) { clearInterval(room.timer); room.timer = null; }
     } else if (!room.started) {
       // still in the lobby: compact the slots so the remaining players reindex
       room.clients.forEach((c, i) => { c.slot = i; });
