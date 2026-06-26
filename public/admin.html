@@ -62,7 +62,9 @@
   .p-not_fixed { color: #ff8a7a; background: #2e1414; border-color: #5a2424; }
   .p-ready_test { color: #c8a6ff; background: #1d1733; border-color: #3c2f63; }
   .p-ready_prod { color: #7df0c0; background: #0f2d23; border-color: #1c5a44; }
+  .p-resolved { color: #9aa9b5; background: #1c2228; border-color: #2f3a44; }
   .rm-row.s-not_fixed { border-left: 3px solid #d2453a; }
+  .rm-row.s-resolved { opacity: 0.6; }
   .rm-note { font-size: 12px; color: #ffb4a8; background: #2410100f; margin: 4px 0 2px; line-height: 1.4; }
   select.statusSel { font-size: 12px; padding: 4px 8px; }
   .rm-actions { display: flex; gap: 8px; align-items: center; }
@@ -121,6 +123,7 @@
           <option value="not_fixed">⚠ Not Fixed</option>
           <option value="ready_test">Ready to Test</option>
           <option value="ready_prod">Ready for Production</option>
+          <option value="resolved">✓ Resolved Already</option>
         </select>
         <select id="rmCatFilter"><option value="">All categories</option></select>
         <input class="search" id="rmSearch" placeholder="Search items…" />
@@ -201,8 +204,8 @@
   });
 
   /* ---------------- ROADMAP ---------------- */
-  let RM = [], rmStatuses = ['backlog','ready_build','in_progress','not_fixed','ready_test','ready_prod'];
-  const ST_LABEL = { backlog:'Backlog', ready_build:'Ready for Build', in_progress:'In Progress', not_fixed:'⚠ Not Fixed', ready_test:'Ready to Test', ready_prod:'Ready for Production' };
+  let RM = [], rmStatuses = ['backlog','ready_build','in_progress','not_fixed','ready_test','ready_prod','resolved'];
+  const ST_LABEL = { backlog:'Backlog', ready_build:'Ready for Build', in_progress:'In Progress', not_fixed:'⚠ Not Fixed', ready_test:'Ready to Test', ready_prod:'Ready for Production', resolved:'✓ Resolved Already' };
   const DEP_LABEL = { '':'– not deployed', test:'● Test', prod:'● Production' };
 
   async function loadRoadmap() {
