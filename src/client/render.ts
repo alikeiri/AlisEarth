@@ -368,11 +368,10 @@ function primaryStarTex(): THREE.CanvasTexture {
   return STAR_TEX;
 }
 const PRIMARY_STAR_TYPES = new Set(['barracks', 'factory', 'dronefac', 'airforce', 'shipyard']);
-// fortified infantry lie prone — the Death-clip frames flipped over so the soldier is
-// face-down and aiming instead of dead-on-back. Tunable while we dial in the look.
-const PRONE_ROLL = Math.PI; // flip 180° around the body's forward axis (on-back -> prone)
-const PRONE_PITCH = 0;      // extra nose-up/down tilt of the lying body
-const PRONE_Y = 0.17;       // lift the flipped body back onto the ground (the roll pivots it ~0.17 under)
+// fortified infantry go prone-firing: the AIM stance tipped forward onto its belly, so it
+// reads as a soldier lying down and aiming. fortAnim ramps the tip in/out (dig-in/get-up).
+const PRONE_PITCH = Math.PI / 2; // fully prone = tip the aim stance 90° forward
+const PRONE_Y = 0.0;             // lift so the chest rests on the ground (measured below)
 
 // rounded, beveled base slab for buildings
 function roundedSlabGeo(w: number, d: number, h: number, r = 0.14): THREE.BufferGeometry {
@@ -2792,28 +2791,22 @@ export class Renderer {
       // posed infantry pick a frame: aim stance when standing (firing happens
       // standing), run-cycle frames 1..N while moving
       const poses = this.posedParts[v.t];
-      const dparts = this.deathParts[v.t];
       let idx: number;
-      // fortified infantry dig in PRONE: reuse the Death-clip frames (flipped over below)
-      // — the dig-in animation is the death fall, the get-up is it reversed.
-      let prone = false;
-      if (dparts && UNITS[v.t]?.kind === 'inf' && v.t !== 'hive') {
+      // fortified infantry go PRONE-FIRING: render the AIM stance and tip it forward onto
+      // its belly (in the matrix below). fortAnim ramps the tip 0->1 (dig in) / 1->0 (get up).
+      let proneP = 0;
+      if (poses && poses.length >= 2 && UNITS[v.t]?.kind === 'inf' && v.t !== 'hive') {
         const target = (v.fo || v.ft) ? 1 : 0;
         let fp = this.fortAnim.get(v.i);
         if (fp === undefined) fp = target;             // first sight: snap to current state, no pop
         fp += (target - fp) * Math.min(1, dt * 2.5);   // ease the dig-in / get-up over ~0.6s
-        if (fp > 0.02) {
-          this.fortAnim.set(v.i, fp);
-          const fi = Math.min(dparts.length - 1, Math.floor(fp * dparts.length));
-          parts = dparts[fi];
-          idx = this.deathCounts[v.t][fi];
-          if (idx >= MAX_INST) continue;
-          this.deathCounts[v.t][fi] = idx + 1;
-          prone = true;
-        } else { this.fortAnim.delete(v.i); }
+        if (fp > 0.01) { this.fortAnim.set(v.i, fp); proneP = fp; } else this.fortAnim.delete(v.i);
       }
-      if (prone) {
-        // parts/idx already chosen from the death frames above
+      if (proneP > 0.01) {
+        parts = poses![1]; // aim stance — laid flat in the matrix block
+        idx = this.poseCounts[v.t][1];
+        if (idx >= MAX_INST) continue;
+        this.poseCounts[v.t][1] = idx + 1;
       } else if (poses) {
         let pi: number;
         if (MODEL_DEFS[v.t]?.spin) {
@@ -2885,11 +2878,11 @@ export class Renderer {
         y += Math.abs(Math.sin(ph)) * 0.055 * k;
         rollZ = Math.sin(ph) * 0.05 * k;
       }
-      this.dummy.position.set(v.x, y + (prone ? PRONE_Y : 0), v.z);
-      if (prone) {
-        // face the aim direction, then flip the body over so it lies prone (aiming), not on its back
+      this.dummy.position.set(v.x, y + PRONE_Y * proneP, v.z);
+      if (proneP > 0.01) {
+        // face the aim direction, then tip the aiming soldier forward onto its belly
         this.qTmp.setFromEuler(this.eTmp.set(0, f.a, 0));
-        this.qTmp2.setFromEuler(this.eTmp.set(PRONE_PITCH, 0, PRONE_ROLL));
+        this.qTmp2.setFromEuler(this.eTmp.set(PRONE_PITCH * proneP, 0, 0));
         this.qTmp.multiply(this.qTmp2);
         this.dummy.quaternion.copy(this.qTmp);
       } else {
