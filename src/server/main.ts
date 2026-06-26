@@ -516,6 +516,7 @@ interface Room {
   dropVote?: { player: number; votes: Map<number, number> }; // lockstep: drop-tick consensus
   rec?: { seed: number; size: number; players: any[]; cmds: { k: number; c: any[] }[] };
   lastReport?: any; replaySaved?: boolean;
+  postGame?: boolean; // a match just finished: the room lingers (even if briefly empty) so players can rejoin the lobby for a rematch
 }
 const rooms = new Map<string, Room>();
 // valid map types (mirrors the client's Map Type dropdown). The client actually
@@ -760,7 +761,7 @@ function departMidGame(room: Room, leaverSlot: number) {
 
 function startRoom(room: Room) {
   if (room.started || !room.clients.length) return;
-  room.started = true;
+  room.started = true; room.postGame = false; // a live game: normal mid-game disconnect cleanup applies
   // humans first (carry their lobby-assigned team; FFA default = slot+1)
   const specs: { name: string; faction: string; isAI?: boolean; aiLvl?: number; team: number }[] =
     room.clients.map((c, i) => ({ name: c.name, faction: c.faction, team: (room.teams && room.teams[i]) || (i + 1) }));
@@ -973,6 +974,20 @@ wss.on('connection', ws => {
         send(ws, lobbyState());
         broadcastLobby();
       }
+    } else if (m.t === 'backToLobby') {
+      // a finished match: reset the room to a fresh lobby (works for both snapshot and
+      // lockstep, which has no server sim) so the same players can start another game.
+      // Mark it postGame so it survives the brief empty window while everyone reconnects
+      // (back-to-lobby closes the game socket and rejoins by code).
+      if (room && me) {
+        if (room.timer) { clearInterval(room.timer); room.timer = null; }
+        room.started = false; room.sim = null; room.cmdQ = []; room.aiSlots = [];
+        room.rec = null; room.replaySaved = false; room.dropVote = undefined; room.postGame = true;
+        const rc = room.code;
+        setTimeout(() => { const r = rooms.get(rc); if (r && !r.clients.length) rooms.delete(rc); }, 90000);
+        sendRoom(room);
+        broadcastLobby();
+      }
     } else if (m.t === 'roomcfg') {
       // host configures the match in the lobby: map, fog, AI fill, teams
       if (!room || !me || me.slot !== 0 || room.started) return;
@@ -1056,7 +1071,8 @@ wss.on('connection', ws => {
       if (room.started && room.sim && !room.sim.done) {
         if (room.sim.tickN > 600 && !room.sim.cheated) saveReplay(room);
       }
-      rooms.delete(room.code);
+      if (!room.postGame) rooms.delete(room.code); // a post-game room lingers ~90s so players can reconnect and rejoin for a rematch
+      else if (room.timer) { clearInterval(room.timer); room.timer = null; }
     } else if (!room.started) {
       // still in the lobby: compact the slots so the remaining players reindex
       room.clients.forEach((c, i) => { c.slot = i; });

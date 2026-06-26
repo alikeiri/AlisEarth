@@ -2931,6 +2931,7 @@ function reportPlaystat() {
   }).catch(() => { /* offline — stats are best-effort */ });
 }
 let endReturnsToLobby = false; // a finished multiplayer match sends players back to the lobby
+let lastRoomCode = ''; // remember the current room so "back to lobby" can rejoin it after a match
 
 // One guided step. `target` is a CSS selector to spotlight; `done` is an optional
 // predicate over the live game that auto-advances when satisfied — every step
@@ -3773,7 +3774,7 @@ function renderLcAi() {
 async function connectNet(): Promise<Net> {
   const n = new Net();
   await n.connect();
-  n.on('room', (m: any) => { renderRoom(m); show('lobby'); });
+  n.on('room', (m: any) => { if (m.code) lastRoomCode = m.code; renderRoom(m); show('lobby'); });
   n.on('start', (m: any) => {
     setMapSize(m.size || 96);
     if (typeof m.fog === 'boolean') fogEnabled = m.fog; // host's lobby fog choice applies to all
@@ -4054,12 +4055,26 @@ function initMenus() {
   // socket + fresh handlers); single-player/replay just reloads to the menu
   $('btnAgain').addEventListener('click', async () => {
     if (endReturnsToLobby) {
+      // multiplayer: ask the server to reset the room to a fresh lobby, then reconnect
+      // (for a clean socket + handlers) and REJOIN the same room — players land back in
+      // the lobby together and can immediately start another match
       endReturnsToLobby = false;
-      if (client) { client.destroy(); client = null; } // also closes the old socket
+      try { net?.send({ t: 'backToLobby' }); } catch { /* socket already gone */ }
+      if (client) { client.destroy(); client = null; } // closes the old socket
+      show('menu'); // transient; the 'room' event switches to the lobby on rejoin
+      try {
+        net = await connectNet();
+        net.send({ t: 'hello', name: playerName(), faction: selFaction });
+        if (lastRoomCode) net.send({ t: 'join', code: lastRoomCode });
+      } catch { location.reload(); }
+    } else {
+      // single-player / replay: tear down and return to the game MENU — NOT a full page
+      // reload, which would drop the player back on the landing page
+      if (client) { client.destroy(); client = null; }
+      simQueue = null;
+      if (tutCtl) { tutCtl.stop(); tutCtl = null; }
       show('menu');
-      try { net = await connectNet(); net.send({ t: 'hello', name: playerName(), faction: selFaction }); }
-      catch { location.reload(); }
-    } else location.reload();
+    }
   });
   // Exit → choice popup: Surrender (a defeat), Just Exit (no result), or Cancel
   const exitMenu = $('exitMenu');
