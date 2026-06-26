@@ -57,6 +57,7 @@ const MODEL_DEFS: Record<string, { file: string; size: number; axis: 'l' | 'h'; 
   minidrone:   { file: 'drone',    size: 0.55, axis: 'l', ry: 0 },
   chemtrooper: { file: 'rocket',   size: 1.15, axis: 'h', ry: 0, tint: 0xa8b23c },
   biotrooper:  { file: 'rocket',   size: 1.15, axis: 'h', ry: 0, tint: 0x8a5cab },
+  interceptor: { file: 'rocket',   size: 1.15, axis: 'h', ry: 0, tint: 0x2fd6c8 }, // anti-drone team — teal/tech tint
   chemtank:    { file: 'tank',     size: 1.50, axis: 'l', ry: 0 },
   biotank:     { file: 'tank',     size: 1.55, axis: 'l', ry: 0 },
   stealthtank: { file: 'tank',     size: 1.55, axis: 'l', ry: 0 },
@@ -2521,6 +2522,20 @@ export class Renderer {
             });
           }
           this.spawnParts(lx, ly, lz, 4, false); // launch flash at the muzzle
+        } else if (ev.w === 13) {
+          // Interceptor Team: a little swarm of tiny drones darting up to the aircraft
+          // (y2 = flyer cruise height via ev.tf) — small, fast, no smoke trail
+          const dist = Math.hypot(ev.tx - ev.x, ev.tz - ev.z);
+          const ly = y1 + 0.4; // out of the trooper's hands
+          for (let k = 0; k < 3 && this.rockets.length < 64; k++) {
+            const ox = (Math.random() - 0.5) * 0.8, oz = (Math.random() - 0.5) * 0.8;
+            this.rockets.push({
+              x0: ev.x + (Math.random() - 0.5) * 0.3, y0: ly, z0: ev.z + (Math.random() - 0.5) * 0.3,
+              x1: ev.tx + ox, y1: y2, z1: ev.tz + oz,
+              t: 0, delay: k * 0.05, dur: Math.max(0.18, dist * 0.018), arc: 0.12, noSmoke: true, scale: 0.5,
+            });
+          }
+          this.spawnParts(ev.x, ly, ev.z, 2, false);
         } else {
           if (this.tracers.length < MAX_TRACER) this.tracers.push({ x1: ev.x, y1, z1: ev.z, x2: ev.tx, y2, z2: ev.tz, t: 0.1 });
           this.spawnParts(ev.tx, y2, ev.tz, 2, false);

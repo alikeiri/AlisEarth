@@ -110,6 +110,10 @@ export const UNITS: Record<string, UnitDef> = {
   // mobile anti-air pair: missile AA hunts airplanes, flak shreds drone swarms
   aatank: { name: 'AA Vehicle',   cost: 950,  hp: 280, speed: 3.0, range: 8.0, dmg: 42, rof: 0.25, builtAt: 'factory',  buildTime: 11, kind: 'veh', aaOnly: true, capacity: 12, reload: 4 }, // dedicated anti-air: only engages aircraft — 4-missile burst then reload
   flak:   { name: 'Flak Gun',     cost: 650,  hp: 240, speed: 2.6, range: 6.5, dmg: 16, rof: 0.45, builtAt: 'factory', buildTime: 9,  kind: 'veh' },
+  // anti-drone infantry: a counter-UAS team that launches swarms of tiny interceptor
+  // drones — only engages aircraft (drone hives' swarms, helicopters, bombers, drones).
+  // Cheap and fragile (it's infantry); mass it to wall off the sky from a Barracks.
+  interceptor: { name: 'Interceptor Team', cost: 550, hp: 110, speed: 2.3, range: 8.0, dmg: 24, rof: 0.35, builtAt: 'barracks', buildTime: 11, kind: 'inf', aaOnly: true, sight: 10 },
   engineer: { name: 'Engineer',   cost: 600,  hp: 200, speed: 2.2, range: 0,   dmg: 0,  rof: 1,   builtAt: 'barracks', altBuiltAt: 'factory', buildTime: 10, kind: 'veh', repair: true, road: true, lays: 'mine', mines: 4, noAttack: true }, // trainable from the Barracks (infantry) AND the War Factory
   patriot:  { name: 'Patriot SAM', cost: 1100, hp: 200, speed: 2.4, range: 11, dmg: 60, rof: 0.5, builtAt: 'factory',  buildTime: 12, kind: 'veh', intercept: { range: 11, cd: 4 }, fortify: true, sight: 14, aaOnly: true, capacity: 4, reload: 5 }, // long-range SAM: only engages aircraft + intercepts silo missiles; mobile radar picket
   mine:     { name: 'Land Mine',  cost: 0,    hp: 1,   speed: 0,   range: 0,   dmg: 150, rof: 1,  builtAt: '',         buildTime: 0,  kind: 'veh', internal: true, mine: true, trigger: 1.5, blastR: 2.4 },

@@ -20,7 +20,7 @@ const B_ICONS: Record<string, string> = {
   cannon: '\u{1F4A5}', tesla: '⚡', irondome: '\u{1F6E1}️',
 };
 const U_ICONS: Record<string, string> = {
-  rifle: '\u{1FA96}', rocket: '\u{1F680}', melody: '\u{1F483}', tank: '\u{1F699}', heavy: '\u{1F69B}', ifv: '\u{1F6FB}', aatank: '\u{1F3AF}', flak: '\u{1F4A5}', harv: '\u{1F69C}', engineer: '\u{1F527}',
+  rifle: '\u{1FA96}', rocket: '\u{1F680}', interceptor: '\u{1F99F}', melody: '\u{1F483}', tank: '\u{1F699}', heavy: '\u{1F69B}', ifv: '\u{1F6FB}', aatank: '\u{1F3AF}', flak: '\u{1F4A5}', harv: '\u{1F69C}', engineer: '\u{1F527}',
   fueltruck: '\u{1F6E2}️', cmissile: '\u{1F680}', bbmissile: '\u{1F4A3}', chemissile: '\u{2623}️',
   hive: '\u{1F41D}', recon: '\u{1F6F8}', strike: '\u{1F6F0}️', msldrone: '☄️', mlrs: '\u{1F9E8}',
   chemtrooper: '\u{2623}️', chemtank: '\u{2623}️', chemdrone: '\u{2623}️',
@@ -51,7 +51,7 @@ const UPG_INFO: Record<string, string> = {
   airforce: '+25% production speed',
   shipyard: '+25% production speed',
 };
-export const U_LIST = ['rifle', 'rocket', 'mortar', 'fieldgun', 'melody', 'hive', 'tank', 'heavy', 'ifv', 'aatank', 'flak', 'patriot', 'fueltruck', 'harv', 'engineer', 'mcv', 'dozer', 'mortartrack', 'mlrs', 'artillery', 'recon', 'strike', 'msldrone', 'shahed',
+export const U_LIST = ['rifle', 'rocket', 'interceptor', 'mortar', 'fieldgun', 'melody', 'hive', 'tank', 'heavy', 'ifv', 'aatank', 'flak', 'patriot', 'fueltruck', 'harv', 'engineer', 'mcv', 'dozer', 'mortartrack', 'mlrs', 'artillery', 'recon', 'strike', 'msldrone', 'shahed',
   'tews', 'chemtrooper', 'chemtank', 'chemdrone', 'biotrooper', 'biotank', 'biodrone', 'stealthtank',
   'apoc', 'brahmos', 'gunship', 'technical', 'mech', 'silicondrone', 'jungleraider', 'marine', 'hovertank', 'shaheen',
   'gunboat', 'destroyer', 'artyship', 'sub', 'subhunter', 'mslcruiser', 'flakship', 'navdrone', 'navengineer', 'transport', 'airtransport', 'fighter', 'bomber', 'dbomber', 'heli', 'helidrone',
@@ -63,6 +63,7 @@ export const U_LIST = ['rifle', 'rocket', 'mortar', 'fieldgun', 'melody', 'hive'
 const TIP_NOTES: Record<string, string> = {
   flak: 'Excellent vs drones, poor vs airplanes',
   aatank: 'Dedicated anti-air missiles',
+  interceptor: 'Interceptor Team: anti-drone infantry — launches swarms of tiny interceptor drones at aircraft only (drone-hive swarms, helicopters, bombers, drones). Cheap and fragile; mass from the Barracks to wall off the sky. No ground attack.',
   mlrs: 'Cannot engage aircraft',
   mortar: 'Mortar Team (infantry): area splash that shreds massed infantry. Cheap, from the Barracks. Fragile, slow, no air defence.',
   mortartrack: 'Mortar Carrier (vehicle): a mobile, armoured self-propelled mortar — same anti-infantry splash as the Mortar Team but tougher and faster. From the War Factory. No air defence.',

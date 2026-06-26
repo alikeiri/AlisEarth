@@ -492,6 +492,12 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
   const refSave = econBoot && nB('refinery') < refs && pl.credits < cost('refinery') + 300;
   for (const bks of (myB['barracks'] || [])) {
     if (bks.progress < bks.total || bks.queue.length >= 2) continue;
+    // air threat → stand up an infantry AA screen (Interceptor Team) as a NEED — even at
+    // the army/infantry cap — so a drone/heli assault is always answered cheaply
+    const sAir = mem.seenAir || 0;
+    if (sAir >= 1 && nU('interceptor') < Math.min(6, 2 + Math.ceil(sAir)) && pl.credits > 700) {
+      cmds.push({ k: 'train', p, bid: bks.id, type: 'interceptor' }); continue;
+    }
     if (armyCount >= cap) continue;
     // economy FIRST, but never DEFENSELESS: before the economy is booted, allow a
     // small cheap infantry screen (≤4) for early defense, then stop bleeding credits
