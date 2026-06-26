@@ -312,6 +312,14 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
   // into a big army instead of banking it) and presses the attack
   if (pl.credits > 6000) { cap = Math.min(140, cap + 8 + Math.floor((pl.credits - 6000) / 3500)); waveEvery = Math.max(18, waveEvery - 6); }
   if (pl.credits < 1200 && underAttack) mem.nextWave = Math.max(mem.nextWave, sim.tickN + 10 * TICKS_PER_SEC); // hold
+  // proactive anti-air for the stronger AIs: stand up a real SAM line BEFORE being
+  // bombed (post-mortem mqtds0g6zlg6: sat at 3 SAMs while the enemy massed 40 bombers),
+  // then scale it with how much enemy air has actually been scouted.
+  if (!doctrine && pl.aiLvl >= 2) {
+    sams = Math.max(sams, pl.aiLvl >= 3 ? 6 : 4);
+    const sa = mem.seenAir || 0;
+    if (sa >= 12) sams = Math.max(sams, 10); else if (sa >= 8) sams = Math.max(sams, 8); else if (sa >= 4) sams = Math.max(sams, 6);
+  }
   if (doctrine) {
     cap = Math.max(cap, 96);        // a big standing force + room for the bomber fleet
     sams = Math.max(sams, 10);      // a thick anti-air wall
@@ -359,6 +367,9 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
   // a couple of turrets for safety, then SPREAD: refineries toward the ore
   // frontier take priority over deep defense (tester: "AI not spreading out")
   else if (econBoot && nB('turret') < Math.min(2, turrets) && nB('barracks')) want = 'turret';
+  // a real anti-air line EARLY (not buried after radar/lab/silo): the first few SAMs
+  // come right after the opening turrets so an air assault is met, not ignored
+  else if (!doctrine && econBoot && nB('sam') < Math.min(3, sams) && nB('factory') && pl.credits > 1300) want = 'sam';
   else if (nB('refinery') < refs && pl.credits > 1200) want = 'refinery';
   // vehicle throughput beats deep turret lines — factories before turret #3+
   // (islanders keep ONE factory and ONE barracks: ground forces can't leave)
@@ -392,6 +403,13 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
   else if (nB('sam') < sams && nB('factory') && pl.credits > (antiAir ? 1400 : 2200)) want = 'sam';
   else if (goAir && !nB('airforce') && nB('factory') && pl.credits > (dirAir || prefAir ? 2400 : 3000)) want = 'airforce';
   else if (goAir && nB('airforce') && nB('airfield') < 2 && pl.credits > 1600) want = 'airfield';
+  // RICH base AI (Hard+): convert a credit hoard into production throughput + air power
+  // instead of banking it (post-mortem mqtds0g6zlg6: 660k banked with 1 factory + 1
+  // barracks all game, army stalled ~40 while income ran away).
+  else if (!doctrine && !island && pl.aiLvl >= 2 && econBoot && nB('factory') < (pl.credits > 12000 ? 3 : 2) && pl.credits > 6000) want = 'factory';
+  else if (!doctrine && !island && pl.aiLvl >= 2 && econBoot && nB('barracks') < (pl.credits > 12000 ? 3 : 2) && pl.credits > 5000) want = 'barracks';
+  else if (!doctrine && pl.aiLvl >= 2 && econBoot && goAir && nB('airforce') && nB('airfield') < (pl.credits > 8000 ? 3 : 2) && pl.credits > 4000) want = 'airfield';
+  else if (!doctrine && pl.aiLvl >= 2 && econBoot && goAir && nB('airforce') < 2 && nB('airfield') >= 2 && pl.credits > 6000) want = 'airforce';
   else if ((pl.aiLvl >= 2 || dirTech) && !nB('lab') && nB('factory') && pl.credits > (dirTech ? 2400 : 3000)) want = 'lab';
   else if (pl.aiLvl >= 2 && nB('lab') && !nB('silo') && pl.credits > 3200) want = 'silo';
   else if (econBoot && nB('turret') < turrets + 1 && pl.credits > 2600) want = 'turret';
@@ -561,11 +579,17 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
       const bcap = Math.max(2, (nB('airfield') || 0) * 10);
       const haveB = nU('bomber') + nU('dbomber');
       t = haveB < bcap ? (r < 0.8 ? 'bomber' : r < 0.93 ? 'dbomber' : 'fighter') : 'fighter';
-    } else t = (enemyCrippled && pl.credits > 2000) ? (r < 0.6 ? 'bomber' : r < 0.85 ? 'dbomber' : 'heli')
+    } else {
+      // enemy is committing to air (an airfield is up, or several aircraft scouted) →
+      // put fighters up to contest it instead of being bombed unanswered
+      const contestAir = (mem.seenAir || 0) >= 4 || enemyHasAirfield(sim, p);
+      t = (enemyCrippled && pl.credits > 2000) ? (r < 0.6 ? 'bomber' : r < 0.85 ? 'dbomber' : 'heli')
+      : contestAir ? (r < 0.7 ? 'fighter' : r < 0.9 ? 'heli' : 'helidrone')
       : antiAir ? (r < 0.6 ? 'fighter' : r < 0.85 ? 'heli' : 'helidrone')
       : bigMass ? (r < 0.55 ? 'bomber' : r < 0.8 ? 'dbomber' : 'fighter')
       : island && r < 0.35 ? 'bomber'
       : r < 0.4 ? 'fighter' : r < 0.7 ? 'heli' : 'helidrone';
+    }
     cmds.push({ k: 'train', p, bid: af.id, type: t });
   }
   // navy: a balanced fleet — gun destroyers to fight ships and shell the coast,
@@ -835,6 +859,13 @@ function countEnemyType(sim: Sim, p: number, type: string): number {
 function enemyHasSilo(sim: Sim, p: number): boolean {
   for (const e of sim.ents.values())
     if (e.b && e.type === 'silo' && e.progress >= e.total && sim.foe(e.owner, p) && sim.players[e.owner].alive) return true;
+  return false;
+}
+
+// does any foe field a finished airforce/airfield? (cue to contest the air early)
+function enemyHasAirfield(sim: Sim, p: number): boolean {
+  for (const e of sim.ents.values())
+    if (e.b && (e.type === 'airforce' || e.type === 'airfield') && e.progress >= e.total && sim.foe(e.owner, p) && sim.players[e.owner].alive) return true;
   return false;
 }
 

@@ -4,7 +4,7 @@ export const TICK = 0.1;            // seconds per sim tick (10 Hz)
 export const TICKS_PER_SEC = 10;
 // bump whenever map generation or sim logic changes in a way that breaks
 // replay reproduction (same seed must produce the same game to replay it)
-export const SIM_VERSION = 6; // v6: 1-tile building spacing rule in canPlace (changes placement -> breaks v5 replay reproduction)
+export const SIM_VERSION = 7; // v7: bomber force-fire bomb-run + team-adjacent spawns (both change sim behavior -> breaks v6 replay reproduction)
 // buildings exempt from the 1-tile placement spacing rule: walls, tank barriers and
 // defensive structures may be packed tightly; economy/production buildings need a gap
 // so their (oversized) models don't overlap. Used by sim.canPlace + the client preview.
@@ -26,6 +26,7 @@ export interface UnitDef {
   alt?: number;                                  // flight altitude (render)
   pad?: boolean;                                 // aircraft: needs airfield capacity
   repair?: boolean;                              // engineer: heals units, repairs buildings
+  noAttack?: boolean;                            // engineers: ignore attack-target orders on enemies (don't path in and die)
   payload?: number;                              // bombers: shots per sortie before returning to rearm
   road?: boolean;                                // engineer: can lay roads
   fortify?: boolean;                             // drone hive: can dig in and emit drones
@@ -84,7 +85,7 @@ export const UNITS: Record<string, UnitDef> = {
   // oil is no longer hauled: an Engineer builds an Oil Rig on an oil well for steady
   // passive income (see BUILDINGS.oilrig). The old Oil Miner / Oil Rig Ship are gone.
   // sea counterpart to the Engineer: repairs friendly ships (and coastal structures) on the water
-  navengineer: { name: 'Naval Engineer', cost: 700, hp: 240, speed: 2.6, range: 0, dmg: 0, rof: 1, builtAt: 'shipyard', buildTime: 11, kind: 'sea', move: 'sea', repair: true },
+  navengineer: { name: 'Naval Engineer', cost: 700, hp: 240, speed: 2.6, range: 0, dmg: 0, rof: 1, builtAt: 'shipyard', buildTime: 11, kind: 'sea', move: 'sea', repair: true, noAttack: true },
   // TEWS: electronic-warfare vehicle — jams enemy radar/satellite in a bubble and
   // pulses an area EMP that only fries drones (harmless to everything else)
   tews:   { name: 'TEWS',         cost: 1600, hp: 360, speed: 2.2, range: 0, dmg: 0, rof: 1, builtAt: 'factory', buildTime: 14, kind: 'veh', jam: 12, droneEmp: { range: 10, dmg: 22, cd: 1.5 }, faction: 'eu' }, // signature: electronic warfare
@@ -109,7 +110,7 @@ export const UNITS: Record<string, UnitDef> = {
   // mobile anti-air pair: missile AA hunts airplanes, flak shreds drone swarms
   aatank: { name: 'AA Vehicle',   cost: 950,  hp: 280, speed: 3.0, range: 8.0, dmg: 42, rof: 0.25, builtAt: 'factory',  buildTime: 11, kind: 'veh', aaOnly: true, capacity: 12, reload: 4 }, // dedicated anti-air: only engages aircraft — 4-missile burst then reload
   flak:   { name: 'Flak Gun',     cost: 650,  hp: 240, speed: 2.6, range: 6.5, dmg: 16, rof: 0.45, builtAt: 'factory', buildTime: 9,  kind: 'veh' },
-  engineer: { name: 'Engineer',   cost: 600,  hp: 200, speed: 2.2, range: 0,   dmg: 0,  rof: 1,   builtAt: 'barracks', altBuiltAt: 'factory', buildTime: 10, kind: 'veh', repair: true, road: true, lays: 'mine', mines: 4 }, // trainable from the Barracks (infantry) AND the War Factory
+  engineer: { name: 'Engineer',   cost: 600,  hp: 200, speed: 2.2, range: 0,   dmg: 0,  rof: 1,   builtAt: 'barracks', altBuiltAt: 'factory', buildTime: 10, kind: 'veh', repair: true, road: true, lays: 'mine', mines: 4, noAttack: true }, // trainable from the Barracks (infantry) AND the War Factory
   patriot:  { name: 'Patriot SAM', cost: 1100, hp: 200, speed: 2.4, range: 11, dmg: 60, rof: 0.5, builtAt: 'factory',  buildTime: 12, kind: 'veh', intercept: { range: 11, cd: 4 }, fortify: true, sight: 14, aaOnly: true, capacity: 4, reload: 5 }, // long-range SAM: only engages aircraft + intercepts silo missiles; mobile radar picket
   mine:     { name: 'Land Mine',  cost: 0,    hp: 1,   speed: 0,   range: 0,   dmg: 150, rof: 1,  builtAt: '',         buildTime: 0,  kind: 'veh', internal: true, mine: true, trigger: 1.5, blastR: 2.4 },
   // Construction Vehicle: slow, defenceless; press F to deploy it into a forward

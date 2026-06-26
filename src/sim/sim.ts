@@ -189,6 +189,7 @@ export class Sim {
   constructor(seed: number, specs: { name: string; faction: string; isAI?: boolean; aiLvl?: number; team?: number }[]) {
     this.rng = new RNG(seed);
     this.map = genMap(seed, specs.length);
+    this.assignTeamSpawns(specs); // co-locate same-team starts (deterministic; FFA untouched)
     specs.forEach((s, i) => {
       const fac = FACTIONS[s.faction] || FACTIONS.usa;
       const lvl = s.aiLvl ?? 1;
@@ -236,6 +237,56 @@ export class Sim {
   }
 
   // ---------- setup ----------
+  // Reorder spawn points so same-team players start ADJACENT instead of scattered
+  // across the farthest-apart sample points genMap produces. Pure function of the specs
+  // order → deterministic on every client (lockstep-safe; no rng/Date). Free-for-all
+  // (every player a distinct team) is left exactly as genMap arranged it.
+  private assignTeamSpawns(specs: { team?: number }[]) {
+    const N = specs.length;
+    const S = this.map.spawns;
+    if (N < 2 || !S || S.length < N) return;
+    const team = (i: number) => specs[i].team ?? i; // mirror the player-init default below
+    const distinct = new Set<number>();
+    for (let i = 0; i < N; i++) distinct.add(team(i));
+    if (distinct.size === N) return; // pure FFA → keep genMap's max-separation layout
+    // group players by team, in first-appearance order (stable & deterministic)
+    const groups: number[][] = [];
+    const gOf = new Map<number, number>();
+    for (let i = 0; i < N; i++) {
+      const t = team(i);
+      let g = gOf.get(t);
+      if (g === undefined) { g = groups.length; gOf.set(t, g); groups.push([]); }
+      groups[g].push(i);
+    }
+    // give each team the tightest still-available cluster of spawn slots: the seed whose
+    // (size-1) nearest unused neighbours are closest, then those neighbours. Teams land
+    // on compact, separated clusters. Pure integer math (ties → lowest index) → it is a
+    // deterministic function of the specs order, so every lockstep client agrees.
+    const M = S.length;
+    const used = new Array<boolean>(M).fill(false);
+    const slotFor = new Array<number>(N);
+    const d2 = (a: number, b: number) => { const dx = S[a].x - S[b].x, dz = S[a].z - S[b].z; return dx * dx + dz * dz; };
+    for (const group of groups) {
+      const gs = group.length;
+      let seed = -1, seedCost = Infinity, seedNbrs: number[] = [];
+      for (let s = 0; s < M; s++) {
+        if (used[s]) continue;
+        const others: { k: number; d: number }[] = [];
+        for (let k = 0; k < M; k++) if (k !== s && !used[k]) others.push({ k, d: d2(s, k) });
+        others.sort((a, b) => a.d - b.d || a.k - b.k);
+        const nbrs = others.slice(0, gs - 1);
+        const cost = nbrs.reduce((acc, o) => acc + o.d, 0);
+        if (cost < seedCost) { seedCost = cost; seed = s; seedNbrs = nbrs.map(o => o.k); }
+      }
+      const cluster = [seed, ...seedNbrs];
+      for (const k of cluster) used[k] = true;
+      for (let q = 0; q < gs; q++) slotFor[group[q]] = cluster[q];
+    }
+    const newSpawns = S.map(s => ({ ...s }));
+    for (let i = 0; i < N; i++) newSpawns[i] = { ...S[slotFor[i]] };
+    this.map.spawns = newSpawns;
+  }
+
   private placeStart(p: number) {
     const s = this.map.spawns[p];
     const cyd = BUILDINGS.conyard;
@@ -794,6 +845,9 @@ export class Sim {
         const o = FORM[Math.min(idx, FORM.length - 1)];
         ord = { k: 'move', x: c.x + o.x, z: c.z + o.z, spd: c.spd };
       } else if (c.k === 'attack') {
+        // engineers ignore attack orders on enemies — otherwise, swept up in a mixed
+        // selection, they'd path into the target and die. They keep their current order.
+        if (UNITS[u.type].noAttack) return;
         // a human's direct attack order sticks to THIS target (no auto-switching
         // to whatever wanders into range); the AI keeps its fighting-advance
         const human = !this.players[c.p]?.isAI;
@@ -1997,6 +2051,21 @@ export class Sim {
         this.moveToward(u, px, pz, def);
         return;
       }
+      // bombers do a real bombing RUN at the point (fly over, drop the stick once,
+      // turn for home to rearm) instead of hovering and ground-shooting
+      if (u.type === 'bomber' || u.type === 'dbomber') {
+        if (u.ammo <= 0) { u.orders.unshift({ k: 'rtb' }); return; } // rearm first, then resume
+        if (hyp(px - u.x, pz - u.z) <= 1.4) {
+          this.bombDrop(u, px, pz);
+          u.orders.shift();               // force orders persist (keep:true) — clear the spent one
+          u.orders.unshift({ k: 'rtb' }); // ...then go rearm
+          return;
+        }
+        const speed = def.speed * this.players[u.owner].fac.speedMul;
+        u.path = [{ x: px, z: pz }]; u.pi = 0;
+        this.stepPath(u, speed, 1);
+        return;
+      }
       const range = (te?.b && def.siegeRange) ? def.siegeRange : def.range;
       const d = hyp(px - u.x, pz - u.z);
       if (d <= range) {
@@ -2192,7 +2261,7 @@ export class Sim {
       if (u.type === 'bomber' || u.type === 'dbomber') {
         if (u.ammo <= 0) { u.orders.unshift({ k: 'rtb' }); return; }
         if (d <= 1.4) {
-          this.bombDrop(u, tgt);
+          this.bombDrop(u, tgt.x, tgt.z);
           u.orders.unshift({ k: 'rtb' }); // rearm, then resume this attack order
           return;
         }
@@ -2373,20 +2442,20 @@ export class Sim {
 
   // carpet release: the full remaining payload detonates around the target
   // with linear falloff — splash hits every enemy in the blast radius
-  private bombDrop(u: Entity, tgt: Entity) {
+  private bombDrop(u: Entity, tx: number, tz: number) {
     const def = UNITS[u.type];
     const total = def.dmg * Math.max(1, u.ammo);
     const R = 2.6;
     for (const e of [...this.ents.values()]) {
       if (e.owner === u.owner || e.hp <= 0 || !this.players[e.owner].alive) continue;
-      const dist = e.b ? this.distToEnt(tgt.x, tgt.z, e) : hyp(e.x - tgt.x, e.z - tgt.z);
+      const dist = e.b ? this.distToEnt(tx, tz, e) : hyp(e.x - tx, e.z - tz);
       if (dist > R) continue;
       this.dealDamage(u, e, total * (1 - 0.5 * (dist / R)));
     }
     u.ammo = 0;
-    // bombs fall from the bomber (u) onto the target; the renderer drops the visible
+    // bombs fall from the bomber (u) onto the target point; the renderer drops the visible
     // ordnance and bursts each one on the ground (damage above is applied immediately)
-    this.events.push({ e: 'bombdrop', x: u.x, z: u.z, tx: tgt.x, tz: tgt.z });
+    this.events.push({ e: 'bombdrop', x: u.x, z: u.z, tx, tz });
   }
 
   private tickHarvest(u: Entity, ord: Order, def: any) {
