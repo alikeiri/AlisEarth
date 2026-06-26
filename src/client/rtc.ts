@@ -21,16 +21,25 @@ interface PeerState {
   audioSender: RTCRtpSender | null;  // voice chat: this peer's outbound mic track slot
 }
 
+// STUN finds the public address for a direct P2P path; TURN relays the media when a
+// direct path is impossible (symmetric NAT / restrictive firewalls) — required for
+// voice (and P2P input) to work between players on arbitrary networks worldwide.
+// The openrelay creds are Metered's public free TURN (published for open use). A
+// dedicated TURN can be swapped in here later for production reliability.
 const RTC_CONFIG: RTCConfiguration = {
   iceServers: [
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
+    { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
+    { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
+    { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' },
   ],
 };
 
 export class RtcMesh {
   private peers = new Map<number, PeerState>();
   private micTrack: MediaStreamTrack | null = null; // shared mic track once voice is on
+  private micTargets: Set<number> | null = null;    // which peer slots receive it (null = all)
   onFrame: (player: number, frames: any[]) => void = () => {};
   onState: () => void = () => {}; // connectivity changed (drives the transport HUD)
   onAudio: (slot: number, stream: MediaStream) => void = () => {}; // remote voice arrived
@@ -62,7 +71,7 @@ export class RtcMesh {
       this.bindChannel(st, pc.createDataChannel('ls', { ordered: false, maxRetransmits: 0 }));
       // negotiate a 2-way audio m-line UP FRONT (track filled later via replaceTrack,
       // which needs no renegotiation) so enabling voice mid-game just works
-      try { st.audioSender = pc.addTransceiver('audio', { direction: 'sendrecv' }).sender; if (this.micTrack) st.audioSender.replaceTrack(this.micTrack); } catch { /* no audio support */ }
+      try { st.audioSender = pc.addTransceiver('audio', { direction: 'sendrecv' }).sender; if (this.micTrack) st.audioSender.replaceTrack(this.micFor(slot)); } catch { /* no audio support */ }
       pc.createOffer()
         .then(o => pc.setLocalDescription(o))
         .then(() => this.signal({ t: 'rtc', to: slot, kind: 'offer', data: pc.localDescription }))
@@ -99,7 +108,7 @@ export class RtcMesh {
         if (!st.audioSender) {
           const tx = pc.getTransceivers().find(t => t.receiver?.track?.kind === 'audio');
           st.audioSender = tx ? tx.sender : null;
-          if (st.audioSender && this.micTrack) { try { await st.audioSender.replaceTrack(this.micTrack); } catch { /* */ } }
+          if (st.audioSender && this.micTrack) { try { await st.audioSender.replaceTrack(this.micFor(st.slot)); } catch { /* */ } }
         }
         const a = await pc.createAnswer();
         await pc.setLocalDescription(a);
@@ -132,15 +141,22 @@ export class RtcMesh {
     const payload = JSON.stringify({ player, frames });
     for (const st of this.peers.values()) if (st.open && st.dc) { try { st.dc.send(payload); } catch { /* drop */ } }
   }
-  // voice chat: route a mic track (or null to stop sending) to every peer. Uses
-  // replaceTrack on the pre-negotiated audio m-line, so no renegotiation is needed.
-  setMicTrack(track: MediaStreamTrack | null) {
+  // voice chat: route a mic track to the chosen peers (targetSlots = null → everyone)
+  // and null to the rest, so the player can talk to their team / one ally / everyone.
+  // Uses replaceTrack on the pre-negotiated audio m-line — no renegotiation.
+  setMicTrack(track: MediaStreamTrack | null, targetSlots?: Set<number> | null) {
     this.micTrack = track;
-    for (const st of this.peers.values()) { try { st.audioSender?.replaceTrack(track); } catch { /* peer not ready */ } }
+    this.micTargets = targetSlots || null;
+    for (const st of this.peers.values()) { try { st.audioSender?.replaceTrack(this.micFor(st.slot)); } catch { /* peer not ready */ } }
+  }
+  private micFor(slot: number): MediaStreamTrack | null {
+    if (!this.micTrack) return null;
+    return (!this.micTargets || this.micTargets.has(slot)) ? this.micTrack : null;
   }
   hasVoice(): boolean { return !!this.micTrack; }
   connectedCount(): number { let n = 0; for (const st of this.peers.values()) if (st.open) n++; return n; }
   peerCount(): number { return this.peers.size; }
+  peerSlotList(): number[] { return [...this.peers.keys()]; }
   close() {
     for (const st of this.peers.values()) { try { st.dc?.close(); } catch { /* */ } try { st.pc.close(); } catch { /* */ } }
     this.peers.clear();
@@ -153,8 +169,9 @@ export class RtcMesh {
 export class VoiceController {
   private micStream: MediaStream | null = null;
   private muted = true;
+  private target: 'all' | 'team' | number = 'all'; // who hears me: everyone / my team / one player
   private audioEls = new Map<number, HTMLAudioElement>();
-  constructor(private mesh: RtcMesh) {
+  constructor(private mesh: RtcMesh, private opts: { myTeam?: number; teamOf?: (slot: number) => number | undefined } = {}) {
     mesh.onAudio = (slot, stream) => {
       let el = this.audioEls.get(slot);
       if (!el) { el = new Audio(); el.autoplay = true; (el as any).playsInline = true; this.audioEls.set(slot, el); }
@@ -164,19 +181,28 @@ export class VoiceController {
   }
   available(): boolean { return this.mesh.peerCount() > 0; }
   state(): 'off' | 'live' | 'muted' { return !this.micStream ? 'off' : this.muted ? 'muted' : 'live'; }
+  getTarget(): 'all' | 'team' | number { return this.target; }
+  setTarget(t: 'all' | 'team' | number) { this.target = t; if (this.micStream) this.route(); }
+  // which peer slots should hear me (null = everyone)
+  private targetSlots(): Set<number> | null {
+    if (this.target === 'all') return null;
+    if (typeof this.target === 'number') return new Set([this.target]);
+    return new Set(this.mesh.peerSlotList().filter(s => this.opts.teamOf?.(s) === this.opts.myTeam)); // 'team'
+  }
+  private route() {
+    const tr = this.micStream?.getAudioTracks()[0] || null;
+    if (tr) tr.enabled = !this.muted;
+    this.mesh.setMicTrack(this.muted ? null : tr, this.targetSlots());
+  }
   // first call asks for the mic and goes live; later calls toggle mute
   async toggle(): Promise<'off' | 'live' | 'muted'> {
     if (!this.micStream) {
       try { this.micStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }, video: false }); }
       catch { this.micStream = null; return 'off'; } // denied / no mic
-      const tr = this.micStream.getAudioTracks()[0];
-      this.muted = false; if (tr) tr.enabled = true;
-      this.mesh.setMicTrack(tr || null);
+      this.muted = false; this.route();
       return 'live';
     }
-    this.muted = !this.muted;
-    const tr = this.micStream.getAudioTracks()[0];
-    if (tr) tr.enabled = !this.muted;
+    this.muted = !this.muted; this.route();
     return this.muted ? 'muted' : 'live';
   }
   dispose() {

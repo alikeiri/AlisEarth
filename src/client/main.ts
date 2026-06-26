@@ -343,6 +343,13 @@ class ReplayGame implements GameLike {
 }
 
 // ---------------- Networked game ----------------
+// voice chat channel options: Everyone, Team only, or one specific human player
+function voiceTargetList(roster: { name: string; isAI?: boolean }[], me: number) {
+  const t: { v: any; label: string }[] = [{ v: 'all', label: '🔊 Everyone' }, { v: 'team', label: '👥 Team only' }];
+  roster.forEach((p, i) => { if (i !== me && !p.isAI) t.push({ v: i, label: '🎙 ' + (p.name || ('Player ' + (i + 1))) }); });
+  return t;
+}
+
 class NetGame implements GameLike {
   map: GameMap;
   me: number;
@@ -381,12 +388,15 @@ class NetGame implements GameLike {
     if (peerSlots.length) {
       this.voiceRtc = new RtcMesh(s => this.net.send(s), me, peerSlots);
       net.on('rtc', (x: any) => this.voiceRtc?.onSignal(x));
-      this.voice = new VoiceController(this.voiceRtc);
+      this.voice = new VoiceController(this.voiceRtc, { myTeam: (this.roster[me] as any)?.team, teamOf: (s) => (this.roster[s] as any)?.team });
     }
   }
   voiceAvailable(): boolean { return !!this.voice && this.voice.available(); }
   voiceState(): 'off' | 'live' | 'muted' { return this.voice ? this.voice.state() : 'off'; }
   toggleVoice(): Promise<'off' | 'live' | 'muted'> { return this.voice ? this.voice.toggle() : Promise.resolve('off'); }
+  voiceTargets() { return voiceTargetList(this.roster as any, this.me); }
+  setVoiceTarget(v: any) { this.voice?.setTarget(v === 'all' || v === 'team' ? v : +v); }
+  voiceTarget() { return this.voice ? this.voice.getTarget() : 'all'; }
 
   sendChat(to: any, msg: string) { this.net.send({ t: 'chat', to, msg }); }
   drainChat() { const q = this.chatQ; this.chatQ = []; return q; }
@@ -475,7 +485,8 @@ class NetLockstepGame implements GameLike {
       this.rtc = new RtcMesh(s => this.net.send(s), this.me, peerSlots);
       this.rtc.onFrame = (player, frames) => this.engine.receive({ player, frames });
       net.on('rtc', (x: any) => this.rtc?.onSignal(x));
-      this.voice = new VoiceController(this.rtc); // voice chat rides the input mesh's audio
+      // voice chat rides the input mesh's audio; team info lets the player talk to team-only
+      this.voice = new VoiceController(this.rtc, { myTeam: (this.roster[this.me] as any)?.team, teamOf: (s) => (this.roster[s] as any)?.team });
     }
     this.engine.send = msg => {
       // prefer the unreliable DataChannel (no head-of-line blocking) once P2P is up
@@ -539,6 +550,9 @@ class NetLockstepGame implements GameLike {
   voiceAvailable(): boolean { return !!this.voice && this.voice.available(); }
   voiceState(): 'off' | 'live' | 'muted' { return this.voice ? this.voice.state() : 'off'; }
   toggleVoice(): Promise<'off' | 'live' | 'muted'> { return this.voice ? this.voice.toggle() : Promise.resolve('off'); }
+  voiceTargets() { return voiceTargetList(this.roster as any, this.me); }
+  setVoiceTarget(v: any) { this.voice?.setTarget(v === 'all' || v === 'team' ? v : +v); }
+  voiceTarget() { return this.voice ? this.voice.getTarget() : 'all'; }
   sendChat(to: any, msg: string) { this.net.send({ t: 'chat', to, msg }); }
   drainChat() { const q = this.chatQ; this.chatQ = []; return q; }
   chatTargets() {
@@ -1029,6 +1043,7 @@ class GameClient {
     // voice chat: a mic toggle in the topbar, shown only in a multiplayer game with
     // human peers. First tap asks for the mic; later taps mute/unmute.
     const voiceBtn = document.getElementById('voiceBtn');
+    const voiceTo = document.getElementById('voiceTo') as HTMLSelectElement | null;
     const g: any = this.game;
     if (voiceBtn && g && typeof g.voiceAvailable === 'function' && g.voiceAvailable()) {
       voiceBtn.classList.remove('hidden');
@@ -1042,8 +1057,17 @@ class GameClient {
       };
       syncVoice();
       on(voiceBtn, 'click', async () => { audio.init(); await g.toggleVoice(); syncVoice(); });
-    } else if (voiceBtn) {
-      voiceBtn.classList.add('hidden'); // single-player / no peers
+      // channel picker: Everyone / Team only / a specific player
+      if (voiceTo && g.voiceTargets) {
+        voiceTo.innerHTML = (g.voiceTargets() as { v: any; label: string }[])
+          .map(o => `<option value="${o.v}">${o.label}</option>`).join('');
+        voiceTo.value = String(g.voiceTarget ? g.voiceTarget() : 'all');
+        voiceTo.classList.remove('hidden');
+        on(voiceTo, 'change', () => g.setVoiceTarget?.(voiceTo.value));
+      }
+    } else {
+      voiceBtn?.classList.add('hidden'); // single-player / no peers
+      voiceTo?.classList.add('hidden');
     }
     // minimap: tap/drag to jump the camera (touch); on desktop left-click/drag
     // jumps the camera and right-click sends the selected units to that spot
