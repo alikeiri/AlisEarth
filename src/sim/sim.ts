@@ -2712,7 +2712,13 @@ export class Sim {
         // silently when their lifetime ends — only their kamikaze IMPACT booms (that
         // explosion is emitted at the target in the kamikaze path). Avoids a constant
         // pop of death-explosions as swarms expire on their own.
-        if (!UNITS[e.type]?.ephemeral) this.events.push({ e: 'boom', x: e.x, z: e.z, big: false });
+        // infantry fall and play a death animation; everything else explodes
+        if (!UNITS[e.type]?.ephemeral) {
+          if (UNITS[e.type]?.kind === 'inf')
+            this.events.push({ e: 'died', t: e.type, x: e.x, z: e.z, h: Math.atan2(e.hx || 0, e.hz || 1), o: e.owner });
+          else
+            this.events.push({ e: 'boom', x: e.x, z: e.z, big: false });
+        }
         if (!UNITS[e.type]?.internal) this.stats.lostU[e.owner]++;
         // a transport sunk with troops aboard: they go down with the ship
         if (e.cargoUnits?.length) { for (const c of e.cargoUnits) if (!UNITS[c.type]?.internal) this.stats.lostU[c.owner]++; e.cargoUnits = []; }

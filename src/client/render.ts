@@ -1022,6 +1022,12 @@ export class Renderer {
   // written into the pose set matching their state each frame
   private posedParts: Record<string, { mesh: THREE.InstancedMesh; mode: number }[][]> = {};
   private poseCounts: Record<string, number[]> = {};
+  // baked frames of the infantry "Death" clip, played as short-lived corpses when a
+  // unit dies (it has already been removed from the sim, so it is rendered separately)
+  private deathParts: Record<string, { mesh: THREE.InstancedMesh; mode: number }[][]> = {};
+  private deathCounts: Record<string, number[]> = {};
+  private deathDur: Record<string, number> = {};
+  private corpses: { t: string; x: number; z: number; a: number; o: number; age: number }[] = [];
   private qTmp = new THREE.Quaternion();
   private qTmp2 = new THREE.Quaternion();
   private eTmp = new THREE.Euler();
@@ -1905,12 +1911,14 @@ export class Renderer {
     let hasSkin = false;
     src.traverse(o => { if ((o as any).isSkinnedMesh) hasSkin = true; });
     const poseSets: Map<THREE.Material, THREE.BufferGeometry[]>[] = [];
+    let deathStart = -1; // index in poseSets where the Death-clip frames begin (-1 = none)
     if (def.axis === 'h' && hasSkin && clips.length) {
       const pick = (re: RegExp) => clips.find(a => re.test(a.name));
       // pose 0 = rest (weapon lowered), pose 1 = aim (only while firing), 2.. = run cycle
       const rest = pick(/Idle_Gun(?!_)/i) || pick(/Idle_Neutral/i) || pick(/Standing/i) || pick(/Idle/i) || clips[0];
       const aim = pick(/Idle_Gun_Shoot/i) || pick(/Idle_Gun_Pointing/i) || rest;
-      const run = pick(/Run_Shoot/i) || pick(/\|Run$/) || pick(/Walk/i);
+      const run = pick(/\|Run$/) || pick(/Run_Shoot/i) || pick(/Walk/i); // plain Run cycle while moving
+      const death = pick(/\|Death$/i) || pick(/Death/i);                 // played once on death
       const mixer = new THREE.AnimationMixer(src);
       const bakeAt = (clip: THREE.AnimationClip, t: number) => {
         mixer.stopAllAction();
@@ -1922,6 +1930,12 @@ export class Renderer {
       bakeAt(rest, rest.duration * 0.5);
       bakeAt(aim === rest ? rest : aim, aim.duration * 0.5);
       if (run) for (const f of [0, 0.25, 0.5, 0.75]) bakeAt(run, run.duration * f);
+      if (death) {
+        deathStart = poseSets.length;
+        const N = 6;
+        for (let i = 0; i < N; i++) bakeAt(death, death.duration * (i / (N - 1))); // start → fully fallen
+        this.deathDur[type] = death.duration;
+      }
     } else if (def.spin && clips.length) {
       // bake the model's OWN spin clip (e.g. the Apache's "Rotor Rotation") into a
       // cycle of frames; the render loops them continuously, so it's the model's real
@@ -2028,7 +2042,13 @@ export class Renderer {
     for (const p of this.unitParts[type] || []) this.scene.remove(p.mesh);
     for (const ps of this.posedParts[type] || []) for (const p of ps) this.scene.remove(p.mesh);
     this.unitParts[type] = allPoses[0];
-    if (allPoses.length > 1) this.posedParts[type] = allPoses;
+    // peel the Death-clip frames off the end into deathParts so the live pose picker
+    // (which cycles 0=rest, 1=aim, 2..=run) never accidentally selects a death frame
+    if (deathStart >= 1) {
+      this.deathParts[type] = allPoses.slice(deathStart);
+      const live = allPoses.slice(0, deathStart);
+      if (live.length > 1) this.posedParts[type] = live; else delete this.posedParts[type];
+    } else if (allPoses.length > 1) this.posedParts[type] = allPoses;
     else delete this.posedParts[type];
   }
 
@@ -2506,6 +2526,16 @@ export class Renderer {
       } else if (ev.e === 'boom') {
         const y = Math.max(this.map.heightAt(ev.x, ev.z), SEA) + 0.4;
         this.spawnParts(ev.x, y, ev.z, ev.big ? 26 : 12, ev.big);
+      } else if (ev.e === 'died') {
+        // infantry death: play the baked Death animation as a brief corpse. types with
+        // no humanoid death clip (e.g. the engineer truck) just get a small dust poof.
+        if (this.deathParts[ev.t]) {
+          this.corpses.push({ t: ev.t, x: ev.x, z: ev.z, a: ev.h || 0, o: ev.o ?? 0, age: 0 });
+          if (this.corpses.length > 200) this.corpses.shift();
+        } else {
+          const y = Math.max(this.map.heightAt(ev.x, ev.z), SEA) + 0.3;
+          this.spawnParts(ev.x, y, ev.z, 6, false);
+        }
       } else if (ev.e === 'crush') {
         const y = Math.max(this.map.heightAt(ev.x, ev.z), SEA) + 0.15;
         this.spawnParts(ev.x, y, ev.z, 6, false);
@@ -2594,6 +2624,7 @@ export class Renderer {
     const counts: Record<string, number> = {};
     for (const t in this.unitParts) counts[t] = 0;
     for (const t in this.posedParts) this.poseCounts[t] = this.posedParts[t].map(() => 0);
+    for (const t in this.deathParts) this.deathCounts[t] = this.deathParts[t].map(() => 0);
     const seen = new Set<number>();
     let selN = 0, rotN = 0, bagN = 0, dishN = 0;
     let rallyV: any = null;
@@ -2856,6 +2887,33 @@ export class Renderer {
       seen.add(v.i);
     }
 
+    // dying infantry: advance each corpse through the baked Death frames, then let it
+    // lie for a moment before it's cleared. Rendered as extra instances on deathParts.
+    for (let ci = this.corpses.length - 1; ci >= 0; ci--) {
+      const c = this.corpses[ci];
+      c.age += dt;
+      const frames = this.deathParts[c.t];
+      const dur = this.deathDur[c.t] || 1.2;
+      if (!frames || c.age > dur + 2.5) { this.corpses.splice(ci, 1); continue; } // play, then linger ~2.5s
+      let fi = Math.floor((c.age / dur) * frames.length);
+      if (fi >= frames.length) fi = frames.length - 1; // hold the fallen pose while lingering
+      if (fi < 0) fi = 0;
+      const dcs = this.deathCounts[c.t]; if (!dcs) continue;
+      const idx = dcs[fi]; if (idx >= MAX_INST) continue;
+      dcs[fi] = idx + 1;
+      const gy = Math.max(this.map.heightAt(c.x, c.z), SEA);
+      this.dummy.position.set(c.x, gy, c.z);
+      this.dummy.rotation.set(0, c.a, 0);
+      this.dummy.scale.setScalar(1);
+      this.dummy.updateMatrix();
+      const teamHex = PLAYER_COLORS[c.o] ?? 0xffffff;
+      for (const part of frames[fi]) {
+        part.mesh.setMatrixAt(idx, this.dummy.matrix);
+        if (part.mode === 1) { this.colTmp.setHex(teamHex); part.mesh.setColorAt(idx, this.colTmp); }
+        else if (part.mode === 2) { this.colTmp.setHex(teamHex).lerp(WHITE, 0.4); part.mesh.setColorAt(idx, this.colTmp); }
+      }
+    }
+
     for (const t in this.unitParts) {
       if (this.posedParts[t]) continue; // counted per pose below
       for (const part of this.unitParts[t]) {
@@ -2869,6 +2927,16 @@ export class Renderer {
       this.posedParts[t].forEach((ps, k) => {
         for (const part of ps) {
           part.mesh.count = pcs[k] || 0;
+          part.mesh.instanceMatrix.needsUpdate = true;
+          if (part.mesh.instanceColor) part.mesh.instanceColor.needsUpdate = true;
+        }
+      });
+    }
+    for (const t in this.deathParts) {
+      const dcs = this.deathCounts[t] || [];
+      this.deathParts[t].forEach((ps, k) => {
+        for (const part of ps) {
+          part.mesh.count = dcs[k] || 0;
           part.mesh.instanceMatrix.needsUpdate = true;
           if (part.mesh.instanceColor) part.mesh.instanceColor.needsUpdate = true;
         }
