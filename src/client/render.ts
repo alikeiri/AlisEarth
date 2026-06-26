@@ -43,6 +43,7 @@ const MODEL_DEFS: Record<string, { file: string; size: number; axis: 'l' | 'h'; 
   bomber:    { file: 'bomber',    size: 2.10, axis: 'l', ry: -Math.PI / 2 },
   dbomber:   { file: 'bomber',    size: 2.40, axis: 'l', ry: -Math.PI / 2 },
   heli:      { file: 'apache',    size: 1.70, axis: 'l', ry: 0, spin: 8 }, // Apache Gunship; its own "Rotor Rotation" clip baked into an 8-frame spin
+  airtransport: { file: 'blackhawk', size: 2.10, axis: 'l', ry: 0 }, // UH-60 Black Hawk transport (static GLB — no rotor anim)
   helidrone: { file: 'helidrone', size: 1.20, axis: 'l', ry: 0 },
   gunboat:   { file: 'gunboat',   size: 1.90, axis: 'l', ry: 0 },
   navdrone:  { file: 'gunboat',   size: 1.20, axis: 'l', ry: 0 },
