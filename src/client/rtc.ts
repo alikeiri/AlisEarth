@@ -21,18 +21,15 @@ interface PeerState {
   audioSender: RTCRtpSender | null;  // voice chat: this peer's outbound mic track slot
 }
 
-// STUN finds the public address for a direct P2P path; TURN relays the media when a
+// STUN finds the public address for a direct P2P path. TURN relays the media when a
 // direct path is impossible (symmetric NAT / restrictive firewalls) — required for
-// voice (and P2P input) to work between players on arbitrary networks worldwide.
-// The openrelay creds are Metered's public free TURN (published for open use). A
-// dedicated TURN can be swapped in here later for production reliability.
+// voice (and P2P input) to work between players on arbitrary networks worldwide. The
+// real TURN (with short-lived credentials) is supplied by the server per match via
+// the 'start' message; this static default is the STUN-only fallback.
 const RTC_CONFIG: RTCConfiguration = {
   iceServers: [
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
-    { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
-    { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
-    { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' },
   ],
 };
 
@@ -44,17 +41,20 @@ export class RtcMesh {
   onState: () => void = () => {}; // connectivity changed (drives the transport HUD)
   onAudio: (slot: number, stream: MediaStream) => void = () => {}; // remote voice arrived
 
+  private rtcConfig: RTCConfiguration;
   constructor(
     private signal: (msg: any) => void, // send a signaling message over the WS
     private localSlot: number,
     peerSlots: number[],
+    iceServers?: RTCIceServer[],        // server-supplied STUN/TURN (with TURN creds); falls back to STUN-only
   ) {
+    this.rtcConfig = iceServers && iceServers.length ? { iceServers } : RTC_CONFIG;
     for (const slot of peerSlots) this.addPeer(slot);
   }
 
   private addPeer(slot: number) {
     let pc: RTCPeerConnection;
-    try { pc = new RTCPeerConnection(RTC_CONFIG); }
+    try { pc = new RTCPeerConnection(this.rtcConfig); }
     catch { return; } // WebRTC blocked/unavailable → this peer stays on the WS fallback
     const st: PeerState = { slot, pc, dc: null, open: false, remoteSet: false, pendingIce: [], audioSender: null };
     this.peers.set(slot, st);

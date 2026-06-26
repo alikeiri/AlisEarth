@@ -22,6 +22,10 @@ const HOST = process.env.DEPLOY_HOST || local.DEPLOY_HOST;
 const USER = process.env.DEPLOY_USER || local.DEPLOY_USER || 'root';
 const PASS = process.env.DEPLOY_PASS || local.DEPLOY_PASS;
 const ADVISOR_KEY = process.env.ADVISOR_KEY || local.ADVISOR_KEY;
+// voice chat: shared coturn secret + host (reuses the existing Matrix TURN via
+// use-auth-secret). Passed only to the container env, never written to the repo.
+const TURN_SECRET = process.env.TURN_SECRET || local.TURN_SECRET || '';
+const TURN_HOST = process.env.TURN_HOST || local.TURN_HOST || '';
 if (!HOST || !PASS) { console.error('Set DEPLOY_HOST / DEPLOY_PASS (env or deploy/secrets.local.json)'); process.exit(1); }
 
 // target: 'test' (staging) or 'prod' (default). Selects an isolated container set.
@@ -94,13 +98,14 @@ conn.on('ready', async () => {
     await exec(`docker rm -f ${NAME} 2>/dev/null || true`);
     // optional Claude strategist key: lives only in the container env, never in files
     const advisorEnv = ADVISOR_KEY ? `-e ADVISOR_KEY='${ADVISOR_KEY}' ` : '';
+    const turnEnv = (TURN_SECRET && TURN_HOST) ? `-e TURN_SECRET='${TURN_SECRET}' -e TURN_HOST='${TURN_HOST}' ` : '';
     const run = await exec(
       // publish ONLY on localhost: nginx reverse-proxies from 127.0.0.1, and binding
       // here (not just ufw, which Docker's iptables bypasses) blocks direct internet
       // access to the game port — so the X-Forwarded-For the app trusts can only come
       // from the proxy, not a spoofed client hitting the port directly.
       `docker run -d --name ${NAME} --restart unless-stopped ` +
-      `-p 127.0.0.1:${PORT}:8080 -v ${REMOTE}:/app -w /app -m ${MEM} ${advisorEnv}node:20-alpine ` +
+      `-p 127.0.0.1:${PORT}:8080 -v ${REMOTE}:/app -w /app -m ${MEM} ${advisorEnv}${turnEnv}node:20-alpine ` +
       `sh -c "[ -d node_modules ] || npm install --omit=dev --no-audit --no-fund; exec node server.mjs"`
     );
     console.log('docker run:', run.out, '(exit', run.code + ')');

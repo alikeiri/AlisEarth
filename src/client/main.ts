@@ -369,7 +369,7 @@ class NetGame implements GameLike {
   private voiceRtc: RtcMesh | null = null;  // snapshot mode has no input mesh — voice gets its own
   private voice: VoiceController | null = null;
 
-  constructor(private net: Net, seed: number, nPlayers: number, me: number, roster?: any[]) {
+  constructor(private net: Net, seed: number, nPlayers: number, me: number, roster?: any[], iceServers?: RTCIceServer[]) {
     this.map = genMap(seed, nPlayers);
     this.me = me;
     this.roster = roster || [];
@@ -386,7 +386,7 @@ class NetGame implements GameLike {
     // the server-relayed 'rtc' messages.
     const peerSlots = this.roster.map((_, i) => i).filter(i => i !== me && !this.roster[i]?.isAI);
     if (peerSlots.length) {
-      this.voiceRtc = new RtcMesh(s => this.net.send(s), me, peerSlots);
+      this.voiceRtc = new RtcMesh(s => this.net.send(s), me, peerSlots, iceServers);
       net.on('rtc', (x: any) => this.voiceRtc?.onSignal(x));
       this.voice = new VoiceController(this.voiceRtc, { myTeam: (this.roster[me] as any)?.team, teamOf: (s) => (this.roster[s] as any)?.team });
     }
@@ -482,7 +482,7 @@ class NetLockstepGame implements GameLike {
     const aiSet = new Set<number>(m.aiSlots || []);
     const peerSlots = specs.map((_: any, i: number) => i).filter((i: number) => i !== this.me && !aiSet.has(i) && !specs[i].isAI);
     if (peerSlots.length) {
-      this.rtc = new RtcMesh(s => this.net.send(s), this.me, peerSlots);
+      this.rtc = new RtcMesh(s => this.net.send(s), this.me, peerSlots, m.iceServers);
       this.rtc.onFrame = (player, frames) => this.engine.receive({ player, frames });
       net.on('rtc', (x: any) => this.rtc?.onSignal(x));
       // voice chat rides the input mesh's audio; team info lets the player talk to team-only
@@ -3849,7 +3849,7 @@ async function connectNet(): Promise<Net> {
     if (typeof m.fog === 'boolean') fogEnabled = m.fog; // host's lobby fog choice applies to all
     // lockstep rooms run a local deterministic sim driven by relayed inputs;
     // snapshot rooms render server-authoritative snapshots
-    const g = m.lockstep ? new NetLockstepGame(n, m) : new NetGame(n, m.seed, m.players.length, m.you, m.players);
+    const g = m.lockstep ? new NetLockstepGame(n, m) : new NetGame(n, m.seed, m.players.length, m.you, m.players, m.iceServers);
     startGame(g);
   });
   n.on('lobby', (m: any) => renderMpLobby(m));

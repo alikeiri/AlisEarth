@@ -760,6 +760,22 @@ function departMidGame(room: Room, leaverSlot: number) {
   }
 }
 
+// Voice/P2P ICE config sent to clients at match start: STUN + the shared coturn using
+// EPHEMERAL HMAC credentials (coturn's use-auth-secret / TURN REST mechanism). This
+// reuses the existing TURN with NO change to its config, so Matrix keeps working. The
+// secret + host come from the container env (never the repo or the durable client).
+const TURN_SECRET = process.env.TURN_SECRET || '';
+const TURN_HOST = process.env.TURN_HOST || '';
+function turnIce(): any[] {
+  const ice: any[] = [{ urls: 'stun:stun.l.google.com:19302' }];
+  if (TURN_SECRET && TURN_HOST) {
+    const username = (Math.floor(Date.now() / 1000) + 24 * 3600) + ':ig'; // 24h-lived
+    const credential = createHmac('sha1', TURN_SECRET).update(username).digest('base64');
+    ice.push({ urls: [`turn:${TURN_HOST}:3478`, `turn:${TURN_HOST}:3478?transport=tcp`, `turns:${TURN_HOST}:5349`], username, credential });
+  }
+  return ice;
+}
+
 function startRoom(room: Room) {
   if (room.started || !room.clients.length) return;
   room.started = true; room.postGame = false; // a live game: normal mid-game disconnect cleanup applies
@@ -806,7 +822,7 @@ function startRoom(room: Room) {
     const maxPing = Math.max(0, ...room.clients.map(c => c.ping || 0));
     const lsDelay = Math.max(6, Math.min(18, Math.round(maxPing / 30)));
     room.clients.forEach((c, i) => send(c.ws, {
-      t: 'start', lockstep: true, seed, size: room.size, fog: room.fog !== false, you: i, aiSlots: room.aiSlots, delay: lsDelay,
+      t: 'start', lockstep: true, seed, size: room.size, fog: room.fog !== false, you: i, aiSlots: room.aiSlots, delay: lsDelay, iceServers: turnIce(),
       players: specs.map(s => ({ name: s.name, faction: s.faction, isAI: !!s.isAI, team: s.team })),
     }));
     return;
@@ -817,7 +833,7 @@ function startRoom(room: Room) {
   room.rec = { seed, size: room.size, players: specs.map(s => ({ ...s })), cmds: [] };
   try { room.sim.aiProfile = JSON.parse(readFileSync(AI_PROFILE_FILE, 'utf8')); } catch { /* fresh AI */ }
   room.clients.forEach((c, i) =>
-    send(c.ws, { t: 'start', seed, size: room.size, fog: room.fog !== false, you: i, players: specs.map(s => ({ name: s.name, faction: s.faction, isAI: !!s.isAI, team: s.team })) }));
+    send(c.ws, { t: 'start', seed, size: room.size, fog: room.fog !== false, you: i, iceServers: turnIce(), players: specs.map(s => ({ name: s.name, faction: s.faction, isAI: !!s.isAI, team: s.team })) }));
 
   let tickErrs = 0;
   // --- performance monitoring: time each tick's work and watch for the loop
