@@ -40,7 +40,7 @@ CC-BY 3.0 / 4.0 (attribution required — used under these terms):
 - Wall ("Concrete Barrier HQ") — Sabri Ayeş (Sketchfab, CC-BY 4.0)
 - Patriot SAM ("MIM-104 Patriot Air Defense System") — Muhamad Mirza Arrafi (Sketchfab, CC-BY 4.0)
 - Flak Gun ("Type-625 Anti Aircraft Gun Missile System") — Muhamad Mirza Arrafi (Sketchfab, CC-BY 4.0)
-- Air Transport ("Low Poly UH-60 Black Hawk") — Sketchfab; author + license TBD (confirm CC-BY/CC0)
+- Air Transport ("Low Poly UH-60 Black Hawk") — SIpriv (@S1Priv) (Sketchfab, CC-BY 4.0)
 - Oil Field ("Oil pump") — Poly by Google
 - (retired) War Factory ("Factory") — Poly by Google — replaced by RTS Military Building 1
 
