@@ -176,7 +176,7 @@ class LocalGame implements GameLike {
     if (steelEnabled) seed |= 0x08000000;
     if (metalEnabled) seed |= 0x04000000;
     seed |= (oreLevelSel & 3) << 24;
-    const LVL_NAMES = ['Easy', 'Normal', 'Hard', 'Brutal', 'Bomber Baron'];
+    const LVL_NAMES = AI_DIFF_NAMES;
     const pickFacs = (avoid: string[], n: number) => {
       const pool = Object.keys(FACTIONS).filter(f => !avoid.includes(f));
       const out: string[] = [];
@@ -468,7 +468,10 @@ class NetLockstepGame implements GameLike {
     setMapSize(m.size || 112);
     this.me = m.you;
     this.roster = m.players || [];
-    const specs = (m.players || []).map((p: any, i: number) => ({ name: p.name, faction: p.faction, isAI: !!p.isAI, team: p.team ?? (i + 1) }));
+    // include aiLvl so lockstep AIs run at the host's chosen difficulty (incl. Bomber
+    // Baron / lvl 4). It comes from the server's start payload — same for every client —
+    // so all sims stay deterministic. Without it the sim defaulted every AI to Normal.
+    const specs = (m.players || []).map((p: any, i: number) => ({ name: p.name, faction: p.faction, isAI: !!p.isAI, team: p.team ?? (i + 1), aiLvl: p.aiLvl }));
     this.sim = new Sim(m.seed, specs);
     this.map = this.sim.map;
     // input delay is chosen by the server from the worst player's ping (6..18),
@@ -3118,7 +3121,7 @@ function renderAiList() {
   list.innerHTML = aiList.map((ai, i) => {
     const dot = `<span style="width:10px;height:10px;border-radius:50%;flex:0 0 auto;background:${TEAM_TINT[(ai.team - 1) % 4]}"></span>`;
     const lvl = `<select data-i="${i}" class="aiLvl" style="${selStyle};flex:1">` +
-      ['Easy', 'Normal', 'Hard', 'Brutal', 'Bomber Baron'].map((n, v) => `<option value="${v}" ${v === ai.lvl ? 'selected' : ''}>${n}</option>`).join('') + '</select>';
+      AI_DIFF_NAMES.map((n, v) => `<option value="${v}" ${v === ai.lvl ? 'selected' : ''}>${n}</option>`).join('') + '</select>';
     const team = `<select data-i="${i}" class="aiTeam" style="${selStyle};flex:1">` +
       [1, 2, 3, 4].map(t => `<option value="${t}" ${t === ai.team ? 'selected' : ''}>${t === 1 ? '🤝 Your team' : '⚔ Enemy ' + t}</option>`).join('') + '</select>';
     return `<div style="display:flex;gap:6px;align-items:center">${dot}` +
@@ -3681,7 +3684,7 @@ function renderMpLobby(m: any) {
       `${u.inGame ? ' <span style="color:#5f7384">· in game</span>' : ''}</span>${pingBadge(u.ping)}</div>`).join('')
     : '<div style="color:#5f7384">No one else online yet</div>';
   const sizes: Record<number, string> = { 112: 'Medium', 136: 'Large', 160: 'Huge', 72: 'Small', 96: 'Medium', 128: 'Large' };
-  const diffs = ['Easy', 'Normal', 'Hard', 'Brutal'];
+  const diffs = AI_DIFF_NAMES;
   $('mpGames').innerHTML = games.length
     ? games.map((g: any) => `<div style="display:flex;align-items:center;gap:6px;padding:3px 0;border-bottom:1px solid #243240">` +
       `<span style="flex:1;min-width:0">${escapeHtml(g.host)}'s game · ${g.players}/${g.max} · ${sizes[g.size] || g.size} · ${diffs[g.diff] || ''}</span>` +
@@ -3767,6 +3770,9 @@ const lobbyCfg: { size: number; mapType: string; fog: boolean; oreLevel: number;
 const LOBBY_SIZES: [number, string][] = [[96, 'Medium'], [128, 'Large'], [160, 'Huge'], [192, 'Giant']];
 const ORE_LEVELS: [number, string][] = [[0, 'Normal'], [2, 'Rich'], [1, 'Sparse']];
 const LOBBY_MAPS: [string, string][] = [['continent', 'Continent'], ['islands', 'Islands'], ['urban', 'Urban'], ['flat', 'Flat City'], ['steel', 'Steel Arena'], ['metal', 'Metal Plain']];
+// single source of truth for AI difficulty labels (index = aiLvl). Bomber Baron is lvl 4.
+// every difficulty dropdown / label reads this so adding a level can't desync the menus.
+const AI_DIFF_NAMES = ['Easy', 'Normal', 'Hard', 'Brutal', 'Bomber Baron'];
 function sendRoomCfg() {
   if (net && lobbyIsHost) net.send({ t: 'roomcfg', size: lobbyCfg.size, mapType: lobbyCfg.mapType, fog: lobbyCfg.fog, oreLevel: lobbyCfg.oreLevel, ai: lobbyCfg.ai, teams: lobbyCfg.teams });
 }
@@ -3831,7 +3837,7 @@ function renderLcAi() {
   const sel = 'background:#1a2430;color:#cfe0ee;border:1px solid #2c3e50;border-radius:4px;padding:4px;font-size:12px';
   el.innerHTML = lobbyCfg.ai.map((a, i) => {
     const dot = `<span style="width:10px;height:10px;border-radius:50%;flex:0 0 auto;background:${TEAM_TINT[(a.team - 1) % 4]}"></span>`;
-    const lvl = `<select data-i="${i}" class="lcLvl" style="${sel};flex:1">${['Easy', 'Normal', 'Hard', 'Brutal'].map((n, v) => `<option value="${v}" ${v === a.lvl ? 'selected' : ''}>${n}</option>`).join('')}</select>`;
+    const lvl = `<select data-i="${i}" class="lcLvl" style="${sel};flex:1">${AI_DIFF_NAMES.map((n, v) => `<option value="${v}" ${v === a.lvl ? 'selected' : ''}>${n}</option>`).join('')}</select>`;
     const team = `<select data-i="${i}" class="lcTeam" style="${sel};flex:1">${[1, 2, 3, 4, 5, 6].map(t => `<option value="${t}" ${t === a.team ? 'selected' : ''}>Team ${t}</option>`).join('')}</select>`;
     return `<div style="display:flex;gap:6px;align-items:center;margin-bottom:4px">${dot}<span style="flex:0 0 auto;font-size:12px;color:#9fb3c8;min-width:30px">AI ${i + 1}</span>${lvl}${team}<button type="button" data-i="${i}" class="lcDel" title="Remove" style="background:#2a1d1d;border:1px solid #5a3030;color:#ff9a8a;border-radius:4px;padding:3px 8px;cursor:pointer">✕</button></div>`;
   }).join('') || '<div style="color:#5f7384;font-size:12px">No AI — one enemy is added if you start solo.</div>';

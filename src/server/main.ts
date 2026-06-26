@@ -823,7 +823,7 @@ function startRoom(room: Room) {
     const lsDelay = Math.max(6, Math.min(18, Math.round(maxPing / 30)));
     room.clients.forEach((c, i) => send(c.ws, {
       t: 'start', lockstep: true, seed, size: room.size, fog: room.fog !== false, you: i, aiSlots: room.aiSlots, delay: lsDelay, iceServers: turnIce(),
-      players: specs.map(s => ({ name: s.name, faction: s.faction, isAI: !!s.isAI, team: s.team })),
+      players: specs.map(s => ({ name: s.name, faction: s.faction, isAI: !!s.isAI, team: s.team, aiLvl: s.aiLvl })),
     }));
     return;
   }
@@ -833,7 +833,7 @@ function startRoom(room: Room) {
   room.rec = { seed, size: room.size, players: specs.map(s => ({ ...s })), cmds: [] };
   try { room.sim.aiProfile = JSON.parse(readFileSync(AI_PROFILE_FILE, 'utf8')); } catch { /* fresh AI */ }
   room.clients.forEach((c, i) =>
-    send(c.ws, { t: 'start', seed, size: room.size, fog: room.fog !== false, you: i, iceServers: turnIce(), players: specs.map(s => ({ name: s.name, faction: s.faction, isAI: !!s.isAI, team: s.team })) }));
+    send(c.ws, { t: 'start', seed, size: room.size, fog: room.fog !== false, you: i, iceServers: turnIce(), players: specs.map(s => ({ name: s.name, faction: s.faction, isAI: !!s.isAI, team: s.team, aiLvl: s.aiLvl })) }));
 
   let tickErrs = 0;
   // --- performance monitoring: time each tick's work and watch for the loop

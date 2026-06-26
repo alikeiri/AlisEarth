@@ -1,4 +1,5 @@
-// Scripted AI with difficulty levels (0 easy, 1 normal, 2 hard, 3 brutal).
+// Scripted AI with difficulty levels (0 easy, 1 normal, 2 hard, 3 brutal, 4 Bomber
+// Baron — Brutal economy + a turtle-and-mass-bombers doctrine layered on top).
 // Macro loop: expand refineries toward unclaimed ore (creeping power nodes when
 // the frontier is out of build range), keep multiple production buildings
 // running, garrison turrets/SAMs, then apply constant pressure after the peace
