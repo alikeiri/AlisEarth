@@ -983,7 +983,9 @@ class GameClient {
     bar.classList.remove('hidden');
     const tap = (act: string, btn: HTMLElement) => {
       const ids = this.myUnitIds();
-      if (act === 'stop') this.issueToUnits({ k: 'stop' });
+      if (act === 'box') { this.touch.boxToggle = !this.touch.boxToggle; btn.classList.toggle('on', this.touch.boxToggle); }
+      else if (act === 'deselect') { this.selection.clear(); this.patrolMode = false; this.patrolDraw = null; this.ui.setPlacing(null); }
+      else if (act === 'stop') this.issueToUnits({ k: 'stop' });
       else if (act === 'hold') { if (ids.length) { const anyAgg = ids.some(id => !this.byId.get(id)?.st); this.game.issue({ k: 'stance', p: this.game.me, ids, stance: anyAgg ? 1 : 0 }); } }
       else if (act === 'holdfire') {
         if (ids.length) { const anyFiring = ids.some(id => !this.byId.get(id)?.hf); this.game.issue({ k: 'holdfire', p: this.game.me, ids, on: anyFiring }); }
