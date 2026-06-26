@@ -1223,7 +1223,7 @@ export class Renderer {
     // (factoryProto stays null, the old poly.pizza factory is retired)
     this.loadBuildingModel('factory', 'powerplant', 5.4); // ("RTS Military Building 1" by Sabri Ayeş, Sketchfab, CC-BY) — War Factory 50% larger (3.6 -> 5.4)
     this.loadBuildingModel('power', 'ammobox', 2.4);       // Power Plant GLB ("RTS Ammo Box" by Sabri Ayeş, Sketchfab, CC-BY) — 50% smaller (4.8 -> 2.4)
-    this.loadBuildingModel('refinery', 'refinery', 6.1); // Ore Refinery GLB (Sketchfab, CC-BY) — 30% smaller (8.72 -> 6.1)
+    this.loadBuildingModel('refinery', 'refinery', 5.3); // Ore Refinery GLB (Sketchfab, CC-BY) — trimmed so it doesn't overhang the adjacent conyard
     this.loadBuildingModel('airfield', 'airfield', 5.6);   // Airfield GLB ("RTS Airport" by Sabri Ayeş, Sketchfab, CC-BY) — sized to its 2-cell footprint (was an oversized 8.28 pad)
     this.loadBuildingModel('barracks', 'barracks', 4.5);   // Barracks GLB ("RTS Barracks" by Sabri Ayeş, Sketchfab, CC-BY) — 50% larger
     this.loadBuildingModel('radar', 'radar', 2.83);        // Radar Dome GLB ("RTS Radar Tower" by Sabri Ayeş, Sketchfab, CC-BY) — 30% larger (2.18 -> 2.83)
@@ -1231,7 +1231,7 @@ export class Renderer {
     this.loadBuildingModel('lab', 'lab', 3.6);             // Research Lab GLB ("ResearchCenter_Building001" by Christian Rudorff, Sketchfab, CC-BY) — 25% smaller (4.8 -> 3.6)
     this.loadBuildingModel('sam', 'sam', 1.9);             // Missile Battery GLB ("MissileTower_Building002" by Christian Rudorff, Sketchfab, CC-BY) — AA missile tower
     this.loadBuildingModel('cannon', 'railgun', 2.4);      // Heavy Cannon GLB ("Railgun Turret" by Yudha Mfr, Sketchfab, CC-BY) — animated; falls back to procedural until railgun.glb is present
-    this.loadBuildingModel('conyard', 'conyard', 5.0);     // Construction Yard GLB (AI-generated via Gemini + Tripo3D) — static fused mesh; reduced from 6.5 so the crane no longer overhangs the adjacent refinery
+    this.loadBuildingModel('conyard', 'conyard', 4.0);     // Construction Yard GLB (AI-generated via Gemini + Tripo3D) — static fused mesh; trimmed so it sits within its cells and clears the adjacent refinery
     // Oil Rig reuses the oil-well "Oil Pump" model, 25% taller than the free well
     // (well is normalised to 2.0 tall in loadOilModel) so building one just enlarges it
     this.loadBuildingModel('oilrig', 'oilfield', 2.5, true);
