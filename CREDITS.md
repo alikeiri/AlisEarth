@@ -29,6 +29,7 @@ CC-BY 3.0 / 4.0 (attribution required — used under these terms):
 - Destroyer ("1:1 Low poly US NAVY DDG-51 USS Arleigh Burke") — Yi Tsung Lee (Sketchfab, CC-BY 4.0)
 - Submarine — Poly by Google
 - IFV ("M2 Bradley IFV") — 42manako (Sketchfab, CC-BY 4.0)
+- Interceptor Team ("PS1/Low Poly Night Vision Special Forces Soldier") — Jellypack (Sketchfab, CC-BY 4.0)
 - Ore Refinery ("Rare Earth Element Refinery") — novusod (Sketchfab, CC-BY 4.0) — edited & texture-optimized
 - Artillery ("Ha-to artillery") — Herdyn (Sketchfab, CC-BY 4.0)
 - Airfield ("RTS Airport") — Sabri Ayeş (Sketchfab, CC-BY 4.0)

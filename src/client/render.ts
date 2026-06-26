@@ -57,7 +57,7 @@ const MODEL_DEFS: Record<string, { file: string; size: number; axis: 'l' | 'h'; 
   minidrone:   { file: 'drone',    size: 0.55, axis: 'l', ry: 0 },
   chemtrooper: { file: 'rocket',   size: 1.15, axis: 'h', ry: 0, tint: 0xa8b23c },
   biotrooper:  { file: 'rocket',   size: 1.15, axis: 'h', ry: 0, tint: 0x8a5cab },
-  interceptor: { file: 'rocket',   size: 1.15, axis: 'h', ry: 0, tint: 0x2fd6c8 }, // anti-drone team — teal/tech tint
+  interceptor: { file: 'nvsoldier', size: 1.20, axis: 'h', ry: 0 }, // anti-drone team — PS1 night-vision special-forces soldier (Jellypack, CC-BY)
   chemtank:    { file: 'tank',     size: 1.50, axis: 'l', ry: 0 },
   biotank:     { file: 'tank',     size: 1.55, axis: 'l', ry: 0 },
   stealthtank: { file: 'tank',     size: 1.55, axis: 'l', ry: 0 },
@@ -1945,8 +1945,10 @@ export class Renderer {
     if (def.axis === 'h' && hasSkin && clips.length) {
       const pick = (re: RegExp) => clips.find(a => re.test(a.name));
       // pose 0 = rest (weapon lowered), pose 1 = aim (only while firing), 2.. = run cycle
-      const rest = pick(/Idle_Gun(?!_)/i) || pick(/Idle_Neutral/i) || pick(/Standing/i) || pick(/Idle/i) || clips[0];
-      const aim = pick(/Idle_Gun_Shoot/i) || pick(/Idle_Gun_Pointing/i) || rest;
+      // …also recognise the night-vision soldier's clip names (SMGpose / SMGwalk): a standing
+      // aim stance for rest, a firing variant for aim (no effect on models with Idle_*/Run names)
+      const rest = pick(/Idle_Gun(?!_)/i) || pick(/Idle_Neutral/i) || pick(/Standing/i) || pick(/Idle/i) || pick(/SMGpose(?![0-9])/i) || pick(/pose(?![0-9])/i) || clips[0];
+      const aim = pick(/Idle_Gun_Shoot/i) || pick(/Idle_Gun_Pointing/i) || pick(/SMGpose2/i) || pick(/pose2/i) || rest;
       const run = pick(/\|Run$/) || pick(/Run_Shoot/i) || pick(/Walk/i); // plain Run cycle while moving
       const death = pick(/\|Death$/i) || pick(/Death/i);                 // played once on death
       const mixer = new THREE.AnimationMixer(src);
