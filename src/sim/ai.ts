@@ -465,6 +465,12 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
     const eng = (myU['engineer'] || []).find(e => !e.orders.length || e.orders[0].k !== 'oilrig');
     if (eng) cmds.push({ k: 'oilrig', p, ids: [eng.id], cx: claimableOil[0].cx, cz: claimableOil[0].cz });
   }
+  // ECONOMY BEFORE ARMY: while a refinery is still wanted, don't let the military
+  // budget (which trains at credits>1000) drain the credits before they ever reach a
+  // refinery's price (~1360-1600) — that 2-refinery income death-spiral keeps the AI
+  // permanently broke on tight starts (seeds 202/606). Hold offensive spending until
+  // there's a buffer above the refinery cost so the economy actually expands first.
+  const refSave = econBoot && nB('refinery') < refs && pl.credits < cost('refinery') + 300;
   for (const bks of (myB['barracks'] || [])) {
     if (bks.progress < bks.total || bks.queue.length >= 2) continue;
     if (armyCount >= cap) continue;
@@ -509,7 +515,7 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
     else if (missileThreat && nU('patriot') < 2 && pl.credits > 1200) {
       cmds.push({ k: 'train', p, bid: fac.id, type: 'patriot' });
     }
-    else if (armyCount < cap && pl.credits > (!econBoot ? 2200 : 1000)) {
+    else if (!refSave && armyCount < cap && pl.credits > (!econBoot ? 2200 : 1000)) {
       // islanders keep only a small home guard of vehicles
       const groundArmy = nU('tank') + nU('heavy') + nU('ifv') + nU('mlrs') + nU('aatank') + nU('flak');
       if (island && groundArmy >= 8) continue;
@@ -532,7 +538,7 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
     }
   }
   const dro = (myB['dronefac'] || []).find(b => b.progress >= b.total && b.queue.length < 2);
-  if (dro && armyCount < cap && pl.credits > (ecoShort ? 2400 : 1100)) {
+  if (dro && !refSave && armyCount < cap && pl.credits > (ecoShort ? 2400 : 1100)) {
     const r = sim.aiRngP[p].next();
     // vs a heavy AA wall, attack drones just die — keep only a couple recon for vision
     const t = (airWall && !island)
@@ -541,7 +547,7 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
     if (t) cmds.push({ k: 'train', p, bid: dro.id, type: t });
   }
   const af = (myB['airforce'] || []).find(b => b.progress >= b.total && b.queue.length < 2);
-  if (af && goAir && armyCount < cap && pl.credits > (island || dirAir || prefAir ? 1800 : 2000)) {
+  if (af && goAir && !refSave && armyCount < cap && pl.credits > (island || dirAir || prefAir ? 1800 : 2000)) {
     const r = sim.aiRngP[p].next();
     // once the enemy army is broken (but buildings remain), switch to bombers to
     // level the base; vs an air-heavy enemy build interceptors; else a mix
