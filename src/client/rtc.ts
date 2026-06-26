@@ -18,6 +18,7 @@ interface PeerState {
   open: boolean;
   remoteSet: boolean;          // remote description applied yet?
   pendingIce: RTCIceCandidateInit[]; // ICE that arrived before the remote description
+  audioSender: RTCRtpSender | null;  // voice chat: this peer's outbound mic track slot
 }
 
 const RTC_CONFIG: RTCConfiguration = {
@@ -29,8 +30,10 @@ const RTC_CONFIG: RTCConfiguration = {
 
 export class RtcMesh {
   private peers = new Map<number, PeerState>();
+  private micTrack: MediaStreamTrack | null = null; // shared mic track once voice is on
   onFrame: (player: number, frames: any[]) => void = () => {};
   onState: () => void = () => {}; // connectivity changed (drives the transport HUD)
+  onAudio: (slot: number, stream: MediaStream) => void = () => {}; // remote voice arrived
 
   constructor(
     private signal: (msg: any) => void, // send a signaling message over the WS
@@ -44,7 +47,7 @@ export class RtcMesh {
     let pc: RTCPeerConnection;
     try { pc = new RTCPeerConnection(RTC_CONFIG); }
     catch { return; } // WebRTC blocked/unavailable → this peer stays on the WS fallback
-    const st: PeerState = { slot, pc, dc: null, open: false, remoteSet: false, pendingIce: [] };
+    const st: PeerState = { slot, pc, dc: null, open: false, remoteSet: false, pendingIce: [], audioSender: null };
     this.peers.set(slot, st);
     pc.onicecandidate = e => { if (e.candidate) this.signal({ t: 'rtc', to: slot, kind: 'ice', data: e.candidate.toJSON() }); };
     pc.onconnectionstatechange = () => {
@@ -52,9 +55,14 @@ export class RtcMesh {
         if (st.open) { st.open = false; this.onState(); }
       }
     };
+    // voice chat: a remote mic track arrived — hand its stream to the app to play
+    pc.ontrack = e => { try { this.onAudio(slot, e.streams[0] || new MediaStream([e.track])); } catch { /* ignore */ } };
     // deterministic initiator (avoids offer glare): the lower slot makes the offer
     if (this.localSlot < slot) {
       this.bindChannel(st, pc.createDataChannel('ls', { ordered: false, maxRetransmits: 0 }));
+      // negotiate a 2-way audio m-line UP FRONT (track filled later via replaceTrack,
+      // which needs no renegotiation) so enabling voice mid-game just works
+      try { st.audioSender = pc.addTransceiver('audio', { direction: 'sendrecv' }).sender; if (this.micTrack) st.audioSender.replaceTrack(this.micTrack); } catch { /* no audio support */ }
       pc.createOffer()
         .then(o => pc.setLocalDescription(o))
         .then(() => this.signal({ t: 'rtc', to: slot, kind: 'offer', data: pc.localDescription }))
@@ -86,6 +94,13 @@ export class RtcMesh {
         await pc.setRemoteDescription(msg.data);
         st.remoteSet = true;
         await this.flushIce(st);
+        // voice: the offer's audio m-line created a transceiver — claim its sender so
+        // we can send our mic back, and attach the mic if voice is already on
+        if (!st.audioSender) {
+          const tx = pc.getTransceivers().find(t => t.receiver?.track?.kind === 'audio');
+          st.audioSender = tx ? tx.sender : null;
+          if (st.audioSender && this.micTrack) { try { await st.audioSender.replaceTrack(this.micTrack); } catch { /* */ } }
+        }
         const a = await pc.createAnswer();
         await pc.setLocalDescription(a);
         this.signal({ t: 'rtc', to: msg.from, kind: 'answer', data: pc.localDescription });
@@ -117,6 +132,13 @@ export class RtcMesh {
     const payload = JSON.stringify({ player, frames });
     for (const st of this.peers.values()) if (st.open && st.dc) { try { st.dc.send(payload); } catch { /* drop */ } }
   }
+  // voice chat: route a mic track (or null to stop sending) to every peer. Uses
+  // replaceTrack on the pre-negotiated audio m-line, so no renegotiation is needed.
+  setMicTrack(track: MediaStreamTrack | null) {
+    this.micTrack = track;
+    for (const st of this.peers.values()) { try { st.audioSender?.replaceTrack(track); } catch { /* peer not ready */ } }
+  }
+  hasVoice(): boolean { return !!this.micTrack; }
   connectedCount(): number { let n = 0; for (const st of this.peers.values()) if (st.open) n++; return n; }
   peerCount(): number { return this.peers.size; }
   close() {

@@ -95,8 +95,10 @@
   #powerbar { height: 100%; width: 50%; background: var(--good); transition: width .3s; }
   #facName { font-weight: 600; color: #eceff1; }
   #gameClock { margin-left: auto; color: #78909c; font-variant-numeric: tabular-nums; }
-  #muteBtn, #musBtn { cursor: pointer; font-size: 16px; padding: 0 6px; user-select: none; }
-  #muteBtn:hover, #musBtn:hover { transform: scale(1.15); }
+  #muteBtn, #musBtn, #voiceBtn { cursor: pointer; font-size: 16px; padding: 0 6px; user-select: none; }
+  #muteBtn:hover, #musBtn:hover, #voiceBtn:hover { transform: scale(1.15); }
+  #voiceBtn.live { filter: drop-shadow(0 0 4px #57d977); }
+  #voiceBtn.muted { opacity: 0.5; }
   #musLabel { font-size: 11px; color: #ffc940; opacity: 0; transition: opacity .25s; white-space: nowrap; }
   #exitBtn { cursor: pointer; font-size: 15px; padding: 0 8px; color: #ff8a7a; user-select: none; font-weight: 700; }
   #exitBtn:hover { color: var(--bad); transform: scale(1.15); }
@@ -497,6 +499,7 @@
       <div id="speedInd" class="hidden" style="color:#ffc940;font-weight:700;font-size:13px"></div>
       <div id="gameClock">00:00</div>
       <div id="perfStat" title="Frame rate and (multiplayer) server ping" style="font-size:12px;font-variant-numeric:tabular-nums;color:#8aa0b2"></div>
+      <div id="voiceBtn" class="hidden" title="Voice chat — click to talk to other players">🎙️</div>
       <div id="musBtn" title="Change music track">🎵</div>
       <span id="musLabel"></span>
       <div id="muteBtn" title="Toggle sound">🔊</div>

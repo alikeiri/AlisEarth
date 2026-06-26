@@ -438,6 +438,9 @@ class NetLockstepGame implements GameLike {
   private chatQ: any[] = [];
   private roster: { name: string; isAI: boolean }[] = [];
   private rtc: RtcMesh | null = null;
+  private micStream: MediaStream | null = null;   // voice chat: local mic (once enabled)
+  private voiceMuted = true;                       // start muted even after enabling
+  private audioEls = new Map<number, HTMLAudioElement>(); // per-peer remote voice players
 
   constructor(private net: Net, m: any) {
     setMapSize(m.size || 112);
@@ -460,6 +463,13 @@ class NetLockstepGame implements GameLike {
       this.rtc = new RtcMesh(s => this.net.send(s), this.me, peerSlots);
       this.rtc.onFrame = (player, frames) => this.engine.receive({ player, frames });
       net.on('rtc', (x: any) => this.rtc?.onSignal(x));
+      // voice chat: play each peer's incoming mic stream through a hidden <audio>
+      this.rtc.onAudio = (slot, stream) => {
+        let el = this.audioEls.get(slot);
+        if (!el) { el = new Audio(); el.autoplay = true; (el as any).playsInline = true; this.audioEls.set(slot, el); }
+        el.srcObject = stream;
+        el.play?.().catch(() => { /* autoplay gate; the Voice button is the user gesture */ });
+      };
     }
     this.engine.send = msg => {
       // prefer the unreliable DataChannel (no head-of-line blocking) once P2P is up
@@ -519,6 +529,25 @@ class NetLockstepGame implements GameLike {
   // debug overlay telemetry: socket counters + ping + lockstep-specific health
   netStats() { return { ...this.net.stats, stalls: this.engine.stalls, tick: this.sim.tickN, delay: this.engine.delay, leads: this.engine.inputLeads(), roster: this.roster, rtc: this.rtc ? { n: this.rtc.connectedCount(), of: this.rtc.peerCount() } : null }; }
   status() { return this.sim.done ? { over: true, winner: this.sim.winner } : { over: false, winner: -2 }; }
+  // ---- voice chat (WebRTC audio over the existing peer mesh) ----
+  voiceAvailable(): boolean { return !!this.rtc && this.rtc.peerCount() > 0; }
+  voiceState(): 'off' | 'live' | 'muted' { return !this.micStream ? 'off' : this.voiceMuted ? 'muted' : 'live'; }
+  // returns the new state; first call requests the mic, later calls toggle mute
+  async toggleVoice(): Promise<'off' | 'live' | 'muted'> {
+    if (!this.rtc) return 'off';
+    if (!this.micStream) {
+      try { this.micStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }, video: false }); }
+      catch { this.micStream = null; return 'off'; } // denied / no mic
+      const tr = this.micStream.getAudioTracks()[0];
+      this.voiceMuted = false; if (tr) tr.enabled = true;
+      this.rtc.setMicTrack(tr || null);
+      return 'live';
+    }
+    this.voiceMuted = !this.voiceMuted;
+    const tr = this.micStream.getAudioTracks()[0];
+    if (tr) tr.enabled = !this.voiceMuted;
+    return this.voiceMuted ? 'muted' : 'live';
+  }
   sendChat(to: any, msg: string) { this.net.send({ t: 'chat', to, msg }); }
   drainChat() { const q = this.chatQ; this.chatQ = []; return q; }
   chatTargets() {
@@ -526,7 +555,12 @@ class NetLockstepGame implements GameLike {
     this.roster.forEach((p, i) => { if (i !== this.me && !p.isAI) t.push({ v: i, label: '@ ' + p.name }); });
     return t;
   }
-  leave() { this.rtc?.close(); this.net.close(); }
+  leave() {
+    this.micStream?.getTracks().forEach(t => t.stop()); this.micStream = null;
+    for (const el of this.audioEls.values()) { try { el.srcObject = null; el.pause?.(); } catch { /* */ } }
+    this.audioEls.clear();
+    this.rtc?.close(); this.net.close();
+  }
 }
 
 // ---------------- Game client (render + input loop) ----------------
@@ -1006,6 +1040,25 @@ class GameClient {
       on(btn, 'touchstart', h, { passive: false });
       on(btn, 'click', h);
     });
+    // voice chat: a mic toggle in the topbar, shown only in a multiplayer game with
+    // human peers. First tap asks for the mic; later taps mute/unmute.
+    const voiceBtn = document.getElementById('voiceBtn');
+    const g: any = this.game;
+    if (voiceBtn && g && typeof g.voiceAvailable === 'function' && g.voiceAvailable()) {
+      voiceBtn.classList.remove('hidden');
+      const syncVoice = () => {
+        const st = g.voiceState ? g.voiceState() : 'off';
+        voiceBtn.classList.toggle('live', st === 'live');
+        voiceBtn.classList.toggle('muted', st === 'muted');
+        voiceBtn.title = st === 'live' ? 'Voice: ON (talking) — click to mute'
+          : st === 'muted' ? 'Voice: muted — click to talk'
+          : 'Voice chat — click to talk to other players';
+      };
+      syncVoice();
+      on(voiceBtn, 'click', async () => { audio.init(); await g.toggleVoice(); syncVoice(); });
+    } else if (voiceBtn) {
+      voiceBtn.classList.add('hidden'); // single-player / no peers
+    }
     // minimap: tap/drag to jump the camera (touch); on desktop left-click/drag
     // jumps the camera and right-click sends the selected units to that spot
     const mm = document.getElementById('minimap');
