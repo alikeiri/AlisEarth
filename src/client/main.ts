@@ -3,7 +3,7 @@
 
 import { Sim } from '../sim/sim';
 import { aiTick } from '../sim/ai';
-import { FACTIONS, BUILDINGS, UNITS, PLAYER_COLORS, SIM_VERSION, UPG_MAX } from '../sim/data';
+import { FACTIONS, BUILDINGS, UNITS, PLAYER_COLORS, SIM_VERSION, UPG_MAX, SPACING_EXEMPT } from '../sim/data';
 import { GameMap, genMap, setMapSize, W, H, MAXD, SEA } from '../sim/map';
 import { Renderer, gfxQuality, preloadModels } from './render';
 import { UI } from './ui';
@@ -548,6 +548,10 @@ function canPlaceClient(map: GameMap, views: any[], me: number, type: string, cx
   for (const v of views) {
     if (!v.b) continue;
     if (v.cx < cx + s && v.cx + v.sz > cx && v.cz < cz + s && v.cz + v.sz > cz) return false;
+    // 1-tile spacing: economy/production buildings can't be placed directly touching
+    // another such building (mirrors sim.canPlace). Walls + defenses are exempt.
+    if (!SPACING_EXEMPT.has(type) && !SPACING_EXEMPT.has(v.t) &&
+        v.cx < cx + s + 1 && v.cx + v.sz > cx - 1 && v.cz < cz + s + 1 && v.cz + v.sz > cz - 1) return false;
     // walls / tank barriers don't anchor placement — can't creep the base out
     // with a chain of cheap walls; a real structure must be within reach
     if (v.o === me && v.t !== 'wall' && v.t !== 'barrier') {
