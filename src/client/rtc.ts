@@ -107,6 +107,10 @@ export class RtcMesh {
         // we can send our mic back, and attach the mic if voice is already on
         if (!st.audioSender) {
           const tx = pc.getTransceivers().find(t => t.receiver?.track?.kind === 'audio');
+          // force 2-way audio: the auto-created transceiver from the offer can default to
+          // recvonly, which would make the answerer hear the offerer but never send its
+          // own mic back — so the offerer hears silence. sendrecv fixes both directions.
+          if (tx) { try { tx.direction = 'sendrecv'; } catch { /* older browser */ } }
           st.audioSender = tx ? tx.sender : null;
           if (st.audioSender && this.micTrack) { try { await st.audioSender.replaceTrack(this.micFor(st.slot)); } catch { /* */ } }
         }
@@ -171,13 +175,30 @@ export class VoiceController {
   private muted = true;
   private target: 'all' | 'team' | number = 'all'; // who hears me: everyone / my team / one player
   private audioEls = new Map<number, HTMLAudioElement>();
+  private armed = false;
   constructor(private mesh: RtcMesh, private opts: { myTeam?: number; teamOf?: (slot: number) => number | undefined } = {}) {
     mesh.onAudio = (slot, stream) => {
       let el = this.audioEls.get(slot);
       if (!el) { el = new Audio(); el.autoplay = true; (el as any).playsInline = true; this.audioEls.set(slot, el); }
       el.srcObject = stream;
-      el.play?.().catch(() => { /* autoplay gate; the Voice button is the user gesture */ });
+      this.playAll();
     };
+  }
+  // browsers block audio playback until a user gesture — if play() is rejected, retry
+  // every remote stream on the next click/keypress (the player interacts constantly)
+  private playAll() {
+    for (const el of this.audioEls.values()) el.play?.().catch(() => this.armResume());
+  }
+  private armResume() {
+    if (this.armed) return;
+    this.armed = true;
+    const resume = () => {
+      this.armed = false;
+      document.removeEventListener('pointerdown', resume); document.removeEventListener('keydown', resume);
+      this.playAll();
+    };
+    document.addEventListener('pointerdown', resume, { once: true });
+    document.addEventListener('keydown', resume, { once: true });
   }
   available(): boolean { return this.mesh.peerCount() > 0; }
   state(): 'off' | 'live' | 'muted' { return !this.micStream ? 'off' : this.muted ? 'muted' : 'live'; }
