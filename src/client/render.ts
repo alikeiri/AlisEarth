@@ -351,6 +351,23 @@ function noPowerIconTex(): THREE.CanvasTexture {
   return NOPWR_TEX;
 }
 
+// "primary factory" badge: a gold star (its produced units roll out from here)
+let STAR_TEX: THREE.CanvasTexture | null = null;
+function primaryStarTex(): THREE.CanvasTexture {
+  if (STAR_TEX) return STAR_TEX;
+  const cv = document.createElement('canvas'); cv.width = cv.height = 64;
+  const g = cv.getContext('2d')!;
+  g.translate(32, 33);
+  g.beginPath();
+  for (let i = 0; i < 10; i++) { const r = i % 2 ? 11 : 26, a = -Math.PI / 2 + i * Math.PI / 5; g.lineTo(Math.cos(a) * r, Math.sin(a) * r); }
+  g.closePath();
+  g.fillStyle = '#ffd23a'; g.fill();
+  g.lineWidth = 4; g.strokeStyle = 'rgba(40,30,5,0.9)'; g.stroke();
+  STAR_TEX = new THREE.CanvasTexture(cv); STAR_TEX.colorSpace = THREE.SRGBColorSpace;
+  return STAR_TEX;
+}
+const PRIMARY_STAR_TYPES = new Set(['barracks', 'factory', 'dronefac', 'airforce', 'shipyard']);
+
 // rounded, beveled base slab for buildings
 function roundedSlabGeo(w: number, d: number, h: number, r = 0.14): THREE.BufferGeometry {
   const s = new THREE.Shape();
@@ -1831,6 +1848,13 @@ export class Renderer {
         spr.name = '__noPower'; spr.scale.setScalar(0.8); spr.position.y = topY + 0.35; spr.renderOrder = 999; spr.visible = false;
         g.add(spr); g.userData.noPowerIcon = spr;
       }
+      if (PRIMARY_STAR_TYPES.has(type)) {                     // gold star when set as the primary factory (toggled in updateViews)
+        const bb = new THREE.Box3().setFromObject(g);
+        const topY = isFinite(bb.max.y) ? bb.max.y : 2;
+        const spr = new THREE.Sprite(new THREE.SpriteMaterial({ map: primaryStarTex(), transparent: true, depthTest: false, depthWrite: false }));
+        spr.name = '__primary'; spr.scale.setScalar(0.7); spr.position.y = topY + 0.55; spr.renderOrder = 999; spr.visible = false;
+        g.add(spr); g.userData.primaryStar = spr;
+      }
       return g;
     }
     return buildingGroupPro(type, col);
@@ -1933,7 +1957,9 @@ export class Renderer {
       if (death) {
         deathStart = poseSets.length;
         const N = 6;
-        for (let i = 0; i < N; i++) bakeAt(death, death.duration * (i / (N - 1))); // start → fully fallen
+        // span 0 → 0.92·duration (NOT the full duration: a looping clip wraps setTime(duration)
+        // back to t=0, which would bake the final "corpse" frame as the STANDING start pose)
+        for (let i = 0; i < N; i++) bakeAt(death, death.duration * 0.92 * (i / (N - 1)));
         this.deathDur[type] = death.duration;
       }
     } else if (def.spin && clips.length) {
@@ -2701,6 +2727,8 @@ export class Renderer {
         // defensive buildings go dark on low power → flash a "no power" badge over them
         const npi = rec.g.userData.noPowerIcon as THREE.Sprite | undefined;
         if (npi) npi.visible = noPwr && Math.sin(this.time * 6) > 0; // ~1 Hz blink
+        const star = rec.g.userData.primaryStar as THREE.Sprite | undefined;
+        if (star) star.visible = !!v.pm; // gold star over the primary factory of its type
         if (selection.has(v.i) && selN < MAX_INST) {
           this.dummy.position.set(v.x, y + 0.1, v.z);
           this.dummy.scale.setScalar((v.sz || 1) * 1.6);
@@ -2894,7 +2922,7 @@ export class Renderer {
       c.age += dt;
       const frames = this.deathParts[c.t];
       const dur = this.deathDur[c.t] || 1.2;
-      if (!frames || c.age > dur + 2.5) { this.corpses.splice(ci, 1); continue; } // play, then linger ~2.5s
+      if (!frames || c.age > dur + 1.0) { this.corpses.splice(ci, 1); continue; } // play the fall once, brief rest, then remove
       let fi = Math.floor((c.age / dur) * frames.length);
       if (fi >= frames.length) fi = frames.length - 1; // hold the fallen pose while lingering
       if (fi < 0) fi = 0;

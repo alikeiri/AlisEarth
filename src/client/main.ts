@@ -1031,6 +1031,7 @@ class GameClient {
       else if (act === 'patrol') { if (ids.length || this.selectedProdBuilding()) { this.patrolMode = !this.patrolMode; this.patrolDraw = null; } }
       else if (act === 'fortify') { const f = ids.filter(id => UNITS[this.byId.get(id)?.t]?.fortify); if (f.length) this.game.issue({ k: 'fortify', p: this.game.me, ids: f }); }
       else if (act === 'ranges') { this.showRanges = !this.showRanges; btn.classList.toggle('on', this.showRanges); }
+      else if (act === 'primary') { const pb = this.selectedProdBuilding(); if (pb) this.game.issue({ k: 'primary', p: this.game.me, bid: pb.i }); }
       else if (act === 'destruct') {
         if (ids.length) { this.game.issue({ k: 'selfdestruct', p: this.game.me, ids }); audio.play('sdbeep'); }
         else { const b = [...this.selection].map(id => this.byId.get(id)).find(v => v && v.b && v.o === this.game.me && v.t !== 'conyard'); if (b) { this.game.issue({ k: 'dismantle', p: this.game.me, bid: b.i }); audio.play('cancel'); } }
@@ -2188,6 +2189,11 @@ class GameClient {
     set('patrol', this.patrolMode || all(v => v.pa === 1));
     set('fortify', all(v => v.fo === 1));
     set('ranges', this.showRanges);
+    // "Set Primary" shows only for a single selected production building, lit when it
+    // is already the primary (its produced units roll out from here)
+    const pb = this.selectedProdBuilding();
+    const primBtn = document.querySelector('#touchBar [data-act="primary"]') as HTMLElement | null;
+    if (primBtn) { primBtn.style.display = pb ? '' : 'none'; primBtn.classList.toggle('on', !!(pb && pb.pm)); }
   }
 
   private loop = (t: number) => {
@@ -2521,7 +2527,7 @@ class GameClient {
       let oilH = false;
       if (hasEng) {
         const gp = this.renderer.groundPoint(this.mouse.x / window.innerWidth, this.mouse.y / window.innerHeight);
-        if (gp && gp.ok) {
+        if (gp) { // groundPoint returns {x,z}|null — there is no .ok field (the old gp.ok check was always false, so the ghost never showed)
           const ocx = Math.floor(gp.x), ocz = Math.floor(gp.z), m = this.game.map;
           if (m.inB(ocx, ocz) && m.oil[ocz * W + ocx] === 1 && m.occ[ocz * W + ocx] === 0) { oilH = true; this.oilCell = { cx: ocx, cz: ocz }; }
         }
