@@ -10,7 +10,7 @@ import { UI } from './ui';
 import { twemojify, twemojiParse } from './twemoji';
 import { safeLS } from './store';
 import { Net } from './net';
-import { RtcMesh } from './rtc';
+import { RtcMesh, VoiceController } from './rtc';
 import { prof } from './prof';
 import { audio } from './audio';
 import { runDeterminismProbe, mathCanary, detMathCanary } from '../sim/determinism';
@@ -359,6 +359,8 @@ class NetGame implements GameLike {
   endData: any = null; // final {players, stats} delivered with the end message
   private chatQ: any[] = [];
   private roster: { name: string; isAI: boolean }[] = [];
+  private voiceRtc: RtcMesh | null = null;  // snapshot mode has no input mesh — voice gets its own
+  private voice: VoiceController | null = null;
 
   constructor(private net: Net, seed: number, nPlayers: number, me: number, roster?: any[]) {
     this.map = genMap(seed, nPlayers);
@@ -372,7 +374,19 @@ class NetGame implements GameLike {
       if (m.stats && m.players) this.endData = { players: m.players, stats: m.stats };
     });
     net.on('chat', m => { if (this.chatQ.length < 50) this.chatQ.push(m); });
+    // voice chat: a voice-only WebRTC mesh among the HUMAN players (snapshot mode
+    // relays input via the server, so it has no P2P mesh otherwise). Signaling rides
+    // the server-relayed 'rtc' messages.
+    const peerSlots = this.roster.map((_, i) => i).filter(i => i !== me && !this.roster[i]?.isAI);
+    if (peerSlots.length) {
+      this.voiceRtc = new RtcMesh(s => this.net.send(s), me, peerSlots);
+      net.on('rtc', (x: any) => this.voiceRtc?.onSignal(x));
+      this.voice = new VoiceController(this.voiceRtc);
+    }
   }
+  voiceAvailable(): boolean { return !!this.voice && this.voice.available(); }
+  voiceState(): 'off' | 'live' | 'muted' { return this.voice ? this.voice.state() : 'off'; }
+  toggleVoice(): Promise<'off' | 'live' | 'muted'> { return this.voice ? this.voice.toggle() : Promise.resolve('off'); }
 
   sendChat(to: any, msg: string) { this.net.send({ t: 'chat', to, msg }); }
   drainChat() { const q = this.chatQ; this.chatQ = []; return q; }
@@ -411,7 +425,7 @@ class NetGame implements GameLike {
   drainEvents() { const e = this.evQ; this.evQ = []; return e; }
   issue(cmd: any) { this.net.send({ t: 'cmd', cmd }); }
   status() { return this.end; }
-  leave() { this.net.close(); }
+  leave() { this.voice?.dispose(); this.voiceRtc?.close(); this.net.close(); }
   // perf overlay telemetry: snapshot timing + the socket's receive counters
   netStats() {
     return { ...this.net.stats, sinceSnap: this.tCur ? performance.now() - this.tCur : 0, interpSpan: this.tCur - this.tPrev };
@@ -438,9 +452,7 @@ class NetLockstepGame implements GameLike {
   private chatQ: any[] = [];
   private roster: { name: string; isAI: boolean }[] = [];
   private rtc: RtcMesh | null = null;
-  private micStream: MediaStream | null = null;   // voice chat: local mic (once enabled)
-  private voiceMuted = true;                       // start muted even after enabling
-  private audioEls = new Map<number, HTMLAudioElement>(); // per-peer remote voice players
+  private voice: VoiceController | null = null;    // voice chat over the input mesh
 
   constructor(private net: Net, m: any) {
     setMapSize(m.size || 112);
@@ -463,13 +475,7 @@ class NetLockstepGame implements GameLike {
       this.rtc = new RtcMesh(s => this.net.send(s), this.me, peerSlots);
       this.rtc.onFrame = (player, frames) => this.engine.receive({ player, frames });
       net.on('rtc', (x: any) => this.rtc?.onSignal(x));
-      // voice chat: play each peer's incoming mic stream through a hidden <audio>
-      this.rtc.onAudio = (slot, stream) => {
-        let el = this.audioEls.get(slot);
-        if (!el) { el = new Audio(); el.autoplay = true; (el as any).playsInline = true; this.audioEls.set(slot, el); }
-        el.srcObject = stream;
-        el.play?.().catch(() => { /* autoplay gate; the Voice button is the user gesture */ });
-      };
+      this.voice = new VoiceController(this.rtc); // voice chat rides the input mesh's audio
     }
     this.engine.send = msg => {
       // prefer the unreliable DataChannel (no head-of-line blocking) once P2P is up
@@ -530,24 +536,9 @@ class NetLockstepGame implements GameLike {
   netStats() { return { ...this.net.stats, stalls: this.engine.stalls, tick: this.sim.tickN, delay: this.engine.delay, leads: this.engine.inputLeads(), roster: this.roster, rtc: this.rtc ? { n: this.rtc.connectedCount(), of: this.rtc.peerCount() } : null }; }
   status() { return this.sim.done ? { over: true, winner: this.sim.winner } : { over: false, winner: -2 }; }
   // ---- voice chat (WebRTC audio over the existing peer mesh) ----
-  voiceAvailable(): boolean { return !!this.rtc && this.rtc.peerCount() > 0; }
-  voiceState(): 'off' | 'live' | 'muted' { return !this.micStream ? 'off' : this.voiceMuted ? 'muted' : 'live'; }
-  // returns the new state; first call requests the mic, later calls toggle mute
-  async toggleVoice(): Promise<'off' | 'live' | 'muted'> {
-    if (!this.rtc) return 'off';
-    if (!this.micStream) {
-      try { this.micStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }, video: false }); }
-      catch { this.micStream = null; return 'off'; } // denied / no mic
-      const tr = this.micStream.getAudioTracks()[0];
-      this.voiceMuted = false; if (tr) tr.enabled = true;
-      this.rtc.setMicTrack(tr || null);
-      return 'live';
-    }
-    this.voiceMuted = !this.voiceMuted;
-    const tr = this.micStream.getAudioTracks()[0];
-    if (tr) tr.enabled = !this.voiceMuted;
-    return this.voiceMuted ? 'muted' : 'live';
-  }
+  voiceAvailable(): boolean { return !!this.voice && this.voice.available(); }
+  voiceState(): 'off' | 'live' | 'muted' { return this.voice ? this.voice.state() : 'off'; }
+  toggleVoice(): Promise<'off' | 'live' | 'muted'> { return this.voice ? this.voice.toggle() : Promise.resolve('off'); }
   sendChat(to: any, msg: string) { this.net.send({ t: 'chat', to, msg }); }
   drainChat() { const q = this.chatQ; this.chatQ = []; return q; }
   chatTargets() {
@@ -555,12 +546,7 @@ class NetLockstepGame implements GameLike {
     this.roster.forEach((p, i) => { if (i !== this.me && !p.isAI) t.push({ v: i, label: '@ ' + p.name }); });
     return t;
   }
-  leave() {
-    this.micStream?.getTracks().forEach(t => t.stop()); this.micStream = null;
-    for (const el of this.audioEls.values()) { try { el.srcObject = null; el.pause?.(); } catch { /* */ } }
-    this.audioEls.clear();
-    this.rtc?.close(); this.net.close();
-  }
+  leave() { this.voice?.dispose(); this.rtc?.close(); this.net.close(); }
 }
 
 // ---------------- Game client (render + input loop) ----------------

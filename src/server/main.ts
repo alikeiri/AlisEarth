@@ -1038,8 +1038,9 @@ wss.on('connection', ws => {
     } else if (m.t === 'rtc') {
       // WebRTC signaling relay: forward an SDP offer/answer or ICE candidate to the
       // target slot in this room, tagging it with the sender's slot. The server only
-      // shuttles signaling — the media (lockstep input) flows peer-to-peer.
-      if (room && room.lockstep && me && typeof m.to === 'number') {
+      // shuttles signaling — the media (lockstep input AND voice chat) flows P2P.
+      // Relayed for ANY room (not just lockstep) so voice works in snapshot games too.
+      if (room && me && typeof m.to === 'number') {
         const dest = room.clients.find(c => c.slot === m.to);
         if (dest && dest.ws.readyState === WebSocket.OPEN)
           dest.ws.send(JSON.stringify({ t: 'rtc', from: me.slot, kind: m.kind, data: m.data }));

@@ -146,3 +146,42 @@ export class RtcMesh {
     this.peers.clear();
   }
 }
+
+// Voice chat over an RtcMesh's audio m-lines: mic capture, mute toggle, and playing
+// each peer's incoming stream. Works on ANY mesh — the lockstep input mesh OR a
+// voice-only mesh — so both multiplayer modes (lockstep + snapshot) share this.
+export class VoiceController {
+  private micStream: MediaStream | null = null;
+  private muted = true;
+  private audioEls = new Map<number, HTMLAudioElement>();
+  constructor(private mesh: RtcMesh) {
+    mesh.onAudio = (slot, stream) => {
+      let el = this.audioEls.get(slot);
+      if (!el) { el = new Audio(); el.autoplay = true; (el as any).playsInline = true; this.audioEls.set(slot, el); }
+      el.srcObject = stream;
+      el.play?.().catch(() => { /* autoplay gate; the Voice button is the user gesture */ });
+    };
+  }
+  available(): boolean { return this.mesh.peerCount() > 0; }
+  state(): 'off' | 'live' | 'muted' { return !this.micStream ? 'off' : this.muted ? 'muted' : 'live'; }
+  // first call asks for the mic and goes live; later calls toggle mute
+  async toggle(): Promise<'off' | 'live' | 'muted'> {
+    if (!this.micStream) {
+      try { this.micStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }, video: false }); }
+      catch { this.micStream = null; return 'off'; } // denied / no mic
+      const tr = this.micStream.getAudioTracks()[0];
+      this.muted = false; if (tr) tr.enabled = true;
+      this.mesh.setMicTrack(tr || null);
+      return 'live';
+    }
+    this.muted = !this.muted;
+    const tr = this.micStream.getAudioTracks()[0];
+    if (tr) tr.enabled = !this.muted;
+    return this.muted ? 'muted' : 'live';
+  }
+  dispose() {
+    this.micStream?.getTracks().forEach(t => t.stop()); this.micStream = null;
+    for (const el of this.audioEls.values()) { try { el.srcObject = null; el.pause?.(); } catch { /* */ } }
+    this.audioEls.clear();
+  }
+}
