@@ -368,10 +368,6 @@ function primaryStarTex(): THREE.CanvasTexture {
   return STAR_TEX;
 }
 const PRIMARY_STAR_TYPES = new Set(['barracks', 'factory', 'dronefac', 'airforce', 'shipyard']);
-// fortified infantry go prone-firing: the AIM stance tipped forward onto its belly, so it
-// reads as a soldier lying down and aiming. fortAnim ramps the tip in/out (dig-in/get-up).
-const PRONE_PITCH = Math.PI / 2; // fully prone = tip the aim stance 90° forward
-const PRONE_Y = 0.0;             // lift so the chest rests on the ground (measured below)
 
 // rounded, beveled base slab for buildings
 function roundedSlabGeo(w: number, d: number, h: number, r = 0.14): THREE.BufferGeometry {
@@ -1066,7 +1062,6 @@ export class Renderer {
   private cruiseY = 12; // constant flight altitude (set from the map's tallest terrain in buildTerrain)
   private rampAnim = new Map<number, number>();     // unit id → seconds left of the "drive down the ramp" descent
   private flyAlt = new Map<number, number>();        // flyer id → altitude factor (0 = landed on pad, 1 = cruise) for smooth take-off/landing
-  private fortAnim = new Map<number, number>();      // infantry id → fortify-prone progress (0 = upright, 1 = fully prone) — drives the dig-in animation
   private prevVeh = new Set<number>();              // ground-vehicle ids seen last frame (to detect freshly-built ones)
   private fogTex: THREE.DataTexture | null = null;
   private fogMesh: THREE.Mesh | null = null;
@@ -2794,22 +2789,7 @@ export class Renderer {
       // standing), run-cycle frames 1..N while moving
       const poses = this.posedParts[v.t];
       let idx: number;
-      // fortified infantry go PRONE-FIRING: render the AIM stance and tip it forward onto
-      // its belly (in the matrix below). fortAnim ramps the tip 0->1 (dig in) / 1->0 (get up).
-      let proneP = 0;
-      if (poses && poses.length >= 2 && UNITS[v.t]?.kind === 'inf' && v.t !== 'hive') {
-        const target = (v.fo || v.ft) ? 1 : 0;
-        let fp = this.fortAnim.get(v.i);
-        if (fp === undefined) fp = target;             // first sight: snap to current state, no pop
-        fp += (target - fp) * Math.min(1, dt * 2.5);   // ease the dig-in / get-up over ~0.6s
-        if (fp > 0.01) { this.fortAnim.set(v.i, fp); proneP = fp; } else this.fortAnim.delete(v.i);
-      }
-      if (proneP > 0.01) {
-        parts = poses![1]; // aim stance — laid flat in the matrix block
-        idx = this.poseCounts[v.t][1];
-        if (idx >= MAX_INST) continue;
-        this.poseCounts[v.t][1] = idx + 1;
-      } else if (poses) {
+      if (poses) {
         let pi: number;
         if (MODEL_DEFS[v.t]?.spin) {
           // rotor/prop spin: cycle through ALL baked frames continuously (always on)
@@ -2880,16 +2860,8 @@ export class Renderer {
         y += Math.abs(Math.sin(ph)) * 0.055 * k;
         rollZ = Math.sin(ph) * 0.05 * k;
       }
-      this.dummy.position.set(v.x, y + PRONE_Y * proneP, v.z);
-      if (proneP > 0.01) {
-        // face the aim direction, then tip the aiming soldier forward onto its belly
-        this.qTmp.setFromEuler(this.eTmp.set(0, f.a, 0));
-        this.qTmp2.setFromEuler(this.eTmp.set(PRONE_PITCH * proneP, 0, 0));
-        this.qTmp.multiply(this.qTmp2);
-        this.dummy.quaternion.copy(this.qTmp);
-      } else {
-        this.dummy.rotation.set(0, f.a, rollZ);
-      }
+      this.dummy.position.set(v.x, y, v.z);
+      this.dummy.rotation.set(0, f.a, rollZ);
       this.dummy.scale.setScalar(1);
       this.dummy.updateMatrix();
       if (!parts) continue; // never iterate undefined parts (defensive — keeps the render loop alive)
