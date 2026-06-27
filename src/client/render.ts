@@ -18,7 +18,7 @@ const MODEL_DEFS: Record<string, { file: string; size: number; axis: 'l' | 'h'; 
   // tint. Rifle Squad is left UNtinted so it shows the SWAT's native look; the
   // other infantry keep their identifying tints.
   rifle:     { file: 'rocket',    size: 1.15, axis: 'h', ry: 0 },
-  rocket:    { file: 'rocket',    size: 1.18, axis: 'h', ry: 0, tint: 0x4d5a6b },
+  rocket:    { file: 'rocket',    size: 1.15, axis: 'h', ry: 0, tint: 0x4d5a6b },
   tank:      { file: 'tank',      size: 1.50, axis: 'l', ry: 0 },
   heavy:     { file: 'heavy',     size: 1.85, axis: 'l', ry: 0 },
   ifv:       { file: 'ifv',       size: 1.55, axis: 'l', ry: 0 }, // M2 Bradley (Sketchfab, CC-BY)
@@ -57,7 +57,7 @@ const MODEL_DEFS: Record<string, { file: string; size: number; axis: 'l' | 'h'; 
   minidrone:   { file: 'drone',    size: 0.55, axis: 'l', ry: 0 },
   chemtrooper: { file: 'rocket',   size: 1.15, axis: 'h', ry: 0, tint: 0xa8b23c },
   biotrooper:  { file: 'rocket',   size: 1.15, axis: 'h', ry: 0, tint: 0x8a5cab },
-  interceptor: { file: 'nvsoldier', size: 1.20, axis: 'h', ry: 0 }, // anti-drone team — PS1 night-vision special-forces soldier (Jellypack, CC-BY)
+  interceptor: { file: 'nvsoldier', size: 1.15, axis: 'h', ry: 0 }, // anti-drone team — PS1 night-vision special-forces soldier (Jellypack, CC-BY)
   chemtank:    { file: 'tank',     size: 1.50, axis: 'l', ry: 0 },
   biotank:     { file: 'tank',     size: 1.55, axis: 'l', ry: 0 },
   stealthtank: { file: 'tank',     size: 1.55, axis: 'l', ry: 0 },
