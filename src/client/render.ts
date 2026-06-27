@@ -1929,6 +1929,12 @@ export class Renderer {
   private applyModel(type: string, gltf: { scene: THREE.Object3D; animations?: THREE.AnimationClip[] }) {
     const def = MODEL_DEFS[type];
     const src = gltf.scene;
+    // gltf.scene is SHARED across every unit type that uses this file (rifle, rocket,
+    // chemtrooper, …). The previous type's bake leaves the skeleton in its LAST pose
+    // (the death frame); bones the idle clip doesn't animate would keep that and mangle
+    // this type's "rest" bake (sprawled body normalized to height → looks huge & broken).
+    // Reset every skeleton to its bind pose first so each type bakes from a clean start.
+    src.traverse(o => { const sm = o as any; if (sm.isSkinnedMesh && sm.skeleton) sm.skeleton.pose(); });
     src.updateMatrixWorld(true);
 
     // infantry with a rigged skeleton: bake static pose frames — an aiming
