@@ -1792,8 +1792,9 @@ export class Renderer {
       // concrete foundation skirt: a dark slab under the model that extends below
       // the base, so on sloped/bumpy ground the building reads as sitting on a pad
       // instead of floating or sinking into the terrain. Skipped for aimable turrets —
-      // the model turns, and a fixed slab under a rotating launcher reads wrong.
-      if (!aimable) {
+      // the model turns, and a fixed slab under a rotating launcher reads wrong — and for
+      // the airfield, whose model already includes its own concrete pad (no double base).
+      if (!aimable && type !== 'airfield') {
         const fw = Math.max(size.x, size.z) * s * 0.96;
         const found = new THREE.Mesh(
           new THREE.BoxGeometry(fw, 1.4, fw),
