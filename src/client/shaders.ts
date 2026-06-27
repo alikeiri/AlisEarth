@@ -61,12 +61,21 @@ export const SPLAT_UNIFORMS = 'uniform sampler2D tGrass, tRock, tSand, tDirt, wM
 
 export const SPLAT_MAP_FRAGMENT = `
   vec4 wv = texture2D( wMap, vMapUv );
-  float ws = wv.r + wv.g + wv.b + wv.a; if (ws < 1e-3) ws = 1.0;
+  float ws = wv.r + wv.g + wv.b + wv.a;
+  if (ws < 0.001) { wv = vec4(1.0, 0.0, 0.0, 0.0); ws = 1.0; } // weight map unreadable on this GPU -> assume grass
   vec2 tuv = vMapUv * tileRep;
   vec3 splat = ( texture2D(tGrass, tuv).rgb * wv.r
                + texture2D(tRock, tuv * 0.6).rgb * wv.g
                + texture2D(tSand, tuv).rgb * wv.b
                + texture2D(tDirt, tuv * 0.85).rgb * wv.a ) / ws;
+  // SAFETY: some GPUs (e.g. certain Adreno / ANGLE setups) sample the tile textures as
+  // black, which would multiply the whole terrain to pure black. Fall back to flat
+  // per-zone colours from the weights so the ground is always visible, never black.
+  if (dot(splat, vec3(0.3333)) < 0.02)
+    splat = ( vec3(0.34, 0.44, 0.24) * wv.r
+            + vec3(0.46, 0.44, 0.41) * wv.g
+            + vec3(0.78, 0.72, 0.52) * wv.b
+            + vec3(0.42, 0.34, 0.24) * wv.a ) / ws;
   diffuseColor.rgb *= splat;
 `;
 
