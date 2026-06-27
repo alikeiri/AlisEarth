@@ -1053,6 +1053,10 @@ export class Renderer {
   private time = 0;
   private terrainShader: any = null;
   private extTex: Record<string, THREE.Texture> = {};
+  // mobile tiler GPUs (Adreno/Mali/PowerVR) sample the tiled terrain textures as BLACK
+  // through the trilinear-mip + repeat + anisotropy minification path (the "tiled-mip
+  // bug"); on those we drop mips/aniso on just the terrain tiles. Set from gpuName.
+  private softTileMips = false;
   private factoryProto: THREE.Group | null = null; // War Factory GLB (poly.pizza), cloned per building
   private factoryTop = 2.6;                         // scaled model height (team band sits here)
   private bldgProtos: Record<string, THREE.Group> = {}; // other GLB building models, cloned per building
@@ -1084,6 +1088,11 @@ export class Renderer {
       this.gpuName = dbg ? String(gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL)) : String(gl.getParameter(gl.RENDERER));
       console.log('[Infinite Greed] GPU in use:', this.gpuName);
     } catch { this.gpuName = 'unknown'; }
+    // Adreno/Mali/PowerVR black out the tiled terrain textures via the mip-minification
+    // path — give them no-mip terrain tiles (full-res, slight grazing shimmer) so they get
+    // real textures instead of the flat-colour splat fallback. Desktop GPUs keep mips.
+    this.softTileMips = /adreno|mali|powervr|videocore/i.test(this.gpuName);
+    if (this.softTileMips) console.log('[Infinite Greed] mobile tiler GPU — terrain tiles use no-mip sampling (tiled-mip workaround)');
     const q = GFX_QUALITY[gfxQuality()] || GFX_QUALITY.medium;
     this.three.setPixelRatio(Math.min(q.pr, window.devicePixelRatio));
     this.three.shadowMap.enabled = q.shadows;
@@ -1512,6 +1521,21 @@ export class Renderer {
     return tex;
   }
 
+  // Configure a terrain tile texture. On desktop GPUs: repeat + anisotropy + mips (crisp,
+  // no shimmer). On mobile tilers (softTileMips): no mips / no anisotropy — those GPUs sample
+  // the mip-minified tiled texture as pure black (the "tiled-mip bug"), so we trade a little
+  // grazing-angle shimmer for full-res textures that actually render. colorSpace stays sRGB.
+  private tuneTile(t: THREE.Texture, maxAniso: number) {
+    t.wrapS = t.wrapT = THREE.RepeatWrapping;
+    t.colorSpace = THREE.SRGBColorSpace; // color texture — decode to linear on sample
+    if (this.softTileMips) {
+      t.generateMipmaps = false; t.minFilter = THREE.LinearFilter; t.anisotropy = 1;
+    } else {
+      t.anisotropy = maxAniso;
+    }
+    t.needsUpdate = true;
+  }
+
   // Texture-splatting material: a MeshLambert base (keeps Three's lighting / shadows
   // / fog) with the map sample replaced by a 4-layer tiled blend in onBeforeCompile.
   // Uses the HIGH-RES photo textures (./textures/*.jpg) when loaded — the procedural
@@ -1520,7 +1544,7 @@ export class Renderer {
   private splatMaterial(maxAniso: number): THREE.Material {
     const layer = (k: string) => {
       const t = this.extTex[k] || groundTexture(k, maxAniso); // prefer the loaded photo
-      t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = maxAniso; t.colorSpace = THREE.SRGBColorSpace;
+      this.tuneTile(t, maxAniso);
       return t;
     };
     const tGrass = layer('grass'), tRock = layer('rock'), tSand = layer('sand'), tDirt = layer('dirt');
@@ -1663,9 +1687,7 @@ export class Renderer {
     const loader = new THREE.TextureLoader();
     for (const name of ['grass', 'rock', 'sand', 'dirt']) {
       loader.load('./textures/' + name + '.jpg', t => {
-        t.wrapS = t.wrapT = THREE.RepeatWrapping;
-        t.anisotropy = maxAniso;
-        t.colorSpace = THREE.SRGBColorSpace; // color texture — decode to linear on sample
+        this.tuneTile(t, maxAniso);
         this.extTex[name] = t;
         if (this.terrainShader) {
           const key = 't' + name[0].toUpperCase() + name.slice(1);
