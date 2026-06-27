@@ -12,7 +12,9 @@ import { safeLS } from './store';
 
 // CC0/CC-BY models from poly.pizza (credits in README). size = world units,
 // axis: 'l' scales by length (z after ry), 'h' by height. ry orients +Z forward.
-const MODEL_DEFS: Record<string, { file: string; size: number; axis: 'l' | 'h'; ry: number; y?: number; tint?: number; spin?: number }> = {
+// poses: override the name-based pose-clip picks with explicit 0-based clip indices
+// (rest = standing/stationary, aim = while firing, run = move cycle, death = on death).
+const MODEL_DEFS: Record<string, { file: string; size: number; axis: 'l' | 'h'; ry: number; y?: number; tint?: number; spin?: number; poses?: { rest?: number; aim?: number; run?: number; death?: number } }> = {
   // all infantry share one rigged SWAT model (the only one with a full animation
   // set: run cycle + gun-pointing idle); type identity comes from the material
   // tint. Rifle Squad is left UNtinted so it shows the SWAT's native look; the
@@ -57,7 +59,7 @@ const MODEL_DEFS: Record<string, { file: string; size: number; axis: 'l' | 'h'; 
   minidrone:   { file: 'drone',    size: 0.55, axis: 'l', ry: 0 },
   chemtrooper: { file: 'rocket',   size: 1.15, axis: 'h', ry: 0, tint: 0xa8b23c },
   biotrooper:  { file: 'rocket',   size: 1.15, axis: 'h', ry: 0, tint: 0x8a5cab },
-  interceptor: { file: 'nvsoldier', size: 1.15, axis: 'h', ry: 0 }, // anti-drone team — PS1 night-vision special-forces soldier (Jellypack, CC-BY)
+  interceptor: { file: 'nvsoldier', size: 1.15, axis: 'h', ry: 0, poses: { rest: 6, aim: 6, run: 0 } }, // anti-drone team — PS1 night-vision special-forces soldier (Jellypack, CC-BY). rest+aim = SMGpose (Anim 7) so it's always aiming when stationary; run = SMGwalk (Anim 1)
   chemtank:    { file: 'tank',     size: 1.50, axis: 'l', ry: 0 },
   biotank:     { file: 'tank',     size: 1.55, axis: 'l', ry: 0 },
   stealthtank: { file: 'tank',     size: 1.55, axis: 'l', ry: 0 },
@@ -1986,10 +1988,13 @@ export class Renderer {
       // pose 0 = rest (weapon lowered), pose 1 = aim (only while firing), 2.. = run cycle
       // …also recognise the night-vision soldier's clip names (SMGpose / SMGwalk): a standing
       // aim stance for rest, a firing variant for aim (no effect on models with Idle_*/Run names)
-      const rest = pick(/Idle_Gun(?!_)/i) || pick(/Idle_Neutral/i) || pick(/Standing/i) || pick(/Idle/i) || pick(/SMGpose(?![0-9])/i) || pick(/pose(?![0-9])/i) || clips[0];
-      const aim = pick(/Idle_Gun_Shoot/i) || pick(/Idle_Gun_Pointing/i) || pick(/SMGpose2/i) || pick(/pose2/i) || rest;
-      const run = pick(/\|Run$/) || pick(/Run_Shoot/i) || pick(/Walk/i); // plain Run cycle while moving
-      const death = pick(/\|Death$/i) || pick(/Death/i);                 // played once on death
+      // explicit per-type clip-index overrides (def.poses) win over the name-based picks
+      const P = def.poses || {};
+      const ov = (i: number | undefined, fallback: THREE.AnimationClip | undefined) => (i != null && clips[i]) ? clips[i] : fallback;
+      const rest = ov(P.rest, pick(/Idle_Gun(?!_)/i) || pick(/Idle_Neutral/i) || pick(/Standing/i) || pick(/Idle/i) || pick(/SMGpose(?![0-9])/i) || pick(/pose(?![0-9])/i) || clips[0])!;
+      const aim = ov(P.aim, pick(/Idle_Gun_Shoot/i) || pick(/Idle_Gun_Pointing/i) || pick(/SMGpose2/i) || pick(/pose2/i) || rest)!;
+      const run = ov(P.run, pick(/\|Run$/) || pick(/Run_Shoot/i) || pick(/Walk/i)); // plain Run cycle while moving
+      const death = ov(P.death, pick(/\|Death$/i) || pick(/Death/i));               // played once on death
       const mixer = new THREE.AnimationMixer(src);
       const bakeAt = (clip: THREE.AnimationClip, t: number) => {
         mixer.stopAllAction();
@@ -2083,15 +2088,26 @@ export class Renderer {
     const sR = Math.abs(Math.sin(totalRy)), cR = Math.abs(Math.cos(totalRy));
     this.modelDims[type] = { h: sz.y * scale, len: (cR * sz.z + sR * sz.x) * scale };
 
-    // every pose shares pose-0's transform so frames don't pop or drift
+    // poses share pose-0's XZ centre + scale (so frames don't drift horizontally), but each
+    // pose is grounded by ITS OWN lowest point — sharing rest's min.y made lower-stance poses
+    // (the run/walk cycle) sink their feet below y=0 into the terrain.
     const allPoses: { mesh: THREE.InstancedMesh; mode: number }[][] = [];
     for (const set of poseSets) {
-      const newParts: { mesh: THREE.InstancedMesh; mode: number }[] = [];
+      // this pose's own lowest point across all its material-merged geometries
+      let poseMinY = Infinity;
+      const mergedList: { mat: THREE.Material; merged: THREE.BufferGeometry }[] = [];
       for (const [mat, geos] of set) {
         let merged: THREE.BufferGeometry | null;
         try { merged = mergeGeometries(geos); } catch { merged = null; }
         if (!merged) continue;
-        merged.translate(-ctr.x, -box.min.y, -ctr.z); // centre XZ, sit on ground
+        merged.computeBoundingBox();
+        if (merged.boundingBox) poseMinY = Math.min(poseMinY, merged.boundingBox.min.y);
+        mergedList.push({ mat, merged });
+      }
+      if (!isFinite(poseMinY)) poseMinY = box.min.y;
+      const newParts: { mesh: THREE.InstancedMesh; mode: number }[] = [];
+      for (const { mat, merged } of mergedList) {
+        merged.translate(-ctr.x, -poseMinY, -ctr.z); // centre XZ (shared), sit THIS pose on the ground
         merged.scale(scale, scale, scale);
         if (totalRy) merged.rotateY(totalRy);
         if (def.y) merged.translate(0, def.y, 0);
