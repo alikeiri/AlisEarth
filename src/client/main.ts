@@ -1131,17 +1131,19 @@ class GameClient {
   // radio line from the enemy AI commander (Claude strategist taunts)
   aiSays(msg: string) {
     const who = this.game.players?.()[1]?.n || 'Enemy AI';
-    this.appendChat({ name: who, to: 'all', msg });
-    audio.play('click');
+    this.appendChat({ name: who, to: 'all', msg, ai: true }); // tagged so the taunt toggle can hide it
+    if (!hideTaunts) audio.play('click');
   }
+  // the topbar 🤖 toggle flipped — re-render so existing taunts hide/show immediately
+  redrawChat() { this.renderChat(); }
 
-  private chatHistory: { name: string; to: any; msg: string; t: number }[] = [];
+  private chatHistory: { name: string; to: any; msg: string; t: number; ai?: boolean }[] = [];
   private chatT0 = performance.now();   // game-start reference for chat timestamps
   private chatExpanded = false;          // click the chat to briefly show the last 10
   private chatExpandT = 0;
 
   private appendChat(m: any) {
-    this.chatHistory.push({ name: String(m.name), to: m.to, msg: String(m.msg), t: performance.now() });
+    this.chatHistory.push({ name: String(m.name), to: m.to, msg: String(m.msg), t: performance.now(), ai: !!m.ai });
     if (this.chatHistory.length > 40) this.chatHistory.shift();
     this.renderChat();
   }
@@ -1159,7 +1161,8 @@ class GameClient {
       return `${String(Math.floor(min / 60)).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`;
     };
     const count = (typing || this.chatExpanded) ? 10 : 2;
-    log.innerHTML = this.chatHistory.slice(-count).map(m => {
+    const visible = hideTaunts ? this.chatHistory.filter(m => !m.ai) : this.chatHistory; // taunt toggle
+    log.innerHTML = visible.slice(-count).map(m => {
       const dm = typeof m.to === 'number';
       const chan = dm ? 'DM' : m.to === 'allies' ? 'ALLY' : 'ALL';
       return `<div class="chatMsg${dm ? ' dm' : ''}" data-t="${m.t}">` +
@@ -2990,6 +2993,8 @@ let aiList: { lvl: number; team: number }[] = [{ lvl: 1, team: 2 }];
 let client: GameClient | null = null;
 let net: Net | null = null;
 let tutCtl: TutorialController | null = null;
+// player preference: hide the enemy AI's radio taunts (they eat chat space, esp. on mobile)
+let hideTaunts = (() => { try { return safeLS.getItem('fe_hideTaunts') === '1'; } catch { return false; } })();
 // per-match play-time tracking for the account stats (minutes + match counts).
 // matchMode is 'ai' for a skirmish vs AI, 'mp' for a multiplayer match, null for
 // sim/replay/tutorial (not counted). Reported once per match to /auth/playstat.
@@ -3933,6 +3938,11 @@ function initMenus() {
   const muteIcon = () => { muteBtn.textContent = audio.muted ? '\u{1F507}' : '\u{1F50A}'; };
   muteIcon();
   muteBtn.addEventListener('click', () => { audio.init(); audio.setMuted(!audio.muted); muteIcon(); syncVol(); });
+  // 🤖 enemy-AI-taunt toggle: hide the AI radio lines to reclaim chat space (esp. mobile)
+  const tauntBtn = $('tauntBtn');
+  const tauntIcon = () => { tauntBtn.classList.toggle('off', hideTaunts); tauntBtn.title = hideTaunts ? 'Enemy AI taunts hidden — click to show' : 'Enemy AI taunts shown — click to hide'; };
+  tauntIcon();
+  tauntBtn.addEventListener('click', () => { hideTaunts = !hideTaunts; try { safeLS.setItem('fe_hideTaunts', hideTaunts ? '1' : '0'); } catch { /* no storage */ } tauntIcon(); client?.redrawChat(); });
   // in-game master volume slider (top bar) — drives the overall volume live
   const volSlider = $('volSlider') as HTMLInputElement | null;
   const syncVol = () => { if (volSlider) volSlider.value = String(Math.round((audio.muted ? 0 : audio.masterVol) * 100)); };
