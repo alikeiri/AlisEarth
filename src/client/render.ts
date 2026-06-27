@@ -160,6 +160,20 @@ const RAMPS: Record<string, number[][]> = {
   dirt:  [[0x5c, 0x45, 0x2d], [0x7a, 0x5d, 0x3b], [0x94, 0x76, 0x4c]],
 };
 
+// Set by the renderer once the GPU is known. Mobile tiler GPUs (Adreno/Mali/PowerVR) sample
+// MIPMAPPED textures as pure black through their minification path, so we strip mips from every
+// texture they touch (terrain tiles, building/unit detail maps, GLB model maps). See [[browser-compat-testers]].
+let MOBILE_TILER = false;
+function softenTex<T extends THREE.Texture>(t: T): T {
+  if (MOBILE_TILER && t) { t.generateMipmaps = false; t.minFilter = THREE.LinearFilter; t.anisotropy = 1; t.needsUpdate = true; }
+  return t;
+}
+// strip mips off every map a (GLB) material carries — on mobile tilers only
+function softenMaps(mat: any) {
+  if (!MOBILE_TILER || !mat) return;
+  for (const k of ['map', 'normalMap', 'roughnessMap', 'metalnessMap', 'emissiveMap', 'aoMap']) if (mat[k]) softenTex(mat[k]);
+}
+
 function groundTexture(kind: string, maxAniso: number): THREE.CanvasTexture {
   const S = 256;
   const base = fbmTile(S, 5), fine = fbmTile(S, 7);
@@ -297,7 +311,7 @@ function detailTex(): THREE.CanvasTexture {
   DETAIL = new THREE.CanvasTexture(cv);
   DETAIL.wrapS = DETAIL.wrapT = THREE.RepeatWrapping;
   DETAIL.colorSpace = THREE.SRGBColorSpace;
-  return DETAIL;
+  return softenTex(DETAIL);
 }
 
 // military camo multiply-map for units — visible texture at RTS zoom
@@ -1092,7 +1106,8 @@ export class Renderer {
     // path — give them no-mip terrain tiles (full-res, slight grazing shimmer) so they get
     // real textures instead of the flat-colour splat fallback. Desktop GPUs keep mips.
     this.softTileMips = /adreno|mali|powervr|videocore/i.test(this.gpuName);
-    if (this.softTileMips) console.log('[Infinite Greed] mobile tiler GPU — terrain tiles use no-mip sampling (tiled-mip workaround)');
+    MOBILE_TILER = this.softTileMips; // module flag used by softenTex/softenMaps (building + GLB textures)
+    if (this.softTileMips) console.log('[Infinite Greed] mobile tiler GPU — no-mip texture sampling (tiled-mip workaround)');
     const q = GFX_QUALITY[gfxQuality()] || GFX_QUALITY.medium;
     this.three.setPixelRatio(Math.min(q.pr, window.devicePixelRatio));
     this.three.shadowMap.enabled = q.shadows;
@@ -1772,7 +1787,7 @@ export class Renderer {
       if (n > 0) { const ox = cxs / n - ctr.x, oz = czs / n - ctr.z; if (Math.hypot(ox, oz) > size.x * 0.04) ry += -Math.round(Math.atan2(ox, oz) / (Math.PI / 2)) * (Math.PI / 2); }
       const s = 3.1 / Math.max(0.001, Math.max(size.x, size.z)); // fill the size-3 footprint
       src.position.set(-ctr.x, -box.min.y, -ctr.z);              // centre x/z, base at y=0
-      src.traverse(o => { const m = o as any; if (m.isMesh) { m.castShadow = true; m.receiveShadow = true; } });
+      src.traverse(o => { const m = o as any; if (m.isMesh) { m.castShadow = true; m.receiveShadow = true; (Array.isArray(m.material) ? m.material : [m.material]).forEach(softenMaps); } });
       const inner = new THREE.Group(); inner.add(src); inner.scale.setScalar(s);
       const proto = new THREE.Group(); proto.add(inner);
       proto.rotation.y = ry;                                      // ramp → +Z
@@ -1794,7 +1809,7 @@ export class Renderer {
       // normalise to a target footprint (max x/z) or, for byHeight, a target height
       const s = target / Math.max(0.001, byHeight ? size.y : Math.max(size.x, size.z));
       src.position.set(-ctr.x, -box.min.y, -ctr.z);
-      src.traverse(o => { const m = o as any; if (m.isMesh) { m.castShadow = true; m.receiveShadow = true; } });
+      src.traverse(o => { const m = o as any; if (m.isMesh) { m.castShadow = true; m.receiveShadow = true; (Array.isArray(m.material) ? m.material : [m.material]).forEach(softenMaps); } });
       const hideRe = BLDG_HIDE_MESH[type];   // strip a model's built-in concrete footing/base mesh
       if (hideRe) src.traverse(o => { if ((o as any).isMesh && o.name && hideRe.test(o.name)) o.visible = false; });
       const inner = new THREE.Group(); inner.add(src); inner.scale.setScalar(s);
