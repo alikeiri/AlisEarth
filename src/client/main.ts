@@ -3366,7 +3366,8 @@ function renderEndStats(game: GameLike) {
   // ---- table: built / killed / lost per faction ----
   const cols = ['Faction', 'Units Built', 'Bldgs Built', 'Units Killed', 'Bldgs Killed', 'Units Lost', 'Bldgs Lost'];
   let html = '<tr>' + cols.map((c, i) => `<th${i === 0 ? " style='text-align:left'" : ''}>${c}</th>`).join('') + '</tr>';
-  players.forEach((_p, i) => {
+  players.forEach((p, i) => {
+    if (p?.neutral) return; // the ownerless/garrison "player" is not a faction — keep it off the report
     const cells = [s.builtU[i] || 0, s.builtB[i] || 0, s.destU[i] || 0, s.destB[i] || 0, s.lostU[i] || 0, s.lostB[i] || 0];
     html += `<tr><td class="name"><span class="dot" style="background:${colorOf(i)}"></span>${nameOf(i)}</td>` +
       cells.map(v => `<td>${v}</td>`).join('') + '</tr>';
@@ -3404,7 +3405,8 @@ function renderEndStats(game: GameLike) {
     }
     ctx.textAlign = 'center';
     for (let g = 0; g <= 4; g++) ctx.fillText(Math.round((maxT * g) / 4 / 60) + 'm', padL + (plotW * g) / 4, H2 - 8);
-    players.forEach((_p, i) => {
+    players.forEach((p, i) => {
+      if (p?.neutral) return; // skip the ownerless/garrison "player" line
       ctx.strokeStyle = colorOf(i); ctx.lineWidth = 2; ctx.beginPath();
       series.forEach((smp, idx) => { const x = xOf(smp.t), y = yOf(vals(smp)[i] || 0); idx === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y); });
       ctx.stroke();
@@ -3415,7 +3417,7 @@ function renderEndStats(game: GameLike) {
       series.forEach((smp, idx) => { const d = Math.abs(smp.t - t); if (d < bd) { bd = d; bi = idx; } });
       const smp = series[bi], hx = xOf(smp.t);
       ctx.strokeStyle = '#3a4a56'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(hx, padT); ctx.lineTo(hx, padT + plotH); ctx.stroke();
-      players.forEach((_p, i) => { const y = yOf(vals(smp)[i] || 0); ctx.fillStyle = colorOf(i); ctx.beginPath(); ctx.arc(hx, y, 3, 0, 7); ctx.fill(); });
+      players.forEach((p, i) => { if (p?.neutral) return; const y = yOf(vals(smp)[i] || 0); ctx.fillStyle = colorOf(i); ctx.beginPath(); ctx.arc(hx, y, 3, 0, 7); ctx.fill(); });
       const mm = Math.floor(smp.t / 60), ss = Math.round(smp.t % 60).toString().padStart(2, '0');
       hint.innerHTML = `${mm}:${ss} — ` + players.map((_p, i) => `<span style="color:${colorOf(i)}">${vals(smp)[i] || 0}</span>`).join(' · ');
     } else hint.textContent = 'Hover the chart to read values over time.';
