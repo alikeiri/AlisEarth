@@ -56,7 +56,8 @@ export interface Entity {
   terraPath?: { x: number; z: number }[]; terraI?: number; terraH?: number; // bulldozer job
   terraHs?: number[]; // per-cell target heights (auto-bridge ramp); parallel to terraPath
   terraBridge?: { ax: number; az: number; bx: number; bz: number }; // auto-bridge: connect these two land cells
-  burnT?: number; burnPs?: number; // building on fire: seconds left, damage/s
+  burnT?: number; burnPs?: number; // on fire: seconds left, damage/s (buildings AND units)
+  boost?: number; // morale aura: damage multiplier from a nearby friendly medic this tick (1 = none)
   upg?: { t: number; t0: number }; // building upgrade in progress: seconds left, total
   icd?: number; // interceptor (Iron Dome / Patriot): reload cooldown between missile kills
   stunT?: number; // EMP stun: seconds the unit is frozen (can't move or fire)
@@ -84,6 +85,21 @@ export interface PlayerState {
   tech: Record<string, boolean>;          // researched technologies
   satOk?: boolean;                         // satellite researched AND powered AND a lab still stands
   spawn: { x: number; z: number };
+}
+
+// The per-player HUD view the client reads. SINGLE source of truth shared by
+// the net snapshot (Sim.snapshot) and the local/lockstep simPlayers() in the
+// client, so the two can never drift. Keeping these in sync by hand has already
+// broken two features (godmode unlock, spy-satellite reveal) — add new HUD
+// player fields HERE and both paths pick them up.
+export function playerView(pl: PlayerState) {
+  return {
+    c: Math.round(pl.credits), a: pl.alive, pm: Math.round(pl.powerMade), pu: Math.round(pl.powerUsed),
+    pwr: Math.round(pl.power), pmax: Math.round(pl.powerMax), // stored battery + capacity for the HUD meter
+    n: pl.name, f: pl.faction, tm: pl.team, ai: pl.isAI, tech: Object.keys(pl.tech).filter(k => pl.tech[k]),
+    god: pl.godmode ? 1 : 0, // cheat: client unlocks every unit in the build menu
+    satOk: pl.satOk ? 1 : 0, // spy-satellite full-map reveal (client reads pl.satOk)
+  };
 }
 
 export type Cmd = any;
@@ -1065,6 +1081,22 @@ export class Sim {
 
     this.rebuildGrid();
 
+    // morale aura: a friendly Field Medic boosts the damage of nearby friendly units.
+    // Recompute each tick so dealDamage can read e.boost. Reset stale boosts in the same
+    // pass (so it clears even when the last medic dies). Deterministic: fixed ents order.
+    const medics: Entity[] = [];
+    for (const e of this.ents.values()) {
+      if (e.b) continue;
+      if (e.boost !== undefined && e.boost !== 1) e.boost = 1; // clear last tick's aura
+      if (e.hp > 0 && UNITS[e.type]?.aura) medics.push(e);
+    }
+    for (const m of medics) {
+      const a = UNITS[m.type]!.aura!;
+      for (const u of this.nearbyUnits(m.x, m.z, a.range)) {
+        if (u.owner === m.owner && u.hp > 0 && a.dmgMul > (u.boost || 1)) u.boost = a.dmgMul;
+      }
+    }
+
     for (const e of [...this.ents.values()]) {
       if (e.hp <= 0) continue;
       e.px = e.x; e.pz = e.z;
@@ -1140,8 +1172,10 @@ export class Sim {
 
   findDamagedFriendly(e: Entity, range: number): Entity | null {
     let best: Entity | null = null, bd = 1e9;
+    const medic = !!UNITS[e.type]?.medic; // medics heal INFANTRY only
     for (const u of this.nearbyUnits(e.x, e.z, range)) {
       if (u.id === e.id || u.owner !== e.owner || u.hp <= 0 || u.hp >= u.maxHp) continue;
+      if (medic && UNITS[u.type]?.kind !== 'inf') continue;
       const d = this.distToEnt(e.x, e.z, u);
       if (d < bd) { bd = d; best = u; }
     }
@@ -1313,6 +1347,7 @@ export class Sim {
     // ...and a submarine itself only hits ships (torpedoes) and buildings (cruise
     // missiles) — never land units or aircraft
     if (UNITS[att.type]?.cloak && UNITS[att.type]?.move === 'sea' && !tgt.b && UNITS[tgt.type]?.kind !== 'sea') return;
+    if (att.boost && att.boost !== 1) base *= att.boost; // Field Medic morale aura
     let mul = dmgMul(att.type, tgt.b, tgt.b ? 'b' : UNITS[tgt.type].kind, tgt.b ? undefined : tgt.type);
     // bombers: even an allowed interceptor only connects by chance (else the shot misses)
     if (!tgt.b && tgt.type === 'bomber' && mul > 0 && this.rng.next() >= (INTERCEPT_BOMBER[att.type] ?? 0)) mul = 0;
@@ -1643,6 +1678,8 @@ export class Sim {
       }
       if (tgt) {
         this.fire(b, tgt, def.attack.dmg * (1 + 0.25 * (b.lvl - 1)), def.attack.rof / pl.pf, forced);
+        // flame tower: ignite the struck target (burn DoT — fierce vs infantry, also chars buildings)
+        if (ready && def.flame && tgt.hp > 0) { tgt.burnT = Math.max(tgt.burnT || 0, 3); tgt.burnPs = tgt.b ? 10 : 8; }
         // tesla coil: the bolt briefly EMP-freezes the struck unit
         if (ready && def.emp && !tgt.b && tgt.hp > 0) {
           tgt.stunT = Math.max(tgt.stunT || 0, def.emp);
@@ -1660,6 +1697,8 @@ export class Sim {
   private tickUnit(u: Entity) {
     const def = UNITS[u.type];
     u.cd -= TICK;
+    // on fire (flame tower): burn DoT until it expires (the death sweep clears hp<=0)
+    if (u.burnT && u.burnT > 0) { u.burnT -= TICK; u.hp -= (u.burnPs || 8) * TICK; }
 
     // aircraft basing: a bomber (limited-ammo flyer) with nothing to do flies to an
     // airfield and lands on it instead of hovering over the factory. grounded is
@@ -2100,6 +2139,7 @@ export class Sim {
     } else if (ord.k === 'repair') {
       const t = this.ents.get(ord.tgt!);
       if (!t || t.hp <= 0 || t.owner !== u.owner || t.hp >= t.maxHp) { u.orders.shift(); u.path = null; return; }
+      if (UNITS[u.type]?.medic && (t.b || UNITS[t.type]?.kind !== 'inf')) { u.orders.shift(); u.path = null; return; } // medics heal infantry only
       const d = this.distToEnt(u.x, u.z, t);
       if (d <= 1.8) {
         u.path = null;
@@ -2967,12 +3007,7 @@ export class Sim {
     return {
       k: this.tickN,
       e: ents,
-      p: this.players.map(pl => ({
-        c: Math.round(pl.credits), a: pl.alive, pm: Math.round(pl.powerMade), pu: Math.round(pl.powerUsed),
-        pwr: Math.round(pl.power), pmax: Math.round(pl.powerMax), // stored battery + capacity
-        n: pl.name, f: pl.faction, tm: pl.team, ai: pl.isAI, tech: Object.keys(pl.tech).filter(k => pl.tech[k]),
-        god: pl.godmode ? 1 : 0, // cheat: client unlocks every unit in the build menu
-      })),
+      p: this.players.map(playerView),
       ev: this.events,
     };
   }

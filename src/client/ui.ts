@@ -17,10 +17,10 @@ const B_ICONS: Record<string, string> = {
   power: '⚡', refinery: '⛏️', barracks: '\u{1F396}️', factory: '\u{1F3ED}', turret: '\u{1F5FC}',
   dronefac: '\u{1F4E1}', sam: '\u{1F3AF}', shipyard: '⚓', airforce: '\u{2708}️', airfield: '\u{1F6EB}', lab: '\u{1F9EA}',
   silo: '\u{1F687}', radar: '\u{1F4F6}', wall: '\u{1F9F1}', barrier: '\u{1F6A7}',
-  cannon: '\u{1F4A5}', tesla: '⚡', irondome: '\u{1F6E1}️',
+  cannon: '\u{1F4A5}', tesla: '⚡', irondome: '\u{1F6E1}️', flametower: '\u{1F525}',
 };
 const U_ICONS: Record<string, string> = {
-  rifle: '\u{1FA96}', rocket: '\u{1F680}', interceptor: '\u{1F99F}', melody: '\u{1F483}', tank: '\u{1F699}', heavy: '\u{1F69B}', ifv: '\u{1F6FB}', aatank: '\u{1F3AF}', flak: '\u{1F4A5}', harv: '\u{1F69C}', engineer: '\u{1F527}',
+  rifle: '\u{1FA96}', rocket: '\u{1F680}', interceptor: '\u{1F99F}', medic: '\u{2695}️', melody: '\u{1F483}', tank: '\u{1F699}', heavy: '\u{1F69B}', ifv: '\u{1F6FB}', aatank: '\u{1F3AF}', flak: '\u{1F4A5}', hovercraft: '\u{1F6E5}️', harv: '\u{1F69C}', engineer: '\u{1F527}',
   fueltruck: '\u{1F6E2}️', cmissile: '\u{1F680}', bbmissile: '\u{1F4A3}', chemissile: '\u{2623}️',
   hive: '\u{1F41D}', recon: '\u{1F6F8}', strike: '\u{1F6F0}️', msldrone: '☄️', mlrs: '\u{1F9E8}',
   chemtrooper: '\u{2623}️', chemtank: '\u{2623}️', chemdrone: '\u{2623}️',
@@ -36,7 +36,7 @@ const U_ICONS: Record<string, string> = {
   technical: '\u{1F3CE}️', mech: '\u{1F916}', silicondrone: '\u{1F4BB}', jungleraider: '\u{1F33F}',
   marine: '\u{2693}', hovertank: '\u{2744}️',
 };
-export const B_LIST = ['power', 'refinery', 'radar', 'barracks', 'factory', 'turret', 'sam', 'cannon', 'tesla', 'irondome', 'wall', 'barrier', 'dronefac', 'shipyard', 'airforce', 'airfield', 'lab', 'silo'];
+export const B_LIST = ['power', 'refinery', 'radar', 'barracks', 'factory', 'turret', 'flametower', 'sam', 'cannon', 'tesla', 'irondome', 'wall', 'barrier', 'dronefac', 'shipyard', 'airforce', 'airfield', 'lab', 'silo'];
 
 // what each building gains per upgrade level (mirrors the sim's effects)
 const UPG_INFO: Record<string, string> = {
@@ -51,7 +51,7 @@ const UPG_INFO: Record<string, string> = {
   airforce: '+25% production speed',
   shipyard: '+25% production speed',
 };
-export const U_LIST = ['rifle', 'rocket', 'interceptor', 'mortar', 'fieldgun', 'melody', 'hive', 'tank', 'heavy', 'ifv', 'aatank', 'flak', 'patriot', 'fueltruck', 'harv', 'engineer', 'mcv', 'dozer', 'mortartrack', 'mlrs', 'artillery', 'recon', 'strike', 'msldrone', 'shahed',
+export const U_LIST = ['rifle', 'rocket', 'interceptor', 'medic', 'mortar', 'fieldgun', 'melody', 'hive', 'tank', 'heavy', 'ifv', 'aatank', 'flak', 'hovercraft', 'patriot', 'fueltruck', 'harv', 'engineer', 'mcv', 'dozer', 'mortartrack', 'mlrs', 'artillery', 'recon', 'strike', 'msldrone', 'shahed',
   'tews', 'chemtrooper', 'chemtank', 'chemdrone', 'biotrooper', 'biotank', 'biodrone', 'stealthtank',
   'apoc', 'brahmos', 'gunship', 'technical', 'mech', 'silicondrone', 'jungleraider', 'marine', 'hovertank', 'shaheen',
   'gunboat', 'destroyer', 'artyship', 'sub', 'subhunter', 'mslcruiser', 'flakship', 'navdrone', 'navengineer', 'transport', 'airtransport', 'fighter', 'bomber', 'dbomber', 'heli', 'helidrone',

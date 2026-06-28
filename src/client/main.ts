@@ -1,7 +1,7 @@
 // Client entry: menus, game loop, input. Two game modes share one interface:
 // LocalGame (sim + AI in-browser) and NetGame (server-authoritative snapshots).
 
-import { Sim } from '../sim/sim';
+import { Sim, playerView } from '../sim/sim';
 import { aiTick } from '../sim/ai';
 import { FACTIONS, BUILDINGS, UNITS, PLAYER_COLORS, SIM_VERSION, UPG_MAX, SPACING_EXEMPT } from '../sim/data';
 import { GameMap, genMap, setMapSize, W, H, MAXD, SEA } from '../sim/map';
@@ -134,12 +134,9 @@ function simViews(sim: Sim, a: number): any[] {
   return out;
 }
 function simPlayers(sim: Sim): any[] {
-  return sim.players.map(pl => ({
-    c: Math.floor(pl.credits), a: pl.alive, pm: Math.round(pl.powerMade), pu: Math.round(pl.powerUsed),
-    pwr: Math.round(pl.power), pmax: Math.round(pl.powerMax), // stored battery + capacity for the HUD meter
-    n: pl.name, f: pl.faction, tm: pl.team, ai: pl.isAI, tech: Object.keys(pl.tech).filter(k => pl.tech[k]), satOk: !!pl.satOk,
-    god: pl.godmode ? 1 : 0, // godmode cheat: the build menu unlocks every unit (ui reads pl.god)
-  }));
+  // shares playerView() with the net snapshot in sim.ts so the local/lockstep
+  // HUD list and the multiplayer one can never drift (see playerView's comment)
+  return sim.players.map(playerView);
 }
 
 // ---------------- Local skirmish ----------------
