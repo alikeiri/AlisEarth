@@ -494,7 +494,7 @@ export class Sim {
       const r = Math.max(1, Math.min(14, c.r || 0));
       const targets: Entity[] = [];
       for (const e of this.ents.values()) {
-        if (!this.foe(e.owner, c.p) || e.hp <= 0 || !this.players[e.owner].alive) continue;
+        if (!this.foe(e.owner, c.p) || e.hp <= 0 || !(this.players[e.owner]?.alive ?? true)) continue;
         const d = e.b ? this.distToEnt(c.x, c.z, e) : hyp(e.x - c.x, e.z - c.z);
         if (d <= r) targets.push(e);
       }
@@ -1216,7 +1216,7 @@ export class Sim {
     let best: Entity | null = null, bd = 1e9;
     for (const e of this.ents.values()) {
       if (!e.b || e.hp <= 0 || (e.type !== 'wall' && e.type !== 'barrier')) continue;
-      if (!this.foe(e.owner, u.owner) || !this.players[e.owner].alive) continue;
+      if (!this.foe(e.owner, u.owner) || !(this.players[e.owner]?.alive ?? true)) continue;
       const dx = e.x - u.x, dz = e.z - u.z, d2 = dx * dx + dz * dz;
       // reach far enough that an army staged near the wall line will march to it
       // and breach (it paths to the wall's open edge); bounded so the O(n) scan
@@ -2336,7 +2336,7 @@ export class Sim {
     let target: Entity | null = null, best = -1;
     const inZone: Entity[] = [];
     for (const e of this.ents.values()) {
-      if (!this.foe(e.owner, b.owner) || e.hp <= 0 || !this.players[e.owner].alive) continue;
+      if (!this.foe(e.owner, b.owner) || e.hp <= 0 || !(this.players[e.owner]?.alive ?? true)) continue;
       const dx = e.x - b.strikeX!, dz = e.z - b.strikeZ!;
       if (dx * dx + dz * dz <= R2) inZone.push(e);
     }
@@ -2403,7 +2403,7 @@ export class Sim {
     const R = mdef.blastR || 3;
     const fake: any = { id: 0, owner: bl.owner, type: bl.type, b: false };
     for (const e of [...this.ents.values()]) {
-      if (!this.foe(e.owner, bl.owner) || e.hp <= 0 || !this.players[e.owner].alive) continue;
+      if (!this.foe(e.owner, bl.owner) || e.hp <= 0 || !(this.players[e.owner]?.alive ?? true)) continue;
       const d = e.b ? this.distToEnt(bl.x, bl.z, e) : hyp(e.x - bl.x, e.z - bl.z);
       if (d > R) continue;
       this.dealDamage(fake, e, mdef.dmg * (1 - 0.45 * (d / R)));
@@ -2420,7 +2420,7 @@ export class Sim {
       // a normal detonation only burns enemies; a FORCE-fire detonation (the player
       // deliberately drove it onto a spot) hits friend OR foe at full strength —
       // including your own buildings, e.g. to clear them off the map
-      if (e.hp <= 0 || !this.players[e.owner].alive || (!force && !this.foe(e.owner, u.owner)) || (force && e.id === u.id)) continue;
+      if (e.hp <= 0 || !(this.players[e.owner]?.alive ?? true) || (!force && !this.foe(e.owner, u.owner)) || (force && e.id === u.id)) continue;
       const d = e.b ? this.distToEnt(u.x, u.z, e) : hyp(e.x - u.x, e.z - u.z);
       if (d > R) continue;
       this.dealDamage(u, e, def.dmg * (1 - 0.4 * (d / R)));
@@ -2439,7 +2439,7 @@ export class Sim {
     const total = def.dmg * Math.max(1, u.ammo);
     const R = 2.6;
     for (const e of [...this.ents.values()]) {
-      if (e.owner === u.owner || e.hp <= 0 || !this.players[e.owner].alive) continue;
+      if (e.owner === u.owner || e.hp <= 0 || !(this.players[e.owner]?.alive ?? true)) continue;
       const dist = e.b ? this.distToEnt(tx, tz, e) : hyp(e.x - tx, e.z - tz);
       if (dist > R) continue;
       this.dealDamage(u, e, total * (1 - 0.5 * (dist / R)));
