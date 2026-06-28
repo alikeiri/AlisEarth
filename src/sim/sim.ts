@@ -469,7 +469,7 @@ export class Sim {
     }
     if (c.k === 'godmode') {
       // no cheating in human-vs-human matches
-      if (this.players.filter(p => !p.isAI).length > 1) return;
+      if (this.players.filter(p => !p.isAI && !p.neutral).length > 1) return; // count real humans only — the Neutral player (isAI:false) must not count
       pl.godmode = true;     // instant builds from now on
       this.cheated = true;   // taint the game so it never trains the AI
       pl.credits += 50000;
@@ -2866,9 +2866,9 @@ export class Sim {
       // otherwise the last player standing represents the winning side
       this.winner = lastAlive;
       for (let i = 0; i < this.players.length; i++)
-        if (this.players[i].alive && !this.players[i].isAI) { this.winner = i; break; }
+        if (this.players[i].alive && !this.players[i].isAI && !this.players[i].neutral) { this.winner = i; break; }
       // hand the host a study report so the AI can adapt next game
-      const hasHuman = this.players.some(pl => !pl.isAI);
+      const hasHuman = this.players.some(pl => !pl.isAI && !pl.neutral); // Neutral player isn't a human
       const hasAI = this.players.some(pl => pl.isAI);
       if (!this.reported && !hasHuman && hasAI && this.winner >= 0) {
         // AI-vs-AI simulation: study the WINNER's doctrine (damage dealt and
