@@ -74,6 +74,7 @@ const MODEL_DEFS: Record<string, { file: string; size: number; axis: 'l' | 'h'; 
   silicondrone:{ file: 'drone',     size: 1.05, axis: 'l', ry: 0, tint: 0x3aa8b8 },     // cyan networked drone
   jungleraider:{ file: 'rocket',    size: 1.15, axis: 'h', ry: 0, tint: 0x4a6b3a },     // jungle-green infantry
   marine:      { file: 'rocket',    size: 1.15, axis: 'h', ry: 0, tint: 0x4a6a8a },     // navy infantry
+  medic:       { file: 'rocket',    size: 1.15, axis: 'h', ry: 0, tint: 0xe2e6ea },     // field medic — clean white (placeholder; SWAT model tinted)
   hovertank:   { file: 'tank',      size: 1.55, axis: 'l', ry: 0, tint: 0xcdd8e0 },     // white arctic hover-tank
 };
 
@@ -913,6 +914,19 @@ function buildingGroupPro(type: string, teamColor: number): THREE.Group {
     const panel = add(new THREE.BoxGeometry(0.55, 0.6, 0.07), mat(0x6b86a8, 0.3, 0.45), -0.62, 0.82, -0.55);
     panel.rotation.y = 0.5;
     add(roundedSlabGeo(1.5, 0.18, 0.06, 0.06), team, 0, 0.42, -0.8);
+  } else if (type === 'flametower') {
+    // squat bunker + a red fuel tank + an orange flame nozzle on a tracking pivot
+    add(new THREE.CylinderGeometry(0.5, 0.62, 0.4, 12), concrete, 0, 0.2, 0);
+    add(new THREE.CylinderGeometry(0.2, 0.22, 0.5, 10), mat(0x9a3b2a), -0.3, 0.45, -0.22); // fuel tank
+    const pivot = new THREE.Group();
+    const addP = (geo: THREE.BufferGeometry, mt: THREE.Material, x = 0, y = 0, z = 0) => {
+      const mesh = new THREE.Mesh(geo, mt); mesh.position.set(x, y, z);
+      mesh.castShadow = true; mesh.receiveShadow = true; pivot.add(mesh); return mesh;
+    };
+    addP(new THREE.SphereGeometry(0.28, 12, 9), team, 0, 0.55, 0).scale.y = 0.7;            // housing
+    addP(new THREE.CylinderGeometry(0.08, 0.1, 0.7, 8), darkM, 0, 0.6, 0.4).rotation.x = Math.PI / 2;       // nozzle
+    addP(new THREE.ConeGeometry(0.14, 0.34, 10), mat(0xff7a1a, 0.4, 0.05), 0, 0.6, 0.92).rotation.x = Math.PI / 2; // flame muzzle (glowing orange)
+    g.add(pivot); g.userData.pivot = pivot;
   }
   return g;
 }
