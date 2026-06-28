@@ -85,7 +85,7 @@ function simViews(sim: Sim, a: number): any[] {
         v.gar = 1;
         v.cu = e.cargoUnits?.length || 0;
         v.gcap = Math.max(2, e.size * e.size);
-        if (sim.players[e.owner]?.neutral) v.ne = 1; // empty/neutral (not owned by a player)
+        if (e.owner < 0) v.ne = 1; // unowned (empty garrison) building — belongs to no player
       }
     } else {
       // per-TICK travel (framerate-independent): real path movement is ~0.2+/tick,

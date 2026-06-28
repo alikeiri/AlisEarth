@@ -161,7 +161,6 @@ export class Sim {
   aiMem: any[] = [];
   done = false;
   winner = -2;
-  neutralP = -1; // player index of the neutral "owner" of garrisonable buildings (-1 = none)
   aiProfile: any = null; // host-provided study of past human-vs-AI games (adaptive AI)
   aiDirective: any = null; // optional LLM strategist (Claude API) high-level orders
   cheated = false; // godmode was used — don't feed this game into the AI's learning
@@ -207,32 +206,23 @@ export class Sim {
       this.aiRngP.push(new RNG((seed ^ 0xa1c0ffe ^ Math.imul(i + 1, 0x9e3779b1)) >>> 0));
       this.placeStart(i);
     });
-    // neutral "owner" for garrisonable city buildings — a non-contender slot that
-    // foe()/checkEnd()/the AI all skip. Empty garrison buildings sit under it; a
-    // building flips to the garrisoning player while occupied, back here when empty.
-    if (this.map.garrisonSites.length) {
-      this.neutralP = this.players.length;
-      this.players.push({
-        name: 'Neutral', faction: FACTIONS.usa.id, fac: FACTIONS.usa, isAI: false, aiLvl: 0,
-        team: -99, credits: 0, alive: true, neutral: true, powerMade: 0, powerUsed: 0, pf: 1, power: 0, powerMax: 0,
-        bonusCost: 1, bonusIncome: 1, tech: {}, spawn: { x: 0, z: 0 },
-      });
-      this.aiMem.push(null);
-      this.aiRngP.push(new RNG((seed ^ 0xbeef) >>> 0));
-    }
+    // Garrisonable city buildings belong to NO player: empty ones carry owner = -1
+    // (unowned), flip to the garrisoning player while occupied, and revert to -1 when
+    // emptied. There is no "Neutral" player in the players list. foe()/win/AI all treat
+    // owner < 0 as not-a-contender.
     const n = this.players.length;
     const z = () => new Array(n).fill(0);
     Object.assign(this.stats, { builtU: z(), builtB: z(), destU: z(), destB: z(), lostU: z(), lostB: z() });
     // place the neutral garrison buildings the map laid out. canPlace() can't be
     // used — it requires friendly build-reach, which neutral has none of — so just
     // confirm the footprint is clear land (the map already reserved it).
-    if (this.neutralP >= 0)
+    if (this.map.garrisonSites.length)
       for (const g of this.map.garrisonSites) {
         const def = BUILDINGS[g.type]; let ok = true;
         for (let z = g.cz; z < g.cz + def.size && ok; z++)
           for (let x = g.cx; x < g.cx + def.size && ok; x++)
             if (!this.map.inB(x, z) || this.map.occ[z * W + x] || this.map.tBlocked[z * W + x] || this.map.ore[z * W + x] > 0) ok = false;
-        if (ok) this.addBuilding(this.neutralP, g.type, g.cx, g.cz, true);
+        if (ok) this.addBuilding(-1, g.type, g.cx, g.cz, true); // -1 = unowned (no neutral player)
       }
   }
 
@@ -341,7 +331,7 @@ export class Sim {
     const e = this.newEnt(p, type, true);
     e.cx = cx; e.cz = cz; e.size = def.size;
     e.x = e.px = cx + def.size / 2; e.z = e.pz = cz + def.size / 2;
-    e.maxHp = Math.round(def.hp * this.players[p].fac.hpMul);
+    e.maxHp = Math.round(def.hp * (this.players[p]?.fac.hpMul ?? 1)); // p < 0 = unowned garrison building → no faction bonus
     e.total = Math.max(0.001, def.buildTime);
     e.progress = instant ? e.total : 0;
     e.hp = instant ? e.maxHp : Math.round(e.maxHp * 0.15);
@@ -802,7 +792,7 @@ export class Sim {
     if (c.k === 'garrison') {
       // infantry enter a neutral (or our own) garrison building and fire out from it
       const b = this.ents.get(c.tgt);
-      if (!b || !b.b || !BUILDINGS[b.type]?.garrison || (b.owner !== this.neutralP && b.owner !== c.p)) return;
+      if (!b || !b.b || !BUILDINGS[b.type]?.garrison || (b.owner >= 0 && b.owner !== c.p)) return; // unowned (-1) or ours
       for (const u of units) if (UNITS[u.type]?.kind === 'inf') { u.orders = [{ k: 'garrison', tgt: c.tgt }]; u.path = null; u.cmdT = this.tickN; }
       return;
     }
@@ -1169,7 +1159,7 @@ export class Sim {
     // neutral is foe to no one: empty garrison buildings (owned by neutral) are
     // never auto-targeted, and neutral never attacks. An OCCUPIED garrison building
     // is owned by the garrisoning player, so it's a normal enemy to their foes.
-    if (this.players[a]?.neutral || this.players[b]?.neutral) return false;
+    if (a < 0 || b < 0) return false; // an unowned (empty garrison) building is foe to no one
     return a !== b && this.players[a]?.team !== this.players[b]?.team;
   }
 
@@ -1466,6 +1456,7 @@ export class Sim {
 
   // ---------- buildings ----------
   private tickBuilding(b: Entity) {
+    if (b.owner < 0) return; // unowned (empty garrison) building — no production/power/defense to tick
     const pl = this.players[b.owner];
     const def = BUILDINGS[b.type];
     const rate = pl.fac.buildMul * pl.pf;
@@ -2009,11 +2000,11 @@ export class Sim {
       const b = this.ents.get(ord.tgt!);
       if (!b || b.hp <= 0 || !b.b || !BUILDINGS[b.type]?.garrison || UNITS[u.type]?.kind !== 'inf') { u.orders.shift(); u.path = null; return; }
       // can only enter if it's empty (neutral) or already held by us — not an enemy's
-      if (b.owner !== this.neutralP && b.owner !== u.owner) { u.orders.shift(); u.path = null; return; }
+      if (b.owner >= 0 && b.owner !== u.owner) { u.orders.shift(); u.path = null; return; } // not unowned and not ours → can't enter
       if (!this.canGarrison(b)) { u.orders.shift(); u.path = null; return; } // full
       const reach = b.size / 2 + 1.6;
       if (Math.abs(b.x - u.x) <= reach && Math.abs(b.z - u.z) <= reach) {
-        if (b.owner === this.neutralP) b.owner = u.owner; // capture the empty building
+        if (b.owner < 0) b.owner = u.owner; // capture the empty (unowned) building
         (b.cargoUnits ??= []).push(u);
         this.ents.delete(u.id);
         u.orders = []; u.path = null;
@@ -2656,7 +2647,7 @@ export class Sim {
       this.events.push({ e: 'unload', x: u.x, z: u.z });
     });
     b.cargoUnits = [];
-    if (this.neutralP >= 0) b.owner = this.neutralP; // empty → back to neutral, re-takeable
+    b.owner = -1; // emptied → unowned again, re-capturable by anyone
   }
 
   private moveToward(u: Entity, x: number, z: number, def: any): boolean {
@@ -2774,7 +2765,7 @@ export class Sim {
             if (this.map.inB(x, z) && this.map.occ[z * W + x] === e.id) this.map.occ[z * W + x] = 0;
         if (BUILDINGS[e.type]?.income) this.map.oreDirty = true; // oil rig gone → restore the well marker
         this.events.push({ e: 'boom', x: e.x, z: e.z, big: true });
-        if (e.type !== 'wall' && e.type !== 'barrier') this.stats.lostB[e.owner]++;
+        if (e.owner >= 0 && e.type !== 'wall' && e.type !== 'barrier') this.stats.lostB[e.owner]++; // unowned garrison building is nobody's loss
         // a garrison building destroyed with troops inside: the occupants die with it
         if (e.cargoUnits?.length) { for (const c of e.cargoUnits) if (!UNITS[c.type]?.internal) this.stats.lostU[c.owner]++; e.cargoUnits = []; }
       } else {

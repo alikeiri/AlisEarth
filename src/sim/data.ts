@@ -4,7 +4,7 @@ export const TICK = 0.1;            // seconds per sim tick (10 Hz)
 export const TICKS_PER_SEC = 10;
 // bump whenever map generation or sim logic changes in a way that breaks
 // replay reproduction (same seed must produce the same game to replay it)
-export const SIM_VERSION = 7; // v7: bomber force-fire bomb-run + team-adjacent spawns (both change sim behavior -> breaks v6 replay reproduction)
+export const SIM_VERSION = 8; // v8: removed the Neutral player — empty garrison buildings are ownerless (owner -1); players array no longer has a neutral slot (breaks v7 replay/lockstep)
 // buildings exempt from the 1-tile placement spacing rule: walls, tank barriers and
 // defensive structures may be packed tightly; economy/production buildings need a gap
 // so their (oversized) models don't overlap. Used by sim.canPlace + the client preview.
