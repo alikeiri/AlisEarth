@@ -501,15 +501,24 @@ function unitGeoSmooth(type: string): [THREE.BufferGeometry, THREE.BufferGeometr
     B.push(part(new THREE.CylinderGeometry(0.015, 0.015, 0.22, 5), gun, { y: 0.46, z: 0.05 }));                                    // periscope
     B.push(part(new THREE.BoxGeometry(0.5, 0.03, 0.16), dark, { y: 0.02, z: -0.62 }));                                             // stern planes
     A.push(part(new THREE.BoxGeometry(0.13, 0.06, 0.2), 0xffffff, { y: 0.36, z: 0.05 }));                                          // sail top (team)
-  } else if (type === 'fighter' || type === 'bomber' || type === 'dbomber') {
-    const s = type === 'fighter' ? 1.0 : 1.5;
+  } else if (type === 'flattop') {
+    // aircraft carrier: wide flat flight deck + an island superstructure to one side
+    const s = 1.8;
+    B.push(part(new THREE.BoxGeometry(0.6 * s, 0.16 * s, 1.55 * s), metal, { y: 0.05 * s }));                          // hull
+    B.push(part(new THREE.BoxGeometry(0.66 * s, 0.04 * s, 1.5 * s), 0x363b41, { y: 0.16 * s }));                       // flight deck
+    B.push(part(new THREE.BoxGeometry(0.16 * s, 0.3 * s, 0.42 * s), dark, { x: 0.28 * s, y: 0.34 * s, z: -0.28 * s })); // island
+    B.push(part(new THREE.CylinderGeometry(0.014 * s, 0.014 * s, 0.42 * s, 6), gun, { x: 0.28 * s, y: 0.62 * s, z: -0.28 * s })); // mast
+    A.push(part(new THREE.BoxGeometry(0.12 * s, 0.06 * s, 0.22 * s), 0xffffff, { x: 0.28 * s, y: 0.5 * s, z: -0.28 * s }));         // bridge (team)
+    A.push(part(new THREE.BoxGeometry(0.045 * s, 0.02 * s, 1.25 * s), 0xffffff, { x: -0.06 * s, y: 0.19 * s }));                    // deck centreline (team)
+  } else if (type === 'fighter' || type === 'bomber' || type === 'dbomber' || type === 'carrierjet') {
+    const s = (type === 'fighter' || type === 'carrierjet') ? 1.0 : 1.5;
     B.push(part(new THREE.CapsuleGeometry(0.1 * s, 0.7 * s, 4, 10), metal, { rx: Math.PI / 2, y: 0.2 * s }));                       // fuselage
     B.push(part(new THREE.ConeGeometry(0.09 * s, 0.25 * s, 8), dark, { rx: Math.PI / 2, y: 0.2 * s, z: 0.55 * s }));                // nose
-    const sweep = type === 'fighter' ? 0.55 : 0.15;
+    const sweep = (type === 'fighter' || type === 'carrierjet') ? 0.55 : 0.15;
     B.push(part(new THREE.BoxGeometry(0.62 * s, 0.035 * s, 0.24 * s), metal, { ry: sweep, x: -0.34 * s, y: 0.18 * s, z: -0.05 * s }));
     B.push(part(new THREE.BoxGeometry(0.62 * s, 0.035 * s, 0.24 * s), metal, { ry: -sweep, x: 0.34 * s, y: 0.18 * s, z: -0.05 * s }));
     B.push(part(new THREE.BoxGeometry(0.03 * s, 0.18 * s, 0.16 * s), metal, { y: 0.32 * s, z: -0.42 * s }));                        // tail fin
-    if (type !== 'fighter') {
+    if (type !== 'fighter' && type !== 'carrierjet') {
       B.push(part(new THREE.CylinderGeometry(0.05 * s, 0.05 * s, 0.3 * s, 8), gun, { rx: Math.PI / 2, x: -0.3 * s, y: 0.12 * s }));  // engines
       B.push(part(new THREE.CylinderGeometry(0.05 * s, 0.05 * s, 0.3 * s, 8), gun, { rx: Math.PI / 2, x: 0.3 * s, y: 0.12 * s }));
     }
@@ -1302,8 +1311,8 @@ export class Renderer {
     this.loadBuildingModel('oilrig', 'oilfield', 2.5, true);
 
     // unit instancing: procedural models first, external GLBs swap in async
-    for (const t of ['rifle', 'rocket', 'tank', 'heavy', 'harv', 'engineer', 'recon', 'strike', 'msldrone', 'mlrs',
-      'gunboat', 'destroyer', 'sub', 'navdrone', 'fighter', 'bomber', 'dbomber', 'heli', 'helidrone',
+    for (const t of ['rifle', 'rocket', 'tank', 'heavy', 'hovercraft', 'harv', 'engineer', 'recon', 'strike', 'msldrone', 'mlrs',
+      'gunboat', 'destroyer', 'sub', 'navdrone', 'flattop', 'fighter', 'bomber', 'dbomber', 'heli', 'helidrone', 'carrierjet',
       'hive', 'minidrone', 'melodydrone', 'shahed', 'chemtrooper', 'chemtank', 'chemdrone', 'biotrooper', 'biotank', 'biodrone', 'stealthtank',
       'tews', 'transport', 'navengineer', 'mortar', 'mortartrack', 'fieldgun', 'artillery', 'artyship', 'airtransport']) {
       const [body, accent] = unitGeoSmooth(t);

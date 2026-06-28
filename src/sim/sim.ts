@@ -1700,6 +1700,26 @@ export class Sim {
     // on fire (flame tower): burn DoT until it expires (the death sweep clears hp<=0)
     if (u.burnT && u.burnT > 0) { u.burnT -= TICK; u.hp -= (u.burnPs || 8) * TICK; }
 
+    // aircraft carrier: a mobile flight deck — keeps a strike air-wing aloft, launching
+    // ephemeral fighters at the nearest enemy in range (capped at def.airwing). Falls
+    // through to normal sea-unit movement so the hull can still be commanded.
+    if (def.emits && def.kind === 'sea') {
+      u.emitCd -= TICK;
+      if (u.emitCd <= 0) {
+        const tgt = this.findEnemy(u, def.range);
+        if (tgt) {
+          let aloft = 0;
+          for (const e of this.ents.values()) if (e.owner === u.owner && e.type === def.emits && e.hp > 0) aloft++;
+          if (aloft < (def.airwing || 4)) {
+            const jet = this.spawnUnit(u.owner, def.emits, u.x + (this.rng.next() - 0.5) * 2, u.z + (this.rng.next() - 0.5) * 2);
+            jet.orders = [{ k: 'attack', tgt: tgt.id, keep: true }];
+            jet.stance = 1;
+          }
+          u.emitCd = 2.5;
+        } else u.emitCd = 1.5;
+      }
+    }
+
     // aircraft basing: a bomber (limited-ammo flyer) with nothing to do flies to an
     // airfield and lands on it instead of hovering over the factory. grounded is
     // recomputed each tick by the park/rtb handlers when it's actually sitting on a pad.

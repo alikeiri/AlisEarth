@@ -26,7 +26,7 @@ const U_ICONS: Record<string, string> = {
   chemtrooper: '\u{2623}️', chemtank: '\u{2623}️', chemdrone: '\u{2623}️',
   biotrooper: '\u{2622}️', biotank: '\u{2622}️', biodrone: '\u{2622}️', stealthtank: '\u{1F977}',
   gunboat: '\u{1F6A4}', destroyer: '\u{1F6F3}️', sub: '\u{1F93F}', navdrone: '\u{1F6F6}',
-  subhunter: '\u{1F42C}', mslcruiser: '\u{1F6A2}', flakship: '\u{1F387}', transport: '\u{26F4}️',
+  subhunter: '\u{1F42C}', mslcruiser: '\u{1F6A2}', flakship: '\u{1F387}', transport: '\u{26F4}️', flattop: '\u{2708}️',
   fighter: '\u{1F6E9}️', bomber: '\u{1F4A3}', dbomber: '\u{1F916}', heli: '\u{1F681}', helidrone: '\u{1FA81}',
   mcv: '\u{1F3D7}️', dozer: '\u{1F69C}', patriot: '\u{1F6F0}️',
   tews: '\u{1F4E1}', navengineer: '\u{1F6E0}️', shahed: '\u{1F6F8}',
@@ -54,7 +54,7 @@ const UPG_INFO: Record<string, string> = {
 export const U_LIST = ['rifle', 'rocket', 'interceptor', 'medic', 'mortar', 'fieldgun', 'melody', 'hive', 'tank', 'heavy', 'ifv', 'aatank', 'flak', 'hovercraft', 'patriot', 'fueltruck', 'harv', 'engineer', 'mcv', 'dozer', 'mortartrack', 'mlrs', 'artillery', 'recon', 'strike', 'msldrone', 'shahed',
   'tews', 'chemtrooper', 'chemtank', 'chemdrone', 'biotrooper', 'biotank', 'biodrone', 'stealthtank',
   'apoc', 'brahmos', 'gunship', 'technical', 'mech', 'silicondrone', 'jungleraider', 'marine', 'hovertank', 'shaheen',
-  'gunboat', 'destroyer', 'artyship', 'sub', 'subhunter', 'mslcruiser', 'flakship', 'navdrone', 'navengineer', 'transport', 'airtransport', 'fighter', 'bomber', 'dbomber', 'heli', 'helidrone',
+  'gunboat', 'destroyer', 'artyship', 'sub', 'subhunter', 'mslcruiser', 'flakship', 'navdrone', 'navengineer', 'transport', 'flattop', 'airtransport', 'fighter', 'bomber', 'dbomber', 'heli', 'helidrone',
   'cmissile', 'bbmissile', 'chemissile'];
 
 // strengths/weaknesses tooltip, derived from the live damage matrix so it can

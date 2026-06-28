@@ -33,6 +33,7 @@ export interface UnitDef {
   aura?: { range: number; dmgMul: number };      // morale aura: friendly units within range deal dmgMul× damage
   fortify?: boolean;                             // drone hive: can dig in and emit drones
   emits?: string;                                // fortified emitter: unit type it spawns
+  airwing?: number;                              // aircraft carrier: max emitted strike jets kept aloft
   ephemeral?: number;                            // self-destructs after N seconds (mini drones)
   tech?: string;                                 // requires this researched technology
   sight?: number;                                // explicit fog-of-war reveal radius (else derived from range)
@@ -130,6 +131,9 @@ export const UNITS: Record<string, UnitDef> = {
   minidrone: { name: 'Mini Drone', cost: 0,   hp: 40,  speed: 4.2, range: 4.0, dmg: 200, rof: 1, builtAt: '',         buildTime: 0,  kind: 'air', fly: true, alt: 1.6, ephemeral: 26, internal: true, kamikaze: true },
   // Melody's anti-vehicle drone: fast homing kamikaze, big shaped-charge hit
   melodydrone: { name: 'Strike Drone', cost: 0, hp: 30, speed: 5.0, range: 4.0, dmg: 320, rof: 1, builtAt: '',       buildTime: 0,  kind: 'air', fly: true, alt: 1.8, ephemeral: 16, internal: true, kamikaze: true },
+  // aircraft-carrier strike jet: ephemeral gun fighter launched by the flattop, strafes
+  // foes then expires. Not buildable (internal); the carrier maintains the wing.
+  carrierjet: { name: 'Carrier Jet', cost: 0, hp: 80, speed: 5.5, range: 5.5, dmg: 24, rof: 0.7, builtAt: '', buildTime: 0, kind: 'air', fly: true, alt: 2.4, ephemeral: 20, internal: true },
   // naval (Ship Factory, water only)
   gunboat:   { name: 'Gunboat',     cost: 700,  hp: 300, speed: 2.8, range: 5.5, dmg: 22, rof: 1.2, builtAt: 'shipyard', buildTime: 10, kind: 'sea', move: 'sea' },
   // armored gun ship: duels other warships and bombards the coast (long reach).
@@ -153,6 +157,9 @@ export const UNITS: Record<string, UnitDef> = {
   // + 30 infantry. Right-click it with units selected to load; press U to unload
   // (onto shore if close, else it sails to the nearest coast and drops everyone).
   transport: { name: 'Transport Ship', cost: 1100, hp: 800, speed: 3.2, range: 0, dmg: 0, rof: 1, builtAt: 'shipyard', buildTime: 12, kind: 'sea', move: 'sea', carrier: true },
+  // capital ship: no gun of its own — keeps a wing of strike jets aloft over enemies in
+  // range. Slow, expensive, high HP; needs escort against ships/subs.
+  flattop:   { name: 'Aircraft Carrier', cost: 2600, hp: 1500, speed: 1.5, range: 14, dmg: 0, rof: 1, builtAt: 'shipyard', buildTime: 22, kind: 'sea', move: 'sea', emits: 'carrierjet', airwing: 5 },
   // aircraft (Aircraft Plant; require Airfield capacity)
   // ---- tech-gated units (require a Research Lab + the named research) ----
   chemtrooper: { name: 'Chem Trooper', cost: 500,  hp: 110, speed: 1.9, range: 4.2, dmg: 16, rof: 0.8, builtAt: 'barracks', buildTime: 7,  kind: 'inf', tech: 'chem', fortify: true },
