@@ -753,6 +753,10 @@ class GameClient {
         this.renderer.zoomBy(e.deltaY > 0 ? 1.12 : 0.89, g?.x, g?.z); // zoom toward the cursor
       }
     }, { passive: false });
+    // dev/test fallback: enable godmode from the browser console — works regardless of
+    // keyboard layout, IME, or which element is focused (the typed-GODMODE path can be
+    // blocked by any of those). Single-player only, same as the typed cheat.
+    (window as any).__godmode = () => { this.game.issue({ k: 'godmode', p: this.game.me }); console.log('[Infinite Greed] godmode issued via __godmode()'); };
     on(window, 'keydown', (e: KeyboardEvent) => {
       // typing in the chat input (or any form field) must not trigger hotkeys
       const tag = (e.target as HTMLElement)?.tagName;
@@ -771,13 +775,19 @@ class GameClient {
       // clean-screen toggle (V): hide the whole GUI to gauge its render cost
       if (e.code === 'KeyV') { this.toggleGui(); e.preventDefault(); return; }
       this.keys.add(e.code);
-      // cheat code buffer
-      if (/^[a-zA-Z]$/.test(e.key)) {
-        this.cheatBuf = (this.cheatBuf + e.key.toUpperCase()).slice(-12);
+      // cheat code buffer — accept the layout letter (e.key) OR the physical key (e.code,
+      // KeyA-KeyZ). Under an IME / non-Latin keyboard layout e.key is not a plain a-z char,
+      // so e.key-only failed to ever spell GODMODE; e.code is layout/IME-independent.
+      let cheatCh = '';
+      if (/^[a-zA-Z]$/.test(e.key)) cheatCh = e.key.toUpperCase();
+      else if (/^Key[A-Z]$/.test(e.code)) cheatCh = e.code.slice(3);
+      if (cheatCh) {
+        this.cheatBuf = (this.cheatBuf + cheatCh).slice(-12);
         if (this.cheatBuf.endsWith('GODMODE')) {
           this.cheatBuf = '';
           this.game.issue({ k: 'godmode', p: this.game.me });
           audio.play('cash');
+          console.log('[Infinite Greed] godmode cheat activated');
         }
       }
       if (e.code === 'Escape') {
