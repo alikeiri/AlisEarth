@@ -27,6 +27,7 @@ const MODEL_DEFS: Record<string, { file: string; size: number; axis: 'l' | 'h'; 
   aatank:    { file: 'mlrs',      size: 1.40, axis: 'l', ry: 0, tint: 0x7c93b5 }, // blue-gray missile carrier
   patriot:   { file: 'patriot',   size: 1.6,  axis: 'l', ry: 0 }, // MIM-104 Patriot launcher (Sketchfab, CC-BY)
   mine:      { file: 'drone',     size: 0.42, axis: 'l', ry: 0, tint: 0x33352f }, // small dark buried charge
+  seamine:   { file: 'drone',     size: 0.62, axis: 'l', ry: 0, tint: 0x10242e }, // dark floating naval mine
   fueltruck: { file: 'harv',      size: 1.50, axis: 'l', ry: Math.PI, tint: 0xc0392b }, // red bomb truck (harv flip)
   flak:      { file: 'flak',      size: 1.6,  axis: 'l', ry: 0 }, // Type-625 AA gun/missile system (Sketchfab, CC-BY)
   mlrs:      { file: 'mlrs',      size: 1.60, axis: 'l', ry: 0 },

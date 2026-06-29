@@ -62,6 +62,7 @@ export interface Entity {
   icd?: number; // interceptor (Iron Dome / Patriot): reload cooldown between missile kills
   stunT?: number; // EMP stun: seconds the unit is frozen (can't move or fire)
   mineStock?: number; // engineer: proximity mines left to lay
+  mineCd?: number;    // engineer: seconds until the next mine replenishes
   rzx?: number; rzz?: number; rzr?: number; // engineer: assigned auto-repair zone (centre + radius)
   hzx?: number; hzz?: number; hzr?: number; // harvester: assigned ore-gathering work area (centre + radius)
   cargoUnits?: Entity[]; // transport ship: ground units stowed aboard (removed from the map while carried)
@@ -1705,6 +1706,36 @@ export class Sim {
     // on fire (flame tower): burn DoT until it expires (the death sweep clears hp<=0)
     if (u.burnT && u.burnT > 0) { u.burnT -= TICK; u.hp -= (u.burnPs || 8) * TICK; }
 
+    // engineers (land + naval) slowly replenish their mine stock so they can keep mining
+    if (def.lays && (u.mineStock ?? 0) < (def.mines || 0)) {
+      u.mineCd = (u.mineCd ?? 18) - TICK;
+      if (u.mineCd <= 0) { u.mineStock = (u.mineStock ?? 0) + 1; u.mineCd = 18; }
+    }
+
+    // proximity mine (land OR sea): dormant until an enemy ground/naval unit enters the
+    // trigger radius, then area-blast (aircraft fly over safely). Checked at the TOP of
+    // tickUnit so SEA mines reach it too (sea units returned before the old lower spot).
+    if (def.mine) {
+      const trig = def.trigger || 1.5;
+      let armed = false;
+      for (const o of this.nearbyUnits(u.x, u.z, trig + 1)) {
+        if (o.b || !this.foe(o.owner, u.owner) || o.hp <= 0 || UNITS[o.type]?.fly) continue;
+        if ((o.x - u.x) * (o.x - u.x) + (o.z - u.z) * (o.z - u.z) <= trig * trig) { armed = true; break; }
+      }
+      if (armed) {
+        const R = def.blastR || 2.4;
+        const fake: any = { id: u.id, owner: u.owner, type: u.type, b: false };
+        for (const o of [...this.ents.values()]) {
+          if (!this.foe(o.owner, u.owner) || o.hp <= 0 || (!o.b && UNITS[o.type]?.fly)) continue;
+          const d = o.b ? this.distToEnt(u.x, u.z, o) : hyp(o.x - u.x, o.z - u.z);
+          if (d <= R) this.dealDamage(fake, o, def.dmg * (1 - 0.4 * (d / R)));
+        }
+        u.hp = 0;
+        this.events.push({ e: 'boom', x: u.x, z: u.z, big: true });
+      }
+      return;
+    }
+
     // aircraft carrier: a mobile flight deck — keeps a strike air-wing aloft, launching
     // ephemeral fighters at the nearest enemy in range (capped at def.airwing). Falls
     // through to normal sea-unit movement so the hull can still be commanded.
@@ -1762,28 +1793,6 @@ export class Sim {
       if (hit) this.events.push({ e: 'emp', x: u.x, z: u.z });
     }
 
-    // proximity mine: lie dormant until an enemy ground unit steps within the
-    // trigger radius, then detonate in an area blast (aircraft fly safely over)
-    if (def.mine) {
-      const trig = def.trigger || 1.5;
-      let armed = false;
-      for (const o of this.nearbyUnits(u.x, u.z, trig + 1)) {
-        if (o.b || !this.foe(o.owner, u.owner) || o.hp <= 0 || UNITS[o.type]?.fly) continue;
-        if ((o.x - u.x) * (o.x - u.x) + (o.z - u.z) * (o.z - u.z) <= trig * trig) { armed = true; break; }
-      }
-      if (armed) {
-        const R = def.blastR || 2.4;
-        const fake: any = { id: u.id, owner: u.owner, type: 'mine', b: false };
-        for (const o of [...this.ents.values()]) {
-          if (!this.foe(o.owner, u.owner) || o.hp <= 0 || (!o.b && UNITS[o.type]?.fly)) continue;
-          const d = o.b ? this.distToEnt(u.x, u.z, o) : hyp(o.x - u.x, o.z - u.z);
-          if (d <= R) this.dealDamage(fake, o, def.dmg * (1 - 0.4 * (d / R)));
-        }
-        u.hp = 0;
-        this.events.push({ e: 'boom', x: u.x, z: u.z, big: true });
-      }
-      return;
-    }
 
     // EMP stun (tesla coil): frozen solid — can't move or fire — until it wears off
     if (u.stunT && u.stunT > 0) {

@@ -4,7 +4,7 @@ export const TICK = 0.1;            // seconds per sim tick (10 Hz)
 export const TICKS_PER_SEC = 10;
 // bump whenever map generation or sim logic changes in a way that breaks
 // replay reproduction (same seed must produce the same game to replay it)
-export const SIM_VERSION = 9; // v9: bombers one-run-then-RTB + no bomber auto-retaliate/retarget + tighter airfield parking + force-firing a friendly no longer provokes return-fire (all change sim trajectory → breaks v8 replay/lockstep)
+export const SIM_VERSION = 10; // v10: Naval Engineer lays sea mines + engineers replenish mine stock over time (new sim behavior → breaks v9 replay/lockstep)
 // buildings exempt from the 1-tile placement spacing rule: walls, tank barriers and
 // defensive structures may be packed tightly; economy/production buildings need a gap
 // so their (oversized) models don't overlap. Used by sim.canPlace + the client preview.
@@ -88,7 +88,7 @@ export const UNITS: Record<string, UnitDef> = {
   // oil is no longer hauled: an Engineer builds an Oil Rig on an oil well for steady
   // passive income (see BUILDINGS.oilrig). The old Oil Miner / Oil Rig Ship are gone.
   // sea counterpart to the Engineer: repairs friendly ships (and coastal structures) on the water
-  navengineer: { name: 'Naval Engineer', cost: 700, hp: 240, speed: 2.6, range: 0, dmg: 0, rof: 1, builtAt: 'shipyard', buildTime: 11, kind: 'sea', move: 'sea', repair: true, noAttack: true },
+  navengineer: { name: 'Naval Engineer', cost: 700, hp: 240, speed: 2.6, range: 0, dmg: 0, rof: 1, builtAt: 'shipyard', buildTime: 11, kind: 'sea', move: 'sea', repair: true, noAttack: true, lays: 'seamine', mines: 4 },
   // TEWS: electronic-warfare vehicle — jams enemy radar/satellite in a bubble and
   // pulses an area EMP that only fries drones (harmless to everything else)
   tews:   { name: 'TEWS',         cost: 1600, hp: 360, speed: 2.2, range: 0, dmg: 0, rof: 1, builtAt: 'factory', buildTime: 14, kind: 'veh', jam: 12, droneEmp: { range: 10, dmg: 22, cd: 1.5 }, faction: 'eu' }, // signature: electronic warfare
@@ -122,6 +122,7 @@ export const UNITS: Record<string, UnitDef> = {
   engineer: { name: 'Engineer',   cost: 600,  hp: 200, speed: 2.2, range: 0,   dmg: 0,  rof: 1,   builtAt: 'barracks', altBuiltAt: 'factory', buildTime: 10, kind: 'veh', repair: true, road: true, lays: 'mine', mines: 4, noAttack: true }, // trainable from the Barracks (infantry) AND the War Factory
   patriot:  { name: 'Patriot SAM', cost: 1100, hp: 200, speed: 2.4, range: 11, dmg: 60, rof: 0.5, builtAt: 'factory',  buildTime: 12, kind: 'veh', intercept: { range: 11, cd: 4 }, fortify: true, sight: 14, aaOnly: true, capacity: 4, reload: 5 }, // long-range SAM: only engages aircraft + intercepts silo missiles; mobile radar picket
   mine:     { name: 'Land Mine',  cost: 0,    hp: 1,   speed: 0,   range: 0,   dmg: 150, rof: 1,  builtAt: '',         buildTime: 0,  kind: 'veh', internal: true, mine: true, trigger: 1.5, blastR: 2.4 },
+  seamine:  { name: 'Sea Mine',   cost: 0,    hp: 1,   speed: 0,   range: 0,   dmg: 175, rof: 1,  builtAt: '',         buildTime: 0,  kind: 'sea', move: 'sea', internal: true, mine: true, trigger: 1.9, blastR: 3.0 }, // floating naval mine laid by the Naval Engineer
   // Construction Vehicle: slow, defenceless; press F to deploy it into a forward
   // construction yard (enables building structures around the new spot)
   mcv:    { name: 'Construction Vehicle', cost: 2500, hp: 500, speed: 1.1, range: 0, dmg: 0, rof: 1, builtAt: 'factory', altBuiltAt: 'shipyard', buildTime: 20, kind: 'veh', deploys: 'conyard', amphibious: true },
@@ -460,6 +461,7 @@ export function dmgMul(attType: string, tgtIsBuilding: boolean, tgtKind: string,
   if (attType === 'cannon') return tgtIsBuilding ? 1.1 : (tgtKind === 'veh' ? 1.7 : 0.7);  // heavy cannon: anti-armor
   if (attType === 'tesla')  return tgtIsBuilding ? 0.9 : 1.5;                               // tesla: all-round zapper
   if (attType === 'mine')   return tgtIsBuilding ? 0.5 : (tgtKind === 'veh' ? 1.7 : 1.3);   // mine blast
+  if (attType === 'seamine') return tgtIsBuilding ? 0.7 : (tgtKind === 'sea' ? 2.2 : 1.3);  // sea mine: devastates ships
   if (attType === 'mslcruiser') return tgtIsBuilding ? 2.2 : (tgtKind === 'veh' ? 0.8 : 0.6); // shore bombardment
   if (attType === 'flakship')   return tgtIsBuilding ? 0.4 : (tgtKind === 'inf' ? 0.9 : 0.3); // AA guns, poor vs ground
   if (attType === 'subhunter')  return tgtIsBuilding ? 0.4 : 0.5;                              // not a land attacker
