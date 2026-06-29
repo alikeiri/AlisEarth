@@ -151,13 +151,13 @@ class LocalGame implements GameLike {
   private evQ: any[] = [];
   private reportSaved = false;
   // replay recording: seed + the full command stream (incl. AI) replays exactly
-  private recSeed = 0; private recSize = 96; private recPlayers: any[] = [];
+  private recSeed = 0; private recSize = 96; private recPlayers: any[] = []; private recStart = 0;
   private recCmds: { k: number; c: any[] }[] = [];
   private recSaved = false;
 
   // simLvl2 !== null switches to simulation mode: two AIs fight, you spectate.
   // enemyLevels lists one difficulty per AI opponent (1-3) in a skirmish.
-  constructor(name: string, faction: string, aiLvl = 1, size = 96, simLvl2: number | null = null, enemyLevels: number[] = [1], teams: number[] = [], tutorial = false) {
+  constructor(name: string, faction: string, aiLvl = 1, size = 96, simLvl2: number | null = null, enemyLevels: number[] = [1], teams: number[] = [], tutorial = false, startOpts: { seed?: number; startIdx?: number } = {}) {
     this.tutorial = tutorial;
     // more players need more room — a 4-player FFA on a small map crams the
     // spawns together. Grow the map with the player count (never shrink the
@@ -174,6 +174,7 @@ class LocalGame implements GameLike {
     if (steelEnabled) seed |= 0x08000000;
     if (metalEnabled) seed |= 0x04000000;
     seed |= (oreLevelSel & 3) << 24;
+    if (startOpts.seed !== undefined) seed = startOpts.seed >>> 0; // start-picker chose this exact map
     const LVL_NAMES = AI_DIFF_NAMES;
     const pickFacs = (avoid: string[], n: number) => {
       const pool = Object.keys(FACTIONS).filter(f => !avoid.includes(f));
@@ -194,8 +195,8 @@ class LocalGame implements GameLike {
       const specs: any[] = [{ name, faction, team: teams[0] }];
       lvls.forEach((lv, i) =>
         specs.push({ name: `AI ${FACTIONS[facs[i]].name} (${LVL_NAMES[lv] || 'Normal'})`, faction: facs[i], isAI: true, aiLvl: lv, team: teams[i + 1] }));
-      this.sim = new Sim(seed, specs);
-      this.recSeed = seed; this.recSize = effSize; this.recPlayers = specs.map(s => ({ ...s }));
+      this.sim = new Sim(seed, specs, startOpts.startIdx || 0);
+      this.recSeed = seed; this.recSize = effSize; this.recPlayers = specs.map(s => ({ ...s })); this.recStart = startOpts.startIdx || 0;
     }
     // the AI studies past games and adapts: server intelligence is primary,
     // the browser's own profile fills in when the server is unreachable
@@ -207,6 +208,7 @@ class LocalGame implements GameLike {
       this.sim.players[0].credits = 12000;
     }
   }
+  get seed() { return this.recSeed; }   // the resolved map seed (for the start-position picker re-roll)
   get map() { return this.sim.map; }
   get tickN() { return this.sim.tickN; }
   issue(cmd: any) { this.pending.push(cmd); }
@@ -222,7 +224,7 @@ class LocalGame implements GameLike {
     };
     fetch('/replays', {
       method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ meta, seed: this.recSeed, size: this.recSize, ver: SIM_VERSION, cmds: this.recCmds }),
+      body: JSON.stringify({ meta, seed: this.recSeed, size: this.recSize, start: this.recStart, ver: SIM_VERSION, cmds: this.recCmds }),
     }).catch(() => { /* offline / static host — replay just isn't stored */ });
   }
   update(dtMs: number) {
@@ -275,7 +277,7 @@ class ReplayGame implements GameLike {
   constructor(data: any) {
     setMapSize(data.size || 96);
     this.meta = data.meta || {};
-    this.sim = new Sim(data.seed, this.meta.players || []);
+    this.sim = new Sim(data.seed, this.meta.players || [], data.start || 0);
     this.cmds = data.cmds || [];
   }
   get map() { return this.sim.map; }
@@ -3471,6 +3473,68 @@ function disableExitGuard() {
   window.removeEventListener('popstate', popstateGuard);
 }
 
+// Skirmish start-position picker: show a minimap of the freshly-generated map with a
+// numbered marker per candidate spawn; the player clicks theirs and the AI takes the rest.
+// `game` is a pre-built LocalGame (its sim.map holds the spawns); onPick(idx) receives the
+// chosen spawn index (0 = keep the default; the caller re-rolls the game for idx>0).
+function showStartPicker(game: any, onPick: (idx: number) => void) {
+  const map: any = game?.sim?.map;
+  const spawns: { x: number; z: number }[] = (map && map.spawns) || [];
+  if (spawns.length < 2) { onPick(0); return; } // single start → nothing to choose
+  let sel = 0;
+  const SZ = 380;
+  const ov = document.createElement('div');
+  ov.style.cssText = 'position:fixed;inset:0;z-index:60;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;background:rgba(6,10,14,0.93);';
+  const title = document.createElement('div');
+  title.textContent = 'CHOOSE YOUR START';
+  title.style.cssText = 'font:700 22px system-ui;letter-spacing:2px;color:#7ee787;';
+  const hint = document.createElement('div');
+  hint.textContent = 'Click a numbered position. The AI takes the rest.';
+  hint.style.cssText = 'font:14px system-ui;color:#9fb0bd;';
+  const cv = document.createElement('canvas'); cv.width = SZ; cv.height = SZ;
+  cv.style.cssText = 'border:1px solid #2a3a44;border-radius:8px;cursor:pointer;background:#0a1014;';
+  const px = (x: number) => (x / W) * SZ, py = (z: number) => (z / H) * SZ;
+  const draw = () => {
+    const ctx = cv.getContext('2d')!; const cw = SZ / W + 1, ch = SZ / H + 1;
+    for (let z = 0; z < H; z++) for (let x = 0; x < W; x++) {
+      const i = z * W + x; let col: string;
+      if (map.water[i]) col = '#1d4a6b';
+      else if (map.tBlocked[i]) col = '#363b30';
+      else if (map.gem && map.gem[i]) col = '#7ad0ff';
+      else if (map.ore[i] > 0) col = '#c8a23a';
+      else if (map.oil && map.oil[i]) col = '#15181c';
+      else { const h = Math.max(0, Math.min(1, map.cellH(x, z) / 6)); const g = 64 + h * 96; col = `rgb(${Math.round(g * 0.55)},${Math.round(g)},${Math.round(g * 0.42)})`; }
+      ctx.fillStyle = col; ctx.fillRect((x / W) * SZ, (z / H) * SZ, cw, ch);
+    }
+    spawns.forEach((s, i) => {
+      const x = px(s.x), y = py(s.z);
+      ctx.beginPath(); ctx.arc(x, y, 13, 0, 7);
+      ctx.fillStyle = i === sel ? '#7ee787' : 'rgba(18,26,32,0.85)'; ctx.fill();
+      ctx.lineWidth = 3; ctx.strokeStyle = i === sel ? '#bfffd0' : '#cfd8df'; ctx.stroke();
+      ctx.fillStyle = i === sel ? '#0a1014' : '#e8eef2'; ctx.font = '700 14px system-ui';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(String(i + 1), x, y + 1);
+    });
+  };
+  draw();
+  cv.addEventListener('click', e => {
+    const r = cv.getBoundingClientRect();
+    const mx = (e.clientX - r.left) / r.width * SZ, my = (e.clientY - r.top) / r.height * SZ;
+    let best = -1, bd = 28 * 28;
+    spawns.forEach((s, i) => { const d = (px(s.x) - mx) ** 2 + (py(s.z) - my) ** 2; if (d < bd) { bd = d; best = i; } });
+    if (best >= 0) { sel = best; draw(); }
+  });
+  const row = document.createElement('div'); row.style.cssText = 'display:flex;gap:12px;';
+  const mkBtn = (label: string, primary: boolean, fn: () => void) => {
+    const b = document.createElement('button'); b.textContent = label;
+    b.style.cssText = `font:700 15px system-ui;padding:10px 24px;border-radius:8px;border:1px solid ${primary ? '#2e7d46' : '#39474f'};background:${primary ? '#1f6a3a' : '#1a2228'};color:#eaf2ee;cursor:pointer;`;
+    b.addEventListener('click', fn); return b;
+  };
+  row.appendChild(mkBtn('START HERE', true, () => { ov.remove(); onPick(sel); }));
+  row.appendChild(mkBtn('Random', false, () => { ov.remove(); onPick(0); }));
+  ov.append(title, hint, cv, row);
+  document.body.appendChild(ov);
+}
+
 function startGame(game: GameLike) {
   // first game: preload all models behind the loading screen, then start (the
   // menu loads instantly; models are fetched only once a game is actually starting)
@@ -4014,7 +4078,14 @@ function initMenus() {
     saveMenuPrefs();                                 // remember these choices for next time
     const levels = aiList.map(a => a.lvl);          // each AI's difficulty
     const teams = [1, ...aiList.map(a => a.team)];   // you are team 1; AIs follow
-    startGame(new LocalGame(playerName(), selFaction, selDiff, selSize, null, levels, teams));
+    const previewGame = new LocalGame(playerName(), selFaction, selDiff, selSize, null, levels, teams);
+    showStartPicker(previewGame, idx => {
+      // idx 0 = keep the default placement (reuse the built game); otherwise re-roll the
+      // SAME map seed with the chosen start so player 0 spawns there.
+      const finalGame = idx === 0 ? previewGame
+        : new LocalGame(playerName(), selFaction, selDiff, selSize, null, levels, teams, false, { seed: previewGame.seed, startIdx: idx });
+      startGame(finalGame);
+    });
   });
   $('btnTutorial').addEventListener('click', () => {
     // guided first game: one passive enemy, fog on so the minimap step makes

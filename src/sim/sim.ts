@@ -201,10 +201,15 @@ export class Sim {
   private reported = false;
   private grid = new Map<number, number[]>(); // spatial hash of units, cell = 2 units
 
-  constructor(seed: number, specs: { name: string; faction: string; isAI?: boolean; aiLvl?: number; team?: number }[]) {
+  constructor(seed: number, specs: { name: string; faction: string; isAI?: boolean; aiLvl?: number; team?: number }[], humanStart = 0) {
     this.rng = new RNG(seed);
     this.map = genMap(seed, specs.length);
     this.assignTeamSpawns(specs); // co-locate same-team starts (deterministic; FFA untouched)
+    // skirmish start-position pick: the human (player 0) chose a spawn — swap it to the
+    // front so player 0 spawns there; whoever held that slot takes player 0's original.
+    if (humanStart > 0 && humanStart < this.map.spawns.length) {
+      const sp = this.map.spawns; const t = sp[0]; sp[0] = sp[humanStart]; sp[humanStart] = t;
+    }
     specs.forEach((s, i) => {
       const fac = FACTIONS[s.faction] || FACTIONS.usa;
       const lvl = s.aiLvl ?? 1;
