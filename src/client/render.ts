@@ -346,8 +346,8 @@ function armorTex(): THREE.CanvasTexture {
   return ARMOR;
 }
 
-// defensive buildings that go dark on low power and show the flashing no-power badge
-const NOPOWER_ICON_TYPES = new Set(['sam', 'cannon', 'turret', 'tesla', 'irondome']);
+// ANY building that draws power shows the flashing no-power badge when its power is shed
+const drawsPower = (type: string) => (BUILDINGS[type]?.power ?? 0) < 0;
 // turrets whose GLB ships a looping "showcase" spin we don't want — they orient via the
 // aim pivot instead, so don't auto-play their animation
 const BLDG_NO_AUTOANIM = new Set(['cannon']);
@@ -367,6 +367,15 @@ function noPowerIconTex(): THREE.CanvasTexture {
   g.beginPath(); g.moveTo(14, 14); g.lineTo(50, 50); g.stroke();
   NOPWR_TEX = new THREE.CanvasTexture(cv); NOPWR_TEX.colorSpace = THREE.SRGBColorSpace;
   return NOPWR_TEX;
+}
+// attach the flashing no-power badge (toggled in updateViews) above any power-drawing building
+function addNoPowerBadge(g: THREE.Group, type: string) {
+  if (!drawsPower(type)) return;
+  const bb = new THREE.Box3().setFromObject(g);
+  const topY = isFinite(bb.max.y) ? bb.max.y : 2;
+  const spr = new THREE.Sprite(new THREE.SpriteMaterial({ map: noPowerIconTex(), transparent: true, depthTest: false, depthWrite: false }));
+  spr.name = '__noPower'; spr.scale.setScalar(0.8); spr.position.y = topY + 0.35; spr.renderOrder = 999; spr.visible = false;
+  g.add(spr); g.userData.noPowerIcon = spr;
 }
 
 // "primary factory" badge: a gold star (its produced units roll out from here)
@@ -1905,13 +1914,7 @@ export class Renderer {
         }
         g.userData.mixer = mixer;
       }
-      if (NOPOWER_ICON_TYPES.has(type)) {                    // flashing "no power" badge (toggled in updateViews)
-        const bb = new THREE.Box3().setFromObject(g);        // sit just above the model's actual top
-        const topY = isFinite(bb.max.y) ? bb.max.y : 2;
-        const spr = new THREE.Sprite(new THREE.SpriteMaterial({ map: noPowerIconTex(), transparent: true, depthTest: false, depthWrite: false }));
-        spr.name = '__noPower'; spr.scale.setScalar(0.8); spr.position.y = topY + 0.35; spr.renderOrder = 999; spr.visible = false;
-        g.add(spr); g.userData.noPowerIcon = spr;
-      }
+      addNoPowerBadge(g, type);                              // flashing "no power" badge (toggled in updateViews)
       if (PRIMARY_STAR_TYPES.has(type)) {                     // gold star when set as the primary factory (toggled in updateViews)
         const bb = new THREE.Box3().setFromObject(g);
         const topY = isFinite(bb.max.y) ? bb.max.y : 2;
@@ -1921,7 +1924,9 @@ export class Renderer {
       }
       return g;
     }
-    return buildingGroupPro(type, col);
+    const gp = buildingGroupPro(type, col);
+    addNoPowerBadge(gp, type); // procedural buildings get the badge too (was GLB-only before)
+    return gp;
   }
 
   private loadOilModel() {

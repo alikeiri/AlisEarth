@@ -1390,7 +1390,7 @@ export class Sim {
         led[k] += base * mul;
       }
     }
-    if (!tgt.b) { tgt.lastHitBy = att.id; tgt.lastHitT = this.tickN; } // for return-fire / flee
+    if (!tgt.b && this.foe(att.owner, tgt.owner)) { tgt.lastHitBy = att.id; tgt.lastHitT = this.tickN; } // only ENEMY hits provoke return-fire/flee — force-firing a friendly does no damage, so it's ignored
     this.dmgLog.push({ vOwner: tgt.owner, victim: tgt.id, by: att.id, x: tgt.x, z: tgt.z, b: tgt.b });
   }
 
@@ -1934,8 +1934,9 @@ export class Sim {
     // ---- stance reactions (run even mid-order) ----
     if (u.reactCd > 0) u.reactCd--;
     const recentlyHit = this.tickN - u.lastHitT < 30;
-    if (def.dmg > 0 && u.holdFire) {
-      // weapons-hold: don't auto-engage, return fire, or chase — just hold
+    if (def.dmg > 0 && (u.holdFire || u.type === 'bomber' || u.type === 'dbomber')) {
+      // weapons-hold AND bombers: don't auto-engage, return fire, or chase. Bombers do
+      // one commanded run then RTB — they must never loiter to retaliate or retarget.
     } else if (def.dmg > 0) {
       const cur = u.orders[0];
       const busy = cur && (cur.k === 'attack' || cur.k === 'patrol');
@@ -2231,8 +2232,8 @@ export class Sim {
       const f = fields[fi];
       const cols = Math.max(1, Math.ceil(S / 2));        // a 2-deep parking apron, evenly spread
       const col = si % cols, row = Math.floor(si / cols);
-      const px = f.x + (cols > 1 ? (col / (cols - 1) - 0.5) * 6.0 : 0); // ~6-wide apron, centred on the field
-      const pz = f.z + (row - 0.5) * 2.6;                // two rows ~2.6 apart
+      const px = f.x + (cols > 1 ? (col / (cols - 1) - 0.5) * 2.2 : 0); // tight apron INSIDE the airfield footprint
+      const pz = f.z + (row - 0.5) * 1.3;                // returning planes stack on the pad, never on water/cliffs
       if (Math.hypot(u.x - px, u.z - pz) > 0.5) this.moveToward(u, px, pz, def);
       else { u.path = null; u.grounded = true; }         // landed on its slot
     } else if (ord.k === 'patrol') {
@@ -2319,7 +2320,8 @@ export class Sim {
         if (u.ammo <= 0) { u.orders.unshift({ k: 'rtb' }); return; }
         if (d <= 1.4) {
           this.bombDrop(u, tgt.x, tgt.z);
-          u.orders.unshift({ k: 'rtb' }); // rearm, then resume this attack order
+          u.orders.shift();               // run complete — don't loop back and re-bomb the same spot
+          u.orders.unshift({ k: 'rtb' }); // fly home to rearm
           return;
         }
         u.path = [{ x: tgt.x, z: tgt.z }]; u.pi = 0;

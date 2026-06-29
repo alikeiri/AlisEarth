@@ -1352,7 +1352,8 @@ class GameClient {
       // the MODEL selects them (not the empty ground beneath, which was confusing)
       const ud = UNITS[v.t];
       const p = ud?.fly
-        ? this.renderer.projectY(v.x, this.renderer.flyY(v.x, v.z, ud.alt || 2.3), v.z)
+        ? (v.gr ? this.renderer.project(v.x, v.z, 0.55)                                   // parked on the pad
+                : this.renderer.projectY(v.x, this.renderer.flyY(v.x, v.z, ud.alt || 2.3), v.z))
         : this.renderer.project(v.x, v.z, 0.5);
       if (p.ok && p.x >= lo.x && p.x <= hi.x && p.y >= lo.y && p.y <= hi.y) boxed.push(v);
     }
@@ -1457,23 +1458,26 @@ class GameClient {
       // aircraft render at a fixed cruise altitude — project at that exact world
       // height so the click lands on the model itself, not the empty ground beneath
       const ud = UNITS[v.t];
+      const grounded = !v.b && ud?.fly && v.gr; // parked flyer is drawn down on the pad
+      // aircraft render at cruise altitude (or on the pad when grounded) — project at the
+      // model's real screen height so the click lands on it, not the ground beneath
       const p = (!v.b && ud?.fly)
-        ? this.renderer.projectY(v.x, this.renderer.flyY(v.x, v.z, ud.alt || 2.3), v.z)
-        : this.renderer.project(v.x, v.z, v.b ? 1 : 0.5);
+        ? (grounded
+            ? this.renderer.project(v.x, v.z, 0.55)                                       // landed: pad height (mirrors render padY)
+            : this.renderer.projectY(v.x, this.renderer.flyY(v.x, v.z, ud.alt || 2.3), v.z))
+        : this.renderer.project(v.x, v.z, v.b ? 0.4 : 0.5);                               // building: anchor mid-body, not above the dome
       if (!p.ok) continue;
       const d = Math.hypot(p.x - sx, p.y - sy);
       let r: number;
       if (v.b) {
-        // GLB building models can be much larger than their grid footprint (e.g. the
-        // airfield) — size the hit area to the model's on-screen footprint so clicking
-        // the visible model selects it, not just the ground beside it
-        const foot = this.renderer.bldgFoot[v.t];
-        if (foot) {
-          const e = this.renderer.project(v.x + foot, v.z, 0.5);
-          const px = e.ok ? Math.hypot(e.x - p.x, e.y - p.y) : 0;
-          r = Math.max(14 + (v.sz || 1) * 7, px + 12);
-        } else r = 14 + (v.sz || 1) * 7;
-      } else r = ud?.fly ? 20 : 16; // a touch more slack for fast movers
+        // size the hit area to the on-screen footprint so clicking anywhere over the
+        // building selects it — incl. procedural defenses (turret/sam/tesla) that have
+        // no GLB and so no bldgFoot entry (these used to only register on the tiny dome)
+        const foot = this.renderer.bldgFoot[v.t] ?? ((v.sz || 1) / 2);
+        const e = this.renderer.project(v.x + foot, v.z, 0.4);
+        const px = e.ok ? Math.hypot(e.x - p.x, e.y - p.y) : 0;
+        r = Math.max(16 + (v.sz || 1) * 8, px + 12);
+      } else r = ud?.fly ? (grounded ? 22 : 26) : 16; // generous slack for fast movers / parked planes
       if (d < r && d < bd) { bd = d; best = v; }
     }
     return best;
