@@ -117,7 +117,7 @@ function loadGLB(file: string): Promise<any> {
 export async function preloadModels(onProgress?: (done: number, total: number) => void): Promise<void> {
   const files = new Set<string>();
   for (const t in MODEL_DEFS) files.add(MODEL_DEFS[t].file);
-  for (const f of ['oilfield', 'powerplant', 'ammobox', 'refinery', 'airfield', 'barracks', 'wall', 'radar', 'lab', 'sam', 'railgun', 'conyard', 'himars_rocket']) files.add(f);
+  for (const f of ['oilfield', 'powerplant', 'ammobox', 'refinery', 'airfield', 'barracks', 'wall', 'radar', 'lab', 'sam', 'railgun', 'conyard', 'ra-7-rocket']) files.add(f);
   const list = [...files]; let done = 0;
   onProgress?.(0, list.length);
   await Promise.all(list.map(f => loadGLB(f).catch(() => null).then(() => { onProgress?.(++done, list.length); })));
@@ -1853,12 +1853,12 @@ export class Renderer {
     }).catch(() => { /* missing model — keep the procedural factory */ });
   }
 
-  // HIMARS projectile model (himars_rocket.glb): merge to one geometry, orient the
+  // HIMARS projectile model (ra-7-rocket.glb): merge to one geometry, orient the
   // nose to +Z (the rocket updater's lookAt points local +Z along the flight path),
   // centre + normalise its length, and build a dedicated instanced mesh. HIMARS
   // rockets render as the cone until this resolves.
   private loadHimarsRocket() {
-    loadGLB('himars_rocket').then(gltf => {
+    loadGLB('ra-7-rocket').then(gltf => {
       const src = gltf.scene.clone(true); src.updateMatrixWorld(true);
       const geos: THREE.BufferGeometry[] = [];
       src.traverse(o => {
@@ -1891,7 +1891,7 @@ export class Renderer {
         else if (z > bb.max.z - span * 0.25) { hiW += r2; hiN++; }
       }
       if ((hiN ? hiW / hiN : 0) > (loN ? loW / loN : 0)) merged.rotateY(Math.PI); // nose at -Z -> face +Z
-      const s = 0.95 / Math.max(0.001, span);   // normalise length (Z) to ~0.95 units
+      const s = 1.2 / Math.max(0.001, span);   // normalise length (Z) to ~1.2 units
       merged.scale(s, s, s);
       const mat = new THREE.MeshStandardMaterial({ color: 0xd7d7cc, metalness: 0.25, roughness: 0.55, emissive: 0x202024, emissiveIntensity: 0.6 });
       const mesh = new THREE.InstancedMesh(merged, mat, 48);
@@ -2701,14 +2701,14 @@ export class Renderer {
           // succession), launched with a blast + tube smoke, arcing HIGH onto the target
           // with a smoke trail, rendered as the himars_rocket GLB, exploding on impact.
           const dist = Math.hypot(ev.tx - ev.x, ev.tz - ev.z);
-          this.spawnParts(ev.x, y1 + 0.6, ev.z, 5, true); // launch blast
+          this.spawnParts(ev.x, y1 + 0.6, ev.z, 3, false); // small launch flash (kept off the projectile)
           if (this.smokeParts.length < MAX_SMOKE) this.smokeParts.push({
             x: ev.x, y: y1 + 0.3, z: ev.z, vx: 0, vy: 0.4, vz: 0, life: 0, max: 1.0 + Math.random() * 0.4, s: 2.4,
           }); // launch smoke at the tube
           if (this.rockets.length < 64) this.rockets.push({
             x0: ev.x, y0: y1 + 0.6, z0: ev.z, x1: ev.tx, y1: y2, z1: ev.tz,
-            t: 0, delay: 0, dur: Math.max(0.6, dist * 0.05), arc: 3 + dist * 0.18,
-            scale: 1.6, burst: 14, ring: true, himars: true,
+            t: 0, delay: 0, dur: Math.max(0.7, dist * 0.055), arc: 3 + dist * 0.18,
+            scale: 2.0, burst: 14, ring: true, himars: true,
           });
         } else if (ev.w === 2) {
           // TANK CANNON: a sharp bright muzzle flash + a fast GLOWING shell that streaks
