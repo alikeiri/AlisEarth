@@ -1429,7 +1429,8 @@ export class Sim {
   // 7 torpedo, 8 sub cruise, 9 cannon emplacement, 10 tesla, 11 Melody twin-gun,
   // 12 SAM, 13 interceptor drones, 14 MLRS rocket, 15 heavy-tank shell,
   // 16 Rocket Team rocket (small man-portable missile), 17 AA Vehicle missile
-  // (small, streaks up to intercept aircraft).
+  // (small, streaks up to intercept aircraft), 18 Patriot SAM (small ra-7 rocket,
+  // straight flight, small airburst on the aircraft).
   // tgt may be omitted (e.g. force-firing empty ground) — then we pick by attacker
   // type alone so an MLRS still launches its rocket and infantry use a small impact,
   // instead of the old generic w=2 (which made everything look like a tank).
@@ -1445,6 +1446,7 @@ export class Sim {
       : att.type === 'interceptor' ? 13                                     // Interceptor Team: swarm of tiny drones
       : att.type === 'rocket' ? 16                                          // Rocket Team: small man-portable missile
       : att.type === 'aatank' ? 17                                          // AA Vehicle: small missile streaks up to intercept aircraft
+      : att.type === 'patriot' ? 18                                         // Patriot SAM: small ra-7 rocket, straight up, small airburst on the aircraft
       : att.type === 'mlrs' ? 14                                            // MLRS: GLB rocket projectile, one per shot
       : att.type === 'msldrone' || att.type === 'mortar' || att.type === 'artillery' || att.type === 'artyship' ? 4
       : att.type === 'heli' || att.type === 'helidrone' ? (tgtInf ? 0 : 1)   // guns vs inf, rockets vs veh/bld

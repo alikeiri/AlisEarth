@@ -540,7 +540,7 @@ interface Room {
   code: string; clients: Client[]; started: boolean;
   sim: Sim | null; timer: ReturnType<typeof setInterval> | null; cmdQ: any[];
   aiSlots: number[]; size: number; diff: number; islands?: boolean; urban?: boolean; flat?: boolean; steel?: boolean; metal?: boolean; lockstep?: boolean;
-  mapType?: string; fog?: boolean; oreLevel?: number;
+  mapType?: string; fog?: boolean; oreLevel?: number; seed?: number;
   ai?: { lvl: number; team: number; faction?: string }[]; // host-configured AI fill (lobby)
   teams?: number[];                                       // human slot -> team number (lobby)
   dropVote?: { player: number; votes: Map<number, number> }; // lockstep: drop-tick consensus
@@ -754,12 +754,34 @@ function freeTeam(r: Room): number {
 function roomMapType(room: Room): string {
   return room.mapType || (room.islands ? 'islands' : room.urban ? 'urban' : room.flat ? 'flat' : room.steel ? 'steel' : room.metal ? 'metal' : 'continent');
 }
+// ---- map seed encoding (mirrors the client) ----
+// bits 26-30 = map type, bits 24-25 = ore level. The server is the source of
+// truth for a room's seed; it's previewed in the lobby and sent at start, so the
+// type/ore high bits MUST always match the room's map config or clients desync.
+const SEED_TYPE_ORE_MASK = 0x7f000000;
+function roomTypeOreBits(room: Room): number {
+  let bits = 0;
+  if (room.islands) bits |= 0x40000000;
+  else if (room.urban) bits |= 0x20000000;
+  else if (room.flat) bits |= 0x10000000;
+  else if (room.steel) bits |= 0x08000000;
+  else if (room.metal) bits |= 0x04000000;
+  bits |= ((room.oreLevel | 0) & 3) << 24;
+  return bits >>> 0;
+}
+// the seed the room will play: keep the stored low (random) bits but force the
+// type/ore high bits from the current room config so they can never diverge
+function roomSeed(room: Room): number {
+  const base = room.seed === undefined ? ((Math.random() * 0x7fffffff) | 0) : room.seed;
+  return (((base >>> 0) & ~SEED_TYPE_ORE_MASK) | roomTypeOreBits(room)) >>> 0;
+}
 function roomState(room: Room) {
   return {
     t: 'room', code: room.code,
     players: room.clients.map((c, i) => ({ name: c.name, faction: c.faction, ping: c.ping ?? null, team: (room.teams && room.teams[i]) || (i + 1) })),
     // lobby game setup (host edits via roomcfg; everyone sees it)
     size: room.size, mapType: roomMapType(room), fog: room.fog !== false, oreLevel: (room.oreLevel | 0) & 3,
+    seed: roomSeed(room), // previewed in the lobby; host can edit, others see it read-only
     ai: room.ai || [], lockstep: !!room.lockstep,
   };
 }
@@ -831,14 +853,10 @@ function startRoom(room: Room) {
     room.aiSlots.push(specs.length);
     specs.push({ name: `AI ${FACTIONS[f].name} (${lvlName(room.diff)})`, faction: f, isAI: true, aiLvl: room.diff, team: enemyTeam });
   }
-  // map type rides in seed bits 26-30; ore/oil level in bits 24-25 (0=normal)
-  let seed = ((Math.random() * 0x7fffffff) | 0) & ~0x7f000000;
-  if (room.islands) seed |= 0x40000000;
-  if (room.urban) seed |= 0x20000000;
-  if (room.flat) seed |= 0x10000000;
-  if (room.steel) seed |= 0x08000000;
-  if (room.metal) seed |= 0x04000000;
-  seed |= ((room.oreLevel | 0) & 3) << 24;
+  // map type rides in seed bits 26-30; ore/oil level in bits 24-25 (0=normal).
+  // Use the room's stored seed (previewed in the lobby / optionally host-set), with
+  // the type/ore high bits re-stamped from the room config so it matches the lobby.
+  const seed = roomSeed(room);
 
   // LOCKSTEP mode: the server runs NO sim and sends NO snapshots — each client
   // runs its own deterministic sim and the server only relays input messages.
@@ -989,6 +1007,7 @@ wss.on('connection', ws => {
         mapType: MAP_TYPES.includes(m.mapType) ? m.mapType
           : m.islands ? 'islands' : m.urban ? 'urban' : m.flat ? 'flat' : m.steel ? 'steel' : m.metal ? 'metal' : 'continent',
         fog: m.fog !== false,
+        seed: (Math.random() * 0x7fffffff) | 0, // random base; type/ore bits re-stamped on read/start
         ai: [], teams: [1], // host on team 1; host edits teams/AI/map via roomcfg in the lobby
       };
       me.room = room;
@@ -1044,6 +1063,10 @@ wss.on('connection', ws => {
         room.flat = m.mapType === 'flat'; room.steel = m.mapType === 'steel'; room.metal = m.mapType === 'metal';
       }
       if (m.oreLevel !== undefined) room.oreLevel = (m.oreLevel | 0) & 3;
+      // host may paste a specific seed to reproduce a known map. We store the raw
+      // number; roomSeed() re-stamps the type/ore high bits from the room config on
+      // every read/start, so a pasted seed can never override the chosen map type.
+      if (typeof m.seed === 'number' && Number.isFinite(m.seed) && m.seed >= 0 && m.seed <= 0xffffffff) room.seed = m.seed >>> 0;
       if (typeof m.fog === 'boolean') room.fog = m.fog;
       if (Array.isArray(m.ai)) room.ai = m.ai.slice(0, 3).map((a: any) => ({ lvl: Math.max(0, Math.min(4, a.lvl | 0)), team: Math.min(8, Math.max(1, a.team | 0)) || 2 }));
       if (Array.isArray(m.teams)) room.teams = m.teams.slice(0, room.clients.length).map((t: any) => Math.min(8, Math.max(1, t | 0)) || 1);

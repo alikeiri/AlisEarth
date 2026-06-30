@@ -139,6 +139,39 @@ function simPlayers(sim: Sim): any[] {
   return sim.players.map(playerView);
 }
 
+// ---------------- Map seed encoding ----------------
+// The 32-bit map seed ENCODES the map type + ore level in its high bits so the
+// SAME number reproduces the SAME map: bits 26-30 = map-type flags, bits 24-25 =
+// ore level. The low 24 bits are the only "random" part. SEED_TYPE_ORE_MASK
+// covers all the encoded high bits; when a user pastes a seed we keep their low
+// bits but force the type/ore bits to the current UI selection so the map type
+// always matches the dropdown (and, in MP, every client agrees on the map).
+const SEED_TYPE_ORE_MASK = 0x7f000000;
+// the high-bit flags for the current map-type string + ore level (0-3)
+function seedTypeOreBits(mapType: string, oreLevel: number): number {
+  let bits = 0;
+  if (mapType === 'islands') bits |= 0x40000000;
+  else if (mapType === 'urban') bits |= 0x20000000;
+  else if (mapType === 'flat') bits |= 0x10000000;
+  else if (mapType === 'steel') bits |= 0x08000000;
+  else if (mapType === 'metal') bits |= 0x04000000;
+  bits |= (oreLevel & 3) << 24;
+  return bits >>> 0;
+}
+// take a user-typed seed and re-stamp the type/ore high bits from the current
+// selection, so the played map always matches the dropdowns
+function applySeedTypeOre(userSeed: number, mapType: string, oreLevel: number): number {
+  return (((userSeed >>> 0) & ~SEED_TYPE_ORE_MASK) | seedTypeOreBits(mapType, oreLevel)) >>> 0;
+}
+// parse a decimal seed string; returns null if it isn't a valid uint32
+function parseSeed(s: string): number | null {
+  const t = (s || '').trim();
+  if (!/^[0-9]+$/.test(t)) return null;
+  const n = Number(t);
+  if (!Number.isFinite(n) || n < 0 || n > 0xffffffff) return null;
+  return n >>> 0;
+}
+
 // ---------------- Local skirmish ----------------
 class LocalGame implements GameLike {
   sim: Sim;
@@ -3852,8 +3885,8 @@ function pingBadge(ping: number | null | undefined): string {
 // roomcfg; the server echoes the authoritative room state back to everyone. ----
 let lobbyIsHost = false;
 let lastRoomSig = '';
-const lobbyCfg: { size: number; mapType: string; fog: boolean; oreLevel: number; ai: { lvl: number; team: number }[]; teams: number[] } =
-  { size: 96, mapType: 'continent', fog: true, oreLevel: 0, ai: [], teams: [] };
+const lobbyCfg: { size: number; mapType: string; fog: boolean; oreLevel: number; seed: number; ai: { lvl: number; team: number }[]; teams: number[] } =
+  { size: 96, mapType: 'continent', fog: true, oreLevel: 0, seed: 0, ai: [], teams: [] };
 const LOBBY_SIZES: [number, string][] = [[96, 'Medium'], [128, 'Large'], [160, 'Huge'], [192, 'Giant']];
 const ORE_LEVELS: [number, string][] = [[0, 'Normal'], [2, 'Rich'], [1, 'Sparse']];
 const LOBBY_MAPS: [string, string][] = [['continent', 'Continent'], ['islands', 'Islands'], ['urban', 'Urban'], ['flat', 'Flat City'], ['steel', 'Steel Arena'], ['metal', 'Metal Plain']];
@@ -3861,17 +3894,18 @@ const LOBBY_MAPS: [string, string][] = [['continent', 'Continent'], ['islands', 
 // every difficulty dropdown / label reads this so adding a level can't desync the menus.
 const AI_DIFF_NAMES = ['Easy', 'Normal', 'Hard', 'Brutal', 'Bomber Baron'];
 function sendRoomCfg() {
-  if (net && lobbyIsHost) net.send({ t: 'roomcfg', size: lobbyCfg.size, mapType: lobbyCfg.mapType, fog: lobbyCfg.fog, oreLevel: lobbyCfg.oreLevel, ai: lobbyCfg.ai, teams: lobbyCfg.teams });
+  if (net && lobbyIsHost) net.send({ t: 'roomcfg', size: lobbyCfg.size, mapType: lobbyCfg.mapType, fog: lobbyCfg.fog, oreLevel: lobbyCfg.oreLevel, seed: lobbyCfg.seed, ai: lobbyCfg.ai, teams: lobbyCfg.teams });
 }
 function renderRoom(m: any) {
   // skip ping-only refreshes (the server rebroadcasts every ~3s) so an open
   // dropdown the host is using isn't reset out from under them
-  const sig = JSON.stringify([m.code, m.you, m.size, m.mapType, m.fog, m.ai, m.players.map((p: any) => [p.name, p.faction, p.team])]);
+  const sig = JSON.stringify([m.code, m.you, m.size, m.mapType, m.fog, m.oreLevel, m.seed, m.ai, m.players.map((p: any) => [p.name, p.faction, p.team])]);
   if (sig === lastRoomSig) return;
   lastRoomSig = sig;
   $('roomCode').textContent = m.code;
   lobbyIsHost = m.you === 0;
   lobbyCfg.size = m.size || 96; lobbyCfg.mapType = m.mapType || 'continent'; lobbyCfg.fog = m.fog !== false; lobbyCfg.oreLevel = (m.oreLevel | 0) & 3;
+  lobbyCfg.seed = (m.seed >>> 0) || 0; // authoritative seed from the server (already type/ore-stamped)
   lobbyCfg.ai = (m.ai || []).map((a: any) => ({ lvl: a.lvl | 0, team: a.team | 0 }));
   lobbyCfg.teams = m.players.map((p: any, i: number) => p.team ?? (i + 1));
   const selStyle = 'background:#1a2430;color:#cfe0ee;border:1px solid #2c3e50;border-radius:4px;padding:3px;font-size:11px';
@@ -3900,7 +3934,7 @@ function renderLobbyCfg() {
     const mapL = (LOBBY_MAPS.find(x => x[0] === lobbyCfg.mapType) || ['', lobbyCfg.mapType])[1];
     const sizeL = (LOBBY_SIZES.find(x => x[0] === lobbyCfg.size) || [0, String(lobbyCfg.size)])[1];
     const oreL = (ORE_LEVELS.find(x => x[0] === lobbyCfg.oreLevel) || [0, 'Normal'])[1];
-    cfg.innerHTML = `<div style="font-size:12px;color:#9fb3c8;background:rgba(20,28,38,0.7);border:1px solid #2c3a44;border-radius:6px;padding:8px 10px">Map: <b>${mapL}</b> · ${sizeL} · ${oreL} ore · Fog ${lobbyCfg.fog ? 'on' : 'off'} · ${lobbyCfg.ai.length} AI — <span style="color:#5f7384">set by host</span></div>`;
+    cfg.innerHTML = `<div style="font-size:12px;color:#9fb3c8;background:rgba(20,28,38,0.7);border:1px solid #2c3a44;border-radius:6px;padding:8px 10px">Map: <b>${mapL}</b> · ${sizeL} · ${oreL} ore · Fog ${lobbyCfg.fog ? 'on' : 'off'} · ${lobbyCfg.ai.length} AI — <span style="color:#5f7384">set by host</span><br>Seed: <b style="color:#cdeef6">${lobbyCfg.seed >>> 0}</b></div>`;
     return;
   }
   cfg.innerHTML =
@@ -3908,12 +3942,42 @@ function renderLobbyCfg() {
     `<div class="optrow"><span class="optlabel">Map Size</span><select id="lcSize" style="${sel};flex:1">${LOBBY_SIZES.map(([v, l]) => `<option value="${v}" ${v === lobbyCfg.size ? 'selected' : ''}>${l}</option>`).join('')}</select></div>` +
     `<div class="optrow"><span class="optlabel">Map Type</span><select id="lcMap" style="${sel};flex:1">${LOBBY_MAPS.map(([v, l]) => `<option value="${v}" ${v === lobbyCfg.mapType ? 'selected' : ''}>${l}</option>`).join('')}</select></div>` +
     `<div class="optrow"><span class="optlabel">Ore / Oil</span><select id="lcOre" style="${sel};flex:1">${ORE_LEVELS.map(([v, l]) => `<option value="${v}" ${v === lobbyCfg.oreLevel ? 'selected' : ''}>${l}</option>`).join('')}</select></div>` +
+    `<div class="optrow"><span class="optlabel">Map Seed</span><input id="lcSeed" inputmode="numeric" value="${lobbyCfg.seed >>> 0}" title="Paste a seed to reproduce a known map. Map type / ore are taken from the dropdowns above." style="${sel};flex:1;min-width:0"><button type="button" class="mbtn" id="lcSeedRoll" title="Roll a new random map seed" style="flex:0 0 auto;padding:5px 8px;font-size:12px">🎲</button></div>` +
     `<label class="optrow" style="cursor:pointer"><span class="optlabel">Fog of War</span><span style="flex:1;display:flex;align-items:center;gap:8px;color:#9fb3c8;font-size:13px"><input type="checkbox" id="lcFog" ${lobbyCfg.fog ? 'checked' : ''} style="width:16px;height:16px;accent-color:#ffc940">Hide unexplored</span></label>` +
     `<div class="optrow" style="align-items:flex-start"><span class="optlabel">AI Players</span><div style="flex:1"><div id="lcAi"></div>` +
     `<div style="display:flex;gap:8px;margin-top:6px"><button type="button" class="mbtn" id="lcAddEnemy" style="flex:1;font-size:12px;padding:6px 4px">⚔ Add Enemy AI</button><button type="button" class="mbtn" id="lcAddPartner" style="flex:1;font-size:12px;padding:6px 4px">🤝 Add Partner AI</button></div></div></div>`;
   ($('lcSize') as HTMLSelectElement).onchange = e => { lobbyCfg.size = +(e.target as HTMLSelectElement).value; sendRoomCfg(); };
-  ($('lcMap') as HTMLSelectElement).onchange = e => { lobbyCfg.mapType = (e.target as HTMLSelectElement).value; sendRoomCfg(); };
-  ($('lcOre') as HTMLSelectElement).onchange = e => { lobbyCfg.oreLevel = (+(e.target as HTMLSelectElement).value | 0) & 3; sendRoomCfg(); };
+  ($('lcMap') as HTMLSelectElement).onchange = e => {
+    lobbyCfg.mapType = (e.target as HTMLSelectElement).value;
+    // re-stamp the typed seed's type bits to match the new map type
+    lobbyCfg.seed = applySeedTypeOre(lobbyCfg.seed, lobbyCfg.mapType, lobbyCfg.oreLevel);
+    const si = $('lcSeed') as HTMLInputElement | null; if (si) si.value = String(lobbyCfg.seed >>> 0);
+    sendRoomCfg();
+  };
+  ($('lcOre') as HTMLSelectElement).onchange = e => {
+    lobbyCfg.oreLevel = (+(e.target as HTMLSelectElement).value | 0) & 3;
+    // re-stamp the typed seed's type/ore bits to match the new ore level
+    lobbyCfg.seed = applySeedTypeOre(lobbyCfg.seed, lobbyCfg.mapType, lobbyCfg.oreLevel);
+    const si = $('lcSeed') as HTMLInputElement | null; if (si) si.value = String(lobbyCfg.seed >>> 0);
+    sendRoomCfg();
+  };
+  // host pastes a seed to reproduce a known map. Validate as uint32 and re-stamp the
+  // type/ore high bits from the current dropdowns (the server enforces this too).
+  const commitLcSeed = () => {
+    const si = $('lcSeed') as HTMLInputElement; if (!si) return;
+    const parsed = parseSeed(si.value);
+    if (parsed === null) { si.value = String(lobbyCfg.seed >>> 0); return; } // reject junk, restore
+    lobbyCfg.seed = applySeedTypeOre(parsed, lobbyCfg.mapType, lobbyCfg.oreLevel);
+    si.value = String(lobbyCfg.seed >>> 0);
+    sendRoomCfg();
+  };
+  ($('lcSeed') as HTMLInputElement).onchange = commitLcSeed;
+  ($('lcSeedRoll') as HTMLButtonElement).onclick = () => {
+    const rnd = ((Date.now() ^ (Math.random() * 0x7fffffff)) >>> 0);
+    lobbyCfg.seed = applySeedTypeOre(rnd, lobbyCfg.mapType, lobbyCfg.oreLevel);
+    const si = $('lcSeed') as HTMLInputElement | null; if (si) si.value = String(lobbyCfg.seed >>> 0);
+    sendRoomCfg();
+  };
   ($('lcFog') as HTMLInputElement).onchange = e => { lobbyCfg.fog = (e.target as HTMLInputElement).checked; sendRoomCfg(); };
   ($('lcAddEnemy') as HTMLButtonElement).onclick = () => { if (lobbyCfg.ai.length < 3) { const used = new Set([...lobbyCfg.teams, ...lobbyCfg.ai.map(a => a.team)]); const t = [2, 3, 4, 5, 6].find(x => !used.has(x)) ?? 2; lobbyCfg.ai.push({ lvl: 1, team: t }); sendRoomCfg(); } };
   ($('lcAddPartner') as HTMLButtonElement).onclick = () => { if (lobbyCfg.ai.length < 3) { lobbyCfg.ai.push({ lvl: 1, team: lobbyCfg.teams[0] || 1 }); sendRoomCfg(); } };
@@ -4082,11 +4146,22 @@ function initMenus() {
       $('menuErr').textContent = 'Add at least one enemy AI to play.';
       return;
     }
+    // a pasted seed reproduces a known map; blank = random each game. Either way
+    // the type/ore high bits are forced from the dropdowns so the map matches.
+    const seedRaw = ($('seedInput') as HTMLInputElement)?.value || '';
+    let startSeed: number | undefined;
+    if (seedRaw.trim()) {
+      const parsed = parseSeed(seedRaw);
+      if (parsed === null) { $('menuErr').textContent = 'Map seed must be a whole number 0–4294967295.'; return; }
+      startSeed = applySeedTypeOre(parsed, mt, oreLevelSel);
+    }
     $('menuErr').textContent = '';
     saveMenuPrefs();                                 // remember these choices for next time
     const levels = aiList.map(a => a.lvl);          // each AI's difficulty
     const teams = [1, ...aiList.map(a => a.team)];   // you are team 1; AIs follow
-    const previewGame = new LocalGame(playerName(), selFaction, selDiff, selSize, null, levels, teams);
+    const startOpts = startSeed !== undefined ? { seed: startSeed } : {};
+    const previewGame = new LocalGame(playerName(), selFaction, selDiff, selSize, null, levels, teams, false, startOpts);
+    refreshSeedInput(previewGame.seed); // show the resolved seed that's actually being played
     showStartPicker(previewGame, idx => {
       // idx 0 = keep the default placement (reuse the built game); otherwise re-roll the
       // SAME map seed with the chosen start so player 0 spawns there.
@@ -4095,6 +4170,27 @@ function initMenus() {
       startGame(finalGame);
     });
   });
+  // 🎲 re-roll button + dropdown changes refresh the displayed seed. We show the
+  // FULL encoded seed (with current type/ore bits) so what's displayed == what plays.
+  const refreshSeedInput = (n?: number) => {
+    const inp = $('seedInput') as HTMLInputElement | null;
+    if (!inp) return;
+    if (n !== undefined) { inp.value = String(n >>> 0); return; }
+    // re-stamp the type/ore bits of whatever is currently typed (if anything)
+    const cur = parseSeed(inp.value);
+    if (cur === null) return; // blank or invalid: leave as-is (random at start)
+    const mt = ($('mapType') as HTMLSelectElement)?.value || 'continent';
+    inp.value = String(applySeedTypeOre(cur, mt, oreLevelSel));
+  };
+  $('seedReroll')?.addEventListener('click', () => {
+    const mt = ($('mapType') as HTMLSelectElement)?.value || 'continent';
+    const ore = (+($('oreAmt') as HTMLSelectElement)?.value || 0) & 3;
+    const rnd = ((Date.now() ^ (Math.random() * 0x7fffffff)) >>> 0);
+    refreshSeedInput(applySeedTypeOre(rnd, mt, ore));
+  });
+  // keep the encoded high bits of a typed seed in sync with the type/ore dropdowns
+  $('mapType')?.addEventListener('change', () => refreshSeedInput());
+  $('oreAmt')?.addEventListener('change', () => { oreLevelSel = (+($('oreAmt') as HTMLSelectElement)?.value || 0) & 3; refreshSeedInput(); });
   $('btnTutorial').addEventListener('click', () => {
     // guided first game: one passive enemy, fog on so the minimap step makes
     // sense, a fat treasury and the scripted coach (set up in startGame)

@@ -357,6 +357,14 @@ const drawsPower = (type: string) => (BUILDINGS[type]?.power ?? 0) < 0;
 const BLDG_NO_AUTOANIM = new Set(['cannon']);
 // remove a model's built-in base/footing mesh (regex on node name) for these types
 const BLDG_HIDE_MESH: Record<string, RegExp> = { cannon: /^Base_01/ };
+// aimable turrets that should turn ONLY their launcher/tower, not the whole model:
+// predicate (on mesh node name) selecting the meshes that go inside the yaw pivot.
+// Everything else (base/feet/frame/platform/ground_plane/console) stays stationary.
+const BLDG_AIM_SPLIT: Record<string, (name: string) => boolean> = {
+  // Missile Battery (sam.glb): launcher assembly + the mid_* shells / top_pipe rotate;
+  // the chassis (base/feet/frame/platform/ground_plane/console) stays put.
+  sam: (n: string) => /launcher/i.test(n) || /^top_pipe/i.test(n) || /^mid_/i.test(n),
+};
 // "no power" badge: a yellow bolt under a red no-entry ring + slash, on a dark disc
 let NOPWR_TEX: THREE.CanvasTexture | null = null;
 function noPowerIconTex(): THREE.CanvasTexture {
@@ -398,6 +406,29 @@ function primaryStarTex(): THREE.CanvasTexture {
   return STAR_TEX;
 }
 const PRIMARY_STAR_TYPES = new Set(['barracks', 'factory', 'dronefac', 'airforce', 'shipyard']);
+
+// soft, wispy smoke puff (white → transparent radial falloff with irregular edges) — a
+// camera-facing sprite tinted grey, so smoke reads as soft volume instead of hard balls
+let SMOKE_TEX: THREE.CanvasTexture | null = null;
+function smokeTex(): THREE.CanvasTexture {
+  if (SMOKE_TEX) return SMOKE_TEX;
+  const cv = document.createElement('canvas'); cv.width = cv.height = 64;
+  const g = cv.getContext('2d')!;
+  const grad = g.createRadialGradient(32, 32, 1, 32, 32, 31);
+  grad.addColorStop(0, 'rgba(255,255,255,0.95)');
+  grad.addColorStop(0.45, 'rgba(255,255,255,0.5)');
+  grad.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = grad; g.fillRect(0, 0, 64, 64);
+  // bite irregular bays out of the edge so the puff isn't a perfect disc (wispy)
+  g.globalCompositeOperation = 'destination-out';
+  for (let i = 0; i < 22; i++) {
+    const a = (i * 2.39996), r = 18 + (i % 6) * 2.6;            // golden-angle scatter near the rim
+    g.fillStyle = 'rgba(0,0,0,' + (0.18 + (i % 4) * 0.07) + ')';
+    g.beginPath(); g.arc(32 + Math.cos(a) * r, 32 + Math.sin(a) * r, 5 + (i % 3) * 2.5, 0, Math.PI * 2); g.fill();
+  }
+  SMOKE_TEX = new THREE.CanvasTexture(cv);
+  return SMOKE_TEX;
+}
 
 // rounded, beveled base slab for buildings
 function roundedSlabGeo(w: number, d: number, h: number, r = 0.14): THREE.BufferGeometry {
@@ -1074,6 +1105,7 @@ export class Renderer {
   private himarsRocketMesh?: THREE.InstancedMesh; // HIMARS projectile (himars_rocket.glb), loaded async; else falls back to the cone
   private smokeMesh!: THREE.InstancedMesh;
   private smokeParts: FxPart[] = [];
+  private smokeAlpha!: Float32Array; // per-instance smoke opacity (soft fade in/out)
   private ringMesh!: THREE.InstancedMesh;
   private rings: { x: number; y: number; z: number; t: number; max: number; r0: number; r1: number }[] = [];
   private ringFade = new THREE.Color();
@@ -1440,11 +1472,17 @@ export class Renderer {
     this.bombMesh.count = 0;
     this.bombMesh.castShadow = true;
     this.scene.add(this.bombMesh);
-    this.smokeMesh = new THREE.InstancedMesh(
-      new THREE.SphereGeometry(0.08, 6, 5),
-      new THREE.MeshBasicMaterial({ color: 0x9aa0a4, transparent: true, opacity: 0.42, depthWrite: false }),
-      MAX_SMOKE
-    );
+    // smoke: soft camera-facing sprites (radial alpha texture) that fade in/out per
+    // instance — reads as soft volume instead of hard low-poly balls.
+    const smokeGeo = new THREE.PlaneGeometry(0.5, 0.5);
+    this.smokeAlpha = new Float32Array(MAX_SMOKE);
+    smokeGeo.setAttribute('instAlpha', new THREE.InstancedBufferAttribute(this.smokeAlpha, 1));
+    const smokeMat = new THREE.MeshBasicMaterial({ map: smokeTex(), color: 0x8d949b, transparent: true, depthWrite: false });
+    smokeMat.onBeforeCompile = (sh) => {
+      sh.vertexShader = 'attribute float instAlpha;\nvarying float vInstAlpha;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n  vInstAlpha = instAlpha;');
+      sh.fragmentShader = 'varying float vInstAlpha;\n' + sh.fragmentShader.replace('vec4 diffuseColor = vec4( diffuse, opacity );', 'vec4 diffuseColor = vec4( diffuse, opacity * vInstAlpha );');
+    };
+    this.smokeMesh = new THREE.InstancedMesh(smokeGeo, smokeMat, MAX_SMOKE);
     this.smokeMesh.frustumCulled = false;
     this.smokeMesh.count = 0;
     this.scene.add(this.smokeMesh);
@@ -1924,17 +1962,36 @@ export class Renderer {
       src.traverse(o => { const m = o as any; if (m.isMesh) { m.castShadow = true; m.receiveShadow = true; (Array.isArray(m.material) ? m.material : [m.material]).forEach(softenMaps); } });
       const hideRe = BLDG_HIDE_MESH[type];   // strip a model's built-in concrete footing/base mesh
       if (hideRe) src.traverse(o => { if ((o as any).isMesh && o.name && hideRe.test(o.name)) o.visible = false; });
-      const inner = new THREE.Group(); inner.add(src); inner.scale.setScalar(s);
       const proto = new THREE.Group();
       // aimable turrets (Missile Battery, Heavy Cannon): wrap the model in a yaw pivot
       // so it can turn to face its target. The foundation stays on proto (doesn't turn).
       // The number is a per-model facing offset (the model's "forward" axis) — tune visually.
       const AIMABLE: Record<string, number> = { sam: Math.PI, cannon: Math.PI }; // facing offset: these models' front is -Z, so +PI points them at the target
       const aimable = type in AIMABLE;
-      if (aimable) {
+      const split = BLDG_AIM_SPLIT[type];
+      if (aimable && split) {
+        // turn ONLY the launcher/tower: build two clones of the (identically-normalised)
+        // model — a stationary one on proto and a rotating one inside the pivot — and on
+        // each hide the meshes that belong to the other. The meshes aren't skinned, but
+        // they're parented under bone nodes, so keeping each in its original hierarchy
+        // (rather than reparenting by name) preserves its full transform. Both clones
+        // share src's centering/scale, so they line up exactly; the pivot's vertical axis
+        // is the model's centre (src is X/Z-centred), so the tower spins in place.
+        const statSrc = src;                 // hide the rotating meshes here
+        const rotSrc = src.clone(true);      // hide the stationary meshes here
+        statSrc.traverse(o => { if ((o as any).isMesh && o.name && split(o.name)) o.visible = false; });
+        rotSrc.traverse(o => { if ((o as any).isMesh && o.name && !split(o.name)) o.visible = false; });
+        const statInner = new THREE.Group(); statInner.add(statSrc); statInner.scale.setScalar(s);
+        const rotInner = new THREE.Group(); rotInner.add(rotSrc); rotInner.scale.setScalar(s);
+        const pivot = new THREE.Group(); pivot.name = '__aimPivot'; pivot.add(rotInner);
+        proto.add(statInner); proto.add(pivot);
+        this.bldgAimOff[type] = AIMABLE[type];
+      } else if (aimable) {
+        const inner = new THREE.Group(); inner.add(src); inner.scale.setScalar(s);
         const pivot = new THREE.Group(); pivot.name = '__aimPivot'; pivot.add(inner); proto.add(pivot);
         this.bldgAimOff[type] = AIMABLE[type];
       } else {
+        const inner = new THREE.Group(); inner.add(src); inner.scale.setScalar(s);
         proto.add(inner);
       }
       this.bldgFoot[type] = Math.max(size.x, size.z) * s / 2; // scaled half-footprint
@@ -2258,6 +2315,10 @@ export class Renderer {
     tex.needsUpdate = true;
     tex.flipY = false; // DataTexture row 0 = cz 0, matches mask index cz*W+cx
     tex.magFilter = THREE.LinearFilter; tex.minFilter = THREE.LinearFilter;
+    // Clamp so the margin past the map edge samples the nearest boundary texel:
+    // an explored/visible edge cell bleeds its visibility outward, an unseen one
+    // keeps the outside dark — softens the hard fog line at the world boundary.
+    tex.wrapS = THREE.ClampToEdgeWrapping; tex.wrapT = THREE.ClampToEdgeWrapping;
     this.fogTex = tex;
 
     // Match the terrain mesh density (was 2× the sim grid, which made the fog the
@@ -2265,11 +2326,18 @@ export class Renderer {
     // flat maps need no draping at all, so a coarse grid covers them just as well.
     const fSegX = this.map.noTerrainDetail ? Math.max(8, W >> 2) : W;
     const fSegZ = this.map.noTerrainDetail ? Math.max(8, H >> 2) : H;
-    const geo = new THREE.PlaneGeometry(W, H, fSegX, fSegZ);
+    // Bleed the fog plane past the map edge by the furthest sight range (radar
+    // dome, sight 26) so the boundary fades out instead of cutting off hard.
+    const EXTENT = 26;
+    // Keep the inner W×H at the same vertex density, then add margin segments
+    // (one per cell) so the draped surface stays smooth out into the margin.
+    const geo = new THREE.PlaneGeometry(W + 2 * EXTENT, H + 2 * EXTENT, fSegX + 2 * EXTENT, fSegZ + 2 * EXTENT);
     geo.rotateX(-Math.PI / 2);
-    geo.translate(W / 2, 0, H / 2);
+    geo.translate(W / 2, 0, H / 2); // still centred over the map
     const uv = geo.getAttribute('uv') as THREE.BufferAttribute;
     const pos = geo.getAttribute('position') as THREE.BufferAttribute;
+    // Inner W×H region maps to UV 0..1 (the real fog texture); the margin lands
+    // at UV <0 / >1 and, with ClampToEdge, samples the nearest boundary texel.
     for (let i = 0; i < pos.count; i++) uv.setXY(i, pos.getX(i) / W, pos.getZ(i) / H); // sample the mask by world cell
     uv.needsUpdate = true;
     this.fogGeo = geo;
@@ -2789,6 +2857,17 @@ export class Renderer {
             x0: ev.x, y0: y1 + 0.4, z0: ev.z, x1: ev.tx, y1: y2, z1: ev.tz,
             t: 0, delay: 0, dur: Math.max(0.22, dist * 0.02), arc: 0.5,
             scale: 0.4, burst: 8, col: 0xeaf0f4, // small white interceptor missile, smoke trail
+          });
+        } else if (ev.w === 18) {
+          // PATRIOT SAM: a small ra-7 rocket (1/4 size, same model as the MLRS) flies a
+          // STRAIGHT path (arc 0) to the aircraft at its altitude (y2 via ev.tf) and bursts
+          // SMALL around it — no big ground explosion, no shockwave ring.
+          const dist = Math.hypot(ev.tx - ev.x, ev.tz - ev.z);
+          this.spawnParts(ev.x, y1 + 0.5, ev.z, 3, false); // launch flash off the rail
+          if (this.rockets.length < 64) this.rockets.push({
+            x0: ev.x, y0: y1 + 0.5, z0: ev.z, x1: ev.tx, y1: y2, z1: ev.tz,
+            t: 0, delay: 0, dur: Math.max(0.25, dist * 0.02), arc: 0, // straight + fast
+            scale: 0.5, himars: true, // ra-7 model @ 1/4 size; no burst/ring → small 7-particle airburst at the target
           });
         } else if (ev.w === 5) {
           // FLAK: a quick tracer up to the target + a small dark airburst puff (anti-air
@@ -3526,15 +3605,20 @@ export class Renderer {
       p.life += dt;
       if (p.life >= p.max) return false;
       p.x += p.vx * dt; p.y += p.vy * dt; p.z += p.vz * dt;
+      if (sn >= MAX_SMOKE) return true;
+      const k = p.life / p.max;
       this.dummy.position.set(p.x, p.y, p.z);
-      this.dummy.rotation.set(0, 0, 0);
-      this.dummy.scale.setScalar((0.6 + (p.life / p.max) * 1.6) * (p.s ?? 1)); // p.s differentiates wisps vs billowing clouds
+      this.dummy.quaternion.copy(this.camera.quaternion);                 // camera-facing billboard
+      this.dummy.scale.setScalar((0.7 + k * 2.2) * (p.s ?? 1));            // grow as it dissipates (p.s = wisp vs cloud)
       this.dummy.updateMatrix();
-      if (sn < MAX_SMOKE) this.smokeMesh.setMatrixAt(sn++, this.dummy.matrix);
+      this.smokeMesh.setMatrixAt(sn, this.dummy.matrix);
+      this.smokeAlpha[sn] = (k < 0.12 ? k / 0.12 : 1) * (1 - k) * 0.62;    // fast fade-in, slow fade-out (no hard pop)
+      sn++;
       return true;
     });
     this.smokeMesh.count = sn;
     this.smokeMesh.instanceMatrix.needsUpdate = true;
+    (this.smokeMesh.geometry.getAttribute('instAlpha') as THREE.InstancedBufferAttribute).needsUpdate = true;
 
     // shockwave rings: expand outward on the ground while fading, then expire.
     // additive blend → multiplying the instance colour toward black dims it out
