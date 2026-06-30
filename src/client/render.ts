@@ -2711,18 +2711,17 @@ export class Renderer {
             scale: 2.0, burst: 14, ring: true, himars: true,
           });
         } else if (ev.w === 2) {
-          // TANK CANNON: a sharp bright muzzle flash + a fast GLOWING shell that streaks
-          // (low arc) to the target; a tracer line makes the shell path readable even at
-          // speed, and the shell bursts with a small shockwave ring on impact.
+          // TANK CANNON: a sharp bright muzzle flash + a glowing shell that LOBS in a
+          // visible arc to the target (the glow-head trail traces the arc), bursting with
+          // a shockwave ring on impact. No straight tracer — that read as a flat beam.
           const ang = Math.atan2(ev.tx - ev.x, ev.tz - ev.z);
           const mx = ev.x + Math.sin(ang) * 0.85, mz = ev.z + Math.cos(ang) * 0.85, my = y1 + 0.45;
           const dist = Math.hypot(ev.tx - ev.x, ev.tz - ev.z);
           this.spawnParts(mx, my, mz, 5, true); // punchy muzzle flash (big particles)
-          if (this.tracers.length < MAX_TRACER) this.tracers.push({ x1: mx, y1: my, z1: mz, x2: ev.tx, y2, z2: ev.tz, t: 0.07 });
           if (this.rockets.length < 64) this.rockets.push({
             x0: mx, y0: my, z0: mz, x1: ev.tx, y1: y2, z1: ev.tz,
-            t: 0, delay: 0, dur: Math.max(0.34, dist * 0.026), arc: 1.3 + dist * 0.09,
-            noSmoke: true, scale: 1.4, burst: 9, col: 0xffc24d, ring: true, // glowing orange round
+            t: 0, delay: 0, dur: Math.max(0.5, dist * 0.04), arc: 2.4 + dist * 0.22,
+            noSmoke: true, scale: 1.4, burst: 9, col: 0xffc24d, ring: true, // glowing orange round, arcs
           });
         } else if (ev.w === 6) {
           // HEAVY / NAVAL GUN: a big slow shell lobs high with a smoke trail, a large
@@ -2737,7 +2736,7 @@ export class Renderer {
           });
           if (this.rockets.length < 64) this.rockets.push({
             x0: mx, y0: my, z0: mz, x1: ev.tx, y1: y2, z1: ev.tz,
-            t: 0, delay: 0, dur: Math.max(0.6, dist * 0.04), arc: 4 + dist * 0.2,
+            t: 0, delay: 0, dur: Math.max(0.75, dist * 0.05), arc: 4.5 + dist * 0.26,
             scale: 2.4, burst: 18, col: 0x3a3f46, ring: true, // big dark shell, lobs high, smoke trail
           });
         } else if (ev.w === 1) {
