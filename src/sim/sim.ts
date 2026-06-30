@@ -1414,7 +1414,8 @@ export class Sim {
   // 0 mg, 1 rocket, 2 cannon, 3 air gun, 4 missile salvo, 5 flak, 6 naval gun,
   // 7 torpedo, 8 sub cruise, 9 cannon emplacement, 10 tesla, 11 Melody twin-gun,
   // 12 SAM, 13 interceptor drones, 14 MLRS rocket, 15 heavy-tank shell,
-  // 16 Rocket Team rocket (small man-portable missile).
+  // 16 Rocket Team rocket (small man-portable missile), 17 AA Vehicle missile
+  // (small, streaks up to intercept aircraft).
   // tgt may be omitted (e.g. force-firing empty ground) — then we pick by attacker
   // type alone so an MLRS still launches its rocket and infantry use a small impact,
   // instead of the old generic w=2 (which made everything look like a tank).
@@ -1429,7 +1430,7 @@ export class Sim {
       : att.type === 'sam' ? 12                                              // Missile Battery: guided AA missiles
       : att.type === 'interceptor' ? 13                                     // Interceptor Team: swarm of tiny drones
       : att.type === 'rocket' ? 16                                          // Rocket Team: small man-portable missile
-      : att.type === 'aatank' ? 1
+      : att.type === 'aatank' ? 17                                          // AA Vehicle: small missile streaks up to intercept aircraft
       : att.type === 'mlrs' ? 14                                            // MLRS: GLB rocket projectile, one per shot
       : att.type === 'msldrone' || att.type === 'mortar' || att.type === 'artillery' || att.type === 'artyship' ? 4
       : att.type === 'heli' || att.type === 'helidrone' ? (tgtInf ? 0 : 1)   // guns vs inf, rockets vs veh/bld
@@ -2127,6 +2128,9 @@ export class Sim {
         if (!te || te.hp <= 0) { u.orders.shift(); u.path = null; return; } // target destroyed → done
         px = te.x; pz = te.z;
       }
+      // dedicated anti-air (AA Vehicle, Patriot, Interceptor): can ONLY engage aircraft —
+      // a force-fire on ground / a non-air target is ignored (it won't shoot the dirt)
+      if (def.aaOnly && !(te && !te.b && UNITS[te.type]?.kind === 'air')) { u.orders.shift(); u.path = null; return; }
       // suicide truck: a force-fire order means "drive there and detonate", not shoot
       if (def.bombTruck) {
         if (hyp(px - u.x, pz - u.z) <= 1.4) { this.truckBoom(u, true); return; }

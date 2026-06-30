@@ -2772,6 +2772,16 @@ export class Renderer {
             t: 0, delay: 0, dur: Math.max(0.5, dist * 0.04), arc: 1.6 + dist * 0.07,
             scale: 0.4, burst: 12, col: 0xeaf0f4, ring: true, // small white missile (1/4 of the w1 rocket)
           });
+        } else if (ev.w === 17) {
+          // AA VEHICLE: a small guided missile launches like a rocket and STREAKS UP to the
+          // aircraft (y2 = flyer cruise altitude via ev.tf), bursting on intercept. 1/4 size.
+          const dist = Math.hypot(ev.tx - ev.x, ev.tz - ev.z);
+          this.spawnParts(ev.x, y1 + 0.4, ev.z, 3, false); // launch flash off the rail
+          if (this.rockets.length < 64) this.rockets.push({
+            x0: ev.x, y0: y1 + 0.4, z0: ev.z, x1: ev.tx, y1: y2, z1: ev.tz,
+            t: 0, delay: 0, dur: Math.max(0.22, dist * 0.02), arc: 0.5,
+            scale: 0.4, burst: 8, col: 0xeaf0f4, // small white interceptor missile, smoke trail
+          });
         } else if (ev.w === 5) {
           // FLAK: a quick tracer up to the target + a small dark airburst puff (anti-air
           // shellburst), distinct from a solid impact spark.

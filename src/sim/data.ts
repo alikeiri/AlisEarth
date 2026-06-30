@@ -4,7 +4,7 @@ export const TICK = 0.1;            // seconds per sim tick (10 Hz)
 export const TICKS_PER_SEC = 10;
 // bump whenever map generation or sim logic changes in a way that breaks
 // replay reproduction (same seed must produce the same game to replay it)
-export const SIM_VERSION = 11; // v11: MLRS no longer China-exclusive — any nation (incl. non-China AIs) can now build it, so prior train commands reproduce differently (breaks v10 replay/lockstep)
+export const SIM_VERSION = 12; // v12: dedicated AA (AA Vehicle/Patriot/Interceptor) can no longer force-fire ground — only air targets (changes force-fire state vs v11)
 // buildings exempt from the 1-tile placement spacing rule: walls, tank barriers and
 // defensive structures may be packed tightly; economy/production buildings need a gap
 // so their (oversized) models don't overlap. Used by sim.canPlace + the client preview.
