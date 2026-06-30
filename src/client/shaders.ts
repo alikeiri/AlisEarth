@@ -49,7 +49,7 @@ export const WATER_FRAG = `
     float crest = smoothstep(0.62, 0.95, h * 0.6 + 0.5);
     float foam = clamp(crest * (0.8 + smoothstep(0.10, 0.45, length(g))), 0.0, 1.0);
     col = mix(col, uFoam, foam * 0.6);
-    gl_FragColor = vec4(col, mix(uOpacity, 1.0, fres));
+    gl_FragColor = vec4(col*1.5, mix(uOpacity, 1.0, fres));
   }
 `;
 
