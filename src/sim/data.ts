@@ -105,7 +105,7 @@ export const UNITS: Record<string, UnitDef> = {
   // All slow/fragile and cannot hit aircraft — kite with them or get overrun.
   mortar:      { name: 'Mortar Team',    cost: 550,  hp: 95,  speed: 1.6, range: 11.0, dmg: 46, rof: 3.4, builtAt: 'barracks', buildTime: 11, kind: 'inf', splash: 2.2, fortify: true }, // infantry mortar
   mortartrack: { name: 'Mortar Carrier', cost: 850,  hp: 240, speed: 2.5, range: 12.0, dmg: 54, rof: 3.2, builtAt: 'factory',  buildTime: 12, kind: 'veh', splash: 2.4 }, // self-propelled mortar
-  fieldgun:    { name: 'Field Gun',      cost: 900,  hp: 120, speed: 1.2, range: 13.5, dmg: 70, rof: 4.2, builtAt: 'barracks', buildTime: 14, kind: 'inf', splash: 2.6, fortify: true }, // towed infantry howitzer
+  fieldgun:    { name: 'Sniper',         cost: 900,  hp: 120, speed: 1.2, range: 13.5, dmg: 70, rof: 4.2, builtAt: 'barracks', buildTime: 14, kind: 'inf', splash: 2.6, fortify: true }, // long-range infantry (renamed from Field Gun; still howitzer-style splash siege)
   artillery:   { name: 'Artillery',      cost: 1500, hp: 200, speed: 1.4, range: 14.5, dmg: 78, rof: 4.2, builtAt: 'factory',  buildTime: 16, kind: 'veh', splash: 2.8 }, // self-propelled siege gun
   artyship: { name: 'Artillery Cruiser', cost: 1900, hp: 620, speed: 2.1, range: 15.5, dmg: 92, rof: 4.6, builtAt: 'shipyard', buildTime: 17, kind: 'sea', move: 'sea', splash: 3.0, faction: 'australia' }, // signature: naval siege
   // the anti-infantry vehicle: autocannon IFV — shreds infantry, loses to tanks

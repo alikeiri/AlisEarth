@@ -30,7 +30,7 @@ const U_ICONS: Record<string, string> = {
   fighter: '\u{1F6E9}️', bomber: '\u{1F4A3}', dbomber: '\u{1F916}', heli: '\u{1F681}', helidrone: '\u{1FA81}',
   mcv: '\u{1F3D7}️', dozer: '\u{1F69C}', patriot: '\u{1F6F0}️',
   tews: '\u{1F4E1}', navengineer: '\u{1F6E0}️', shahed: '\u{1F6F8}',
-  mortar: '\u{1F4A3}', mortartrack: '\u{1F4A3}', fieldgun: '\u{1F4A5}', artillery: '\u{1F4A5}', artyship: '\u{1F4A5}', airtransport: '\u{1F681}',
+  mortar: '\u{1F4A3}', mortartrack: '\u{1F4A3}', fieldgun: '\u{1F3AF}', artillery: '\u{1F4A5}', artyship: '\u{1F4A5}', airtransport: '\u{1F681}',
   // faction signature units
   apoc: '\u{2620}️', shaheen: '\u{1F680}', brahmos: '\u{2604}️', gunship: '\u{1F4B0}',
   technical: '\u{1F3CE}️', mech: '\u{1F916}', silicondrone: '\u{1F4BB}', jungleraider: '\u{1F33F}',
@@ -67,7 +67,7 @@ const TIP_NOTES: Record<string, string> = {
   mlrs: 'Cannot engage aircraft',
   mortar: 'Mortar Team (infantry): area splash that shreds massed infantry. Cheap, from the Barracks. Fragile, slow, no air defence.',
   mortartrack: 'Mortar Carrier (vehicle): a mobile, armoured self-propelled mortar — same anti-infantry splash as the Mortar Team but tougher and faster. From the War Factory. No air defence.',
-  fieldgun: 'Field Gun (infantry): a towed howitzer crew — long-range siege splash from the Barracks, cheaper than the Artillery vehicle. Very fragile and slow. No air defence.',
+  fieldgun: 'Sniper (infantry): a long-range marksman from the Barracks — heavy, slow-firing shots with splash, cheaper than the Artillery vehicle. Very fragile and slow. No air defence.',
   artillery: 'Artillery (vehicle): long-range siege gun with big area splash — breaks up clumped pushes and flattens bases. Fragile; outrange the enemy or get overrun. No air defence.',
   artyship: 'Artillery Cruiser: long-range naval bombardment with wide area splash. Shell coastal pushes and bases from offshore. No air defence.',
   turret: 'Cannot engage aircraft',
