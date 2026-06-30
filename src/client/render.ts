@@ -1893,7 +1893,7 @@ export class Renderer {
       if ((hiN ? hiW / hiN : 0) > (loN ? loW / loN : 0)) merged.rotateY(Math.PI); // nose at -Z -> face +Z
       const s = 0.95 / Math.max(0.001, span);   // normalise length (Z) to ~0.95 units
       merged.scale(s, s, s);
-      const mat = new THREE.MeshStandardMaterial({ color: 0xd7d7cc, metalness: 0.25, roughness: 0.55 });
+      const mat = new THREE.MeshStandardMaterial({ color: 0xd7d7cc, metalness: 0.25, roughness: 0.55, emissive: 0x202024, emissiveIntensity: 0.6 });
       const mesh = new THREE.InstancedMesh(merged, mat, 48);
       mesh.frustumCulled = false; mesh.count = 0; mesh.castShadow = true;
       this.scene.add(mesh);
@@ -2708,7 +2708,7 @@ export class Renderer {
           if (this.rockets.length < 64) this.rockets.push({
             x0: ev.x, y0: y1 + 0.6, z0: ev.z, x1: ev.tx, y1: y2, z1: ev.tz,
             t: 0, delay: 0, dur: Math.max(0.6, dist * 0.05), arc: 3 + dist * 0.18,
-            scale: 1.1, burst: 14, ring: true, himars: true,
+            scale: 1.6, burst: 14, ring: true, himars: true,
           });
         } else if (ev.w === 2) {
           // TANK CANNON: a sharp bright muzzle flash + a fast GLOWING shell that streaks
@@ -3420,8 +3420,14 @@ export class Renderer {
           life: 0, max: 0.5 + Math.random() * 0.3, s: 1,
         });
       }
-      // bright glowing trail head so the projectile streak + arc read clearly in flight
-      if (this.parts.length < MAX_PART) {
+      // trail glow. projectiles with a real GLB model (HIMARS) get only a SMALL exhaust
+      // glow at the tail so the bright head doesn't cover the model; the procedural cones
+      // get a bright head on the body so their streak + arc read clearly.
+      if (r.himars) {
+        const dx = ahead.x - pos.x, dy = ahead.y - pos.y, dz = ahead.z - pos.z, dl = Math.hypot(dx, dy, dz) || 1;
+        const off = 0.55 * (r.scale ?? 1);
+        if (this.parts.length < MAX_PART) this.parts.push({ x: pos.x - dx / dl * off, y: pos.y - dy / dl * off, z: pos.z - dz / dl * off, vx: 0, vy: 0, vz: 0, life: 0, max: 0.12, s: 0.7 });
+      } else if (this.parts.length < MAX_PART) {
         this.parts.push({ x: pos.x, y: pos.y, z: pos.z, vx: 0, vy: 0, vz: 0, life: 0, max: 0.16, s: (r.scale ?? 1) * 1.2 });
       }
       return true;
