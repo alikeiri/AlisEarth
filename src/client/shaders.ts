@@ -28,27 +28,30 @@ export const WATER_FRAG = `
     // gradient (for the surface normal) — no geometry is displaced
     float h = 0.0; vec2 g = vec2(0.0);
     #define WAVE(dx,dy,fr,sp,am) { vec2 d = vec2(dx,dy); float ph = dot(p,d)*fr + uTime*sp; h += (am)*sin(ph); g += (am)*cos(ph)*(fr)*d; }
-    WAVE( 0.85,  0.52, 0.45, 1.10, 0.55)
-    WAVE(-0.45,  0.89, 0.90, 0.85, 0.32)
-    WAVE( 0.30, -0.95, 1.70, 1.50, 0.18)
-    WAVE(-0.92, -0.38, 2.90, 2.10, 0.10)
-    WAVE( 0.70, -0.71, 5.30, 2.80, 0.05)
-    WAVE(-0.20,  0.98, 8.40, 3.40, 0.028)
+    WAVE( 1.0,  1.0, 1.0, 0.95, 0.05)
+    WAVE( -1.0,  0.0, 0.5, 0.25, 0.2)
+    WAVE( 0.5,  0.5, 0.5, 0.10, 0.1)
+    //WAVE( 0.85,  0.52, 0.45, 1.10, 0.55)
+    //WAVE(-0.45,  0.89, 0.90, 0.85, 0.32)
+    //WAVE( 0.30, -0.95, 1.70, 1.50, 0.18)
+    //WAVE(-0.92, -0.38, 2.90, 2.10, 0.10)
+    //WAVE( 0.70, -0.71, 5.30, 2.80, 0.05)
+    //WAVE(-0.20,  0.98, 8.40, 3.40, 0.028)
     vec3 N = normalize(vec3(-g.x * 0.6, 1.0, -g.y * 0.6));
     vec3 V = normalize(cameraPosition - vWorld);
     vec3 L = normalize(uSunDir);
-    float ndv = clamp(dot(N, V), 0.0, 1.0);
+    float ndv = clamp(dot(N, V), 0.0, 0.5);
     float fres = pow(1.0 - ndv, 3.0);
     vec3 water = mix(uDeep, uShallow, ndv);                 // deeper looking straight down
     water += uShallow * 0.12 * smoothstep(0.2, 0.9, h * 0.5 + 0.5); // subsurface shimmer
     vec3 col = mix(water, uSky, fres * 0.65);               // sky reflection at grazing angles
     // sun glints — a broad sheen plus a tight sparkle
-    float nh = max(dot(N, normalize(L + V)), 0.0);
-    col += uSunCol * (pow(nh, 90.0) * 0.7 + pow(nh, 800.0) * 1.2);
+    float nh = max(dot(N, normalize(L + V)), 0.5);
+    col += uSunCol * (pow(nh, 90.0) * 0.7 + pow(nh, 500.0) * 1.2);
     // whitecap foam on the steep wave crests
     float crest = smoothstep(0.62, 0.95, h * 0.6 + 0.5);
     float foam = clamp(crest * (0.8 + smoothstep(0.10, 0.45, length(g))), 0.0, 1.0);
-    col = mix(col, uFoam, foam * 0.6);
+    col = mix(col, uFoam, foam * 0.5);
     gl_FragColor = vec4(col, mix(uOpacity, 1.0, fres));
   }
 `;
