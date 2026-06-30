@@ -718,6 +718,63 @@ export function genMap(seed: number, nPlayers: number): GameMap {
     if (addOilWell(cx, cz)) oilL++;
   }
 
+  // -- tiny sandbanks: sprinkle a few 1-2 cell shoals JUST above sea level in big
+  // open oceans (continent / island maps). They give light infantry/amphibious a
+  // stepping stone and break up empty water without becoming real islands. Seeded
+  // (uses the map rng) so every lockstep client / replay gets the identical layout,
+  // and kept clear of spawn plateaus and ore/oil centres. Skipped on flat & urban
+  // maps (their only "water" is a thin scripted river — leave it alone).
+  if (!anyFlatLike) {
+    const seenW = new Uint8Array(W * H);
+    const farFromSpawnAndOre = (cx: number, cz: number) => {
+      for (const s of starts) if ((cx - s.x) * (cx - s.x) + (cz - s.z) * (cz - s.z) < 16 * 16) return false;
+      for (const c of oreCenters) if ((c.x - cx) * (c.x - cx) + (c.z - cz) * (c.z - cz) < 8 * 8) return false;
+      return true;
+    };
+    // raise a cell's four corner nodes to a shoal height + reblock so it stops being water
+    const raiseShoal = (cx: number, cz: number) => {
+      if (!m.inB(cx, cz)) return;
+      const i = cz * (W + 1) + cx;
+      for (const n of [i, i + 1, i + W + 1, i + W + 2]) m.hN[n] = Math.max(m.hN[n], SEA + 0.3);
+      recomputeBlocked(cx - 1, cz - 1, cx + 2, cz + 2);
+    };
+    for (let s = 0; s < W * H; s++) {
+      if (m.water[s] !== 1 || seenW[s]) continue;
+      // flood-fill this connected water body (4-neighbour), collecting its cells
+      const body: number[] = [];
+      const q = [s]; seenW[s] = 1;
+      while (q.length) {
+        const i = q.pop()!;
+        body.push(i);
+        const x = i % W, z = (i / W) | 0;
+        for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
+          const nx = x + dx, nz = z + dz;
+          if (nx < 0 || nz < 0 || nx >= W || nz >= H) continue;
+          const ni = nz * W + nx;
+          if (m.water[ni] === 1 && !seenW[ni]) { seenW[ni] = 1; q.push(ni); }
+        }
+      }
+      if (body.length < 150) continue;                 // only LARGE open water bodies
+      // 2-5 shoals, scaled gently with the body's size; deterministic via rng
+      const want = Math.min(5, Math.max(2, 2 + Math.floor(body.length / 800)));
+      let made = 0, attempts = 0;
+      while (made < want && attempts < want * 40) {
+        attempts++;
+        const i = body[rng.int(body.length)];
+        if (m.water[i] !== 1) continue;                // already raised by a previous shoal
+        const cx = i % W, cz = (i / W) | 0;
+        // keep shoals off the body's edge (so they sit in open water, not against shore)
+        if (cx < 3 || cz < 3 || cx > W - 4 || cz > H - 4) continue;
+        if (!farFromSpawnAndOre(cx, cz)) continue;
+        raiseShoal(cx, cz);
+        if (rng.next() < 0.5) raiseShoal(cx + (rng.next() < 0.5 ? 1 : -1), cz); // sometimes a 2-cell bar
+        made++;
+      }
+    }
+    m.regionDirty = true; // land connectivity changed (new specks of land)
+    m.terraVersion++;     // minimap cache: water turned to land
+  }
+
   // Steel Arena: pave the whole plain (renders as bare metallic concrete) and make
   // EVERY ore field the high-value crystal kind, richer than usual, to bankroll
   // the big-army matches this map is built for.

@@ -33,13 +33,14 @@ const MODEL_DEFS: Record<string, { file: string; size: number; axis: 'l' | 'h'; 
   mlrs:      { file: 'himars',    size: 1.95, axis: 'l', ry: 0 }, // HIMARS launcher truck
   artillery: { file: 'artillery', size: 1.75, axis: 'l', ry: Math.PI }, // Ha-To SP artillery (Sketchfab, CC-BY) — flipped to face forward
   // trucks: cab/bed geometry defeats the front heuristic — flip both (user-verified)
-  harv:      { file: 'harv',      size: 1.70, axis: 'l', ry: Math.PI },
+  harv:      { file: 'harvester', size: 1.80, axis: 'l', ry: Math.PI }, // tracked harvester (harvester.glb)
   engineer:  { file: 'engineer',  size: 1.35, axis: 'l', ry: Math.PI },
   mcv:       { file: 'harv',      size: 1.90, axis: 'l', ry: Math.PI, tint: 0x4a7ab0 }, // big blue construction rig
   dozer:     { file: 'bulldozer', size: 1.7,  axis: 'l', ry: 0 }, // IDF-style armored bulldozer (Gemini + Tripo3D); own textures, no tint
   recon:     { file: 'drone',     size: 0.90, axis: 'l', ry: 0 },
   strike:    { file: 'drone',     size: 1.25, axis: 'l', ry: 0 },
   msldrone:  { file: 'drone',     size: 1.60, axis: 'l', ry: 0 },
+  minedrone: { file: 'drone',     size: 0.80, axis: 'l', ry: 0, tint: 0xd9a521 }, // small amber mine-clearing rover
   fighter:   { file: 'fighter',   size: 1.70, axis: 'l', ry: Math.PI }, // delta wing reads wider at the nose third
   // bomber: wingspan exceeds fuselage length, so the long-axis heuristic picks
   // the wings — quarter-turn nudge puts the prop forward
@@ -86,6 +87,7 @@ const ROTORS: Record<string, { y: number; r: number; speed: number; nose?: boole
   // (heli/Apache spins its OWN modeled rotor via the baked 'Rotor Rotation' clip — no procedural rotor)
   helidrone: { y: 0.80, r: 0.95, speed: 31 },
   recon:     { y: 0.55, r: 0.60, speed: 36 },
+  minedrone: { y: 0.45, r: 0.52, speed: 38 },
   strike:    { y: 0.70, r: 0.85, speed: 33 },
   msldrone:  { y: 0.85, r: 1.00, speed: 31 },
   minidrone: { y: 0.34, r: 0.42, speed: 42 },
@@ -461,7 +463,7 @@ function unitGeoSmooth(type: string): [THREE.BufferGeometry, THREE.BufferGeometr
     chemtank: 'tank', biotank: 'tank', stealthtank: 'tank', chemdrone: 'recon', biodrone: 'recon',
     mcv: 'harv', dozer: 'harv', tews: 'mlrs', transport: 'destroyer', navengineer: 'gunboat',
     mortar: 'rocket', artillery: 'mlrs', artyship: 'destroyer', airtransport: 'heli',
-    mortartrack: 'mlrs', fieldgun: 'rocket',
+    mortartrack: 'mlrs', fieldgun: 'rocket', minedrone: 'recon',
   };
   if (ALIAS[type]) type = ALIAS[type];
   const B: THREE.BufferGeometry[] = [], A: THREE.BufferGeometry[] = [];

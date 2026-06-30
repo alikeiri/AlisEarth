@@ -22,7 +22,7 @@ const B_ICONS: Record<string, string> = {
 const U_ICONS: Record<string, string> = {
   rifle: '\u{1FA96}', rocket: '\u{1F680}', interceptor: '\u{1F99F}', medic: '\u{2695}️', melody: '\u{1F483}', tank: '\u{1F699}', heavy: '\u{1F69B}', ifv: '\u{1F6FB}', aatank: '\u{1F3AF}', flak: '\u{1F4A5}', hovercraft: '\u{1F6E5}️', harv: '\u{1F69C}', engineer: '\u{1F527}',
   fueltruck: '\u{1F6E2}️', cmissile: '\u{1F680}', bbmissile: '\u{1F4A3}', chemissile: '\u{2623}️',
-  hive: '\u{1F41D}', recon: '\u{1F6F8}', strike: '\u{1F6F0}️', msldrone: '☄️', mlrs: '\u{1F9E8}',
+  hive: '\u{1F41D}', recon: '\u{1F6F8}', strike: '\u{1F6F0}️', msldrone: '☄️', mlrs: '\u{1F9E8}', minedrone: '\u{1F9F9}',
   chemtrooper: '\u{2623}️', chemtank: '\u{2623}️', chemdrone: '\u{2623}️',
   biotrooper: '\u{2622}️', biotank: '\u{2622}️', biodrone: '\u{2622}️', stealthtank: '\u{1F977}',
   gunboat: '\u{1F6A4}', destroyer: '\u{1F6F3}️', sub: '\u{1F93F}', navdrone: '\u{1F6F6}',
@@ -51,7 +51,7 @@ const UPG_INFO: Record<string, string> = {
   airforce: '+25% production speed',
   shipyard: '+25% production speed',
 };
-export const U_LIST = ['rifle', 'rocket', 'interceptor', 'medic', 'mortar', 'fieldgun', 'melody', 'hive', 'tank', 'heavy', 'ifv', 'aatank', 'flak', 'hovercraft', 'patriot', 'fueltruck', 'harv', 'engineer', 'mcv', 'dozer', 'mortartrack', 'mlrs', 'artillery', 'recon', 'strike', 'msldrone', 'shahed',
+export const U_LIST = ['rifle', 'rocket', 'interceptor', 'medic', 'mortar', 'fieldgun', 'melody', 'hive', 'tank', 'heavy', 'ifv', 'aatank', 'flak', 'hovercraft', 'patriot', 'fueltruck', 'harv', 'engineer', 'minedrone', 'mcv', 'dozer', 'mortartrack', 'mlrs', 'artillery', 'recon', 'strike', 'msldrone', 'shahed',
   'tews', 'chemtrooper', 'chemtank', 'chemdrone', 'biotrooper', 'biotank', 'biodrone', 'stealthtank',
   'apoc', 'brahmos', 'gunship', 'technical', 'mech', 'silicondrone', 'jungleraider', 'marine', 'hovertank', 'shaheen',
   'gunboat', 'destroyer', 'artyship', 'sub', 'subhunter', 'mslcruiser', 'flakship', 'navdrone', 'navengineer', 'transport', 'flattop', 'airtransport', 'fighter', 'bomber', 'dbomber', 'heli', 'helidrone',
@@ -84,6 +84,7 @@ const TIP_NOTES: Record<string, string> = {
   irondome: 'Iron Dome: shoots down incoming silo missiles aimed inside its shield. One kill per reload — a heavy salvo can still overwhelm a single dome. Needs a Radar Dome.',
   patriot: 'Patriot SAM: long-range air defence — shreds fighters, bombers and large drones, AND intercepts incoming silo missiles. Weak vs ground. Fortify (F) to dig in and deploy its own radar: wide vision + early-warning detection of incoming enemies.',
   engineer: 'Repairs units, builds roads, and lays proximity mines (press F to lay one from its stock of 4). Right-click an oil well to build an Oil Rig there (consumes the engineer) for steady passive income.',
+  minedrone: 'Mine Drone: cheap, slow, fragile unarmed rover that harmlessly triggers nearby enemy mines (land & sea). Drive it ahead of an assault to sweep minefields. Cannot attack.',
   destroyer: 'Armored gun ship: duels other warships and bombards the coast. Its sonar also detects and depth-charges submarines.',
   sub: 'Submarine: cloaked until a sonar ship (Destroyer / Sub Hunter) pings it or you get very close. Devastating ambush torpedoes, but a thin hull.',
   subhunter: 'Sub Hunter: fast sonar escort that reveals and depth-charges submarines. Weak against everything else.',

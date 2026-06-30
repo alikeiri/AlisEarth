@@ -3,7 +3,7 @@
 
 import { Sim, playerView } from '../sim/sim';
 import { aiTick } from '../sim/ai';
-import { FACTIONS, BUILDINGS, UNITS, PLAYER_COLORS, SIM_VERSION, UPG_MAX, SPACING_EXEMPT } from '../sim/data';
+import { FACTIONS, BUILDINGS, UNITS, PLAYER_COLORS, SIM_VERSION, UPG_MAX, SPACING_EXEMPT, CLIFF_IMMUNE } from '../sim/data';
 import { GameMap, genMap, setMapSize, W, H, MAXD, SEA } from '../sim/map';
 import { Renderer, gfxQuality, preloadModels } from './render';
 import { UI } from './ui';
@@ -605,6 +605,15 @@ function canPlaceClient(map: GameMap, views: any[], me: number, type: string, cx
       if (map.tBlocked[i] && !(onWater && map.water[i])) return false; // shipyards sit on water
       if (map.ore && map.ore[i] > 0) return false; // can't build on an ore patch
     }
+  // cliff clearance: most buildings must keep a ~2-cell gap from cliffs/mountains so
+  // their models don't overhang the slope (mirrors sim.canPlace). Base-defence
+  // turrets + the shipyard (CLIFF_IMMUNE) are exempt.
+  if (!CLIFF_IMMUNE.has(type)) {
+    const pad = 2;
+    for (let z = cz - pad; z < cz + s + pad; z++)
+      for (let x = cx - pad; x < cx + s + pad; x++)
+        if (map.isCliff(x, z)) return false;
+  }
   // prerequisite building must exist and be finished (else placement fails server-side)
   if (def.prereq && !views.some(v => v.b && v.o === me && v.t === def.prereq && (v.pr ?? 1) >= 1)) return false;
   let near = false;
@@ -612,10 +621,10 @@ function canPlaceClient(map: GameMap, views: any[], me: number, type: string, cx
   for (const v of views) {
     if (!v.b) continue;
     if (v.cx < cx + s && v.cx + v.sz > cx && v.cz < cz + s && v.cz + v.sz > cz) return false;
-    // 1-tile spacing: economy/production buildings can't be placed directly touching
+    // 2-tile spacing: economy/production buildings must keep a 2-cell gap from
     // another such building (mirrors sim.canPlace). Walls + defenses are exempt.
     if (!SPACING_EXEMPT.has(type) && !SPACING_EXEMPT.has(v.t) &&
-        v.cx < cx + s + 1 && v.cx + v.sz > cx - 1 && v.cz < cz + s + 1 && v.cz + v.sz > cz - 1) return false;
+        v.cx < cx + s + 2 && v.cx + v.sz > cx - 2 && v.cz < cz + s + 2 && v.cz + v.sz > cz - 2) return false;
     // walls / tank barriers don't anchor placement — can't creep the base out
     // with a chain of cheap walls; a real structure must be within reach
     if (v.o === me && v.t !== 'wall' && v.t !== 'barrier') {

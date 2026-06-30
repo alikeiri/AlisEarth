@@ -1,7 +1,7 @@
 // Authoritative game simulation. Fixed timestep (10 Hz), no rendering imports.
 // Runs in the browser for skirmish and on the Node server for multiplayer.
 
-import { TICK, UNITS, BUILDINGS, FACTIONS, Faction, dmgMul, AIRFIELD_HELI, AIRFIELD_PLANE, airSlotClass, UPG_MAX, upgCost, ORE_VALUE, START_CREDITS, ORE_REGEN, ORE_REGEN_CAP, TECHS, DRONE_TYPES, SPACING_EXEMPT } from './data';
+import { TICK, UNITS, BUILDINGS, FACTIONS, Faction, dmgMul, AIRFIELD_HELI, AIRFIELD_PLANE, airSlotClass, UPG_MAX, upgCost, ORE_VALUE, START_CREDITS, ORE_REGEN, ORE_REGEN_CAP, TECHS, DRONE_TYPES, SPACING_EXEMPT, CLIFF_IMMUNE } from './data';
 import { hyp, dsin, dcos } from './dmath';
 import { GameMap, genMap, nearestPassable, nearestSea, W, H, SEA } from './map';
 import { findPath } from './path';
@@ -392,18 +392,31 @@ export class Sim {
         // harvesters trying to mine it (reported: AI harvesters getting stuck)
         if (this.map.ore[i] > 0) return false;
       }
-    // 1-tile spacing: economy/production buildings can't be placed directly touching
-    // another such building (their models overhang their footprint and overlap).
-    // Walls + defensive structures are exempt so they can still be packed.
+    // 2-tile spacing: economy/production buildings need a 2-cell gap from another
+    // such building (their models overhang their footprint and overlap). The
+    // footprint spans cx..cx+size-1, so scanning cx-2..cx+size+1 covers a 2-cell
+    // ring on every side. Walls + defensive structures are exempt so they can
+    // still be packed tightly.
     if (!SPACING_EXEMPT.has(type)) {
-      for (let z = cz - 1; z <= cz + def.size; z++)
-        for (let x = cx - 1; x <= cx + def.size; x++) {
+      for (let z = cz - 2; z <= cz + def.size + 1; z++)
+        for (let x = cx - 2; x <= cx + def.size + 1; x++) {
           if (!this.map.inB(x, z)) continue;
           const id = this.map.occ[z * W + x];
           if (!id) continue;
           const e = this.ents.get(id);
           if (e && e.b && !SPACING_EXEMPT.has(e.type)) return false;
         }
+    }
+    // cliff clearance: keep most buildings a small (~2-cell) gap from cliffs/
+    // mountains so their oversized models don't overhang the slope. Base-defence
+    // turrets and the shipyard are exempt (CLIFF_IMMUNE) — you WANT a turret on the
+    // high ground, and a shipyard must straddle a cliffy coast. A "cliff" cell is a
+    // slope-blocked, non-water, non-forest cell (map.isCliff).
+    if (!CLIFF_IMMUNE.has(type)) {
+      const pad = 2;
+      for (let z = cz - pad; z < cz + def.size + pad; z++)
+        for (let x = cx - pad; x < cx + def.size + pad; x++)
+          if (this.map.isCliff(x, z)) return false;
     }
     // shipyards must straddle the coast: water in/around the footprint
     if (type === 'shipyard') {
@@ -1732,6 +1745,22 @@ export class Sim {
       this.siloAutoStrike(b);
   }
 
+  // detonate a proximity mine `m`: area-blast every nearby foe (aircraft fly over
+  // safely) then destroy the mine. Shared by the mine's own trigger and the
+  // mine-clearing drone so both take the identical (deterministic) damage path.
+  private detonateMine(m: Entity) {
+    const def = UNITS[m.type];
+    const R = def.blastR || 2.4;
+    const fake: any = { id: m.id, owner: m.owner, type: m.type, b: false };
+    for (const o of [...this.ents.values()]) {
+      if (!this.foe(o.owner, m.owner) || o.hp <= 0 || (!o.b && UNITS[o.type]?.fly)) continue;
+      const d = o.b ? this.distToEnt(m.x, m.z, o) : hyp(o.x - m.x, o.z - m.z);
+      if (d <= R) this.dealDamage(fake, o, def.dmg * (1 - 0.4 * (d / R)));
+    }
+    m.hp = 0;
+    this.events.push({ e: 'boom', x: m.x, z: m.z, big: true });
+  }
+
   // ---------- units ----------
   private tickUnit(u: Entity) {
     const def = UNITS[u.type];
@@ -1755,18 +1784,20 @@ export class Sim {
         if (o.b || !this.foe(o.owner, u.owner) || o.hp <= 0 || UNITS[o.type]?.fly) continue;
         if ((o.x - u.x) * (o.x - u.x) + (o.z - u.z) * (o.z - u.z) <= trig * trig) { armed = true; break; }
       }
-      if (armed) {
-        const R = def.blastR || 2.4;
-        const fake: any = { id: u.id, owner: u.owner, type: u.type, b: false };
-        for (const o of [...this.ents.values()]) {
-          if (!this.foe(o.owner, u.owner) || o.hp <= 0 || (!o.b && UNITS[o.type]?.fly)) continue;
-          const d = o.b ? this.distToEnt(u.x, u.z, o) : hyp(o.x - u.x, o.z - u.z);
-          if (d <= R) this.dealDamage(fake, o, def.dmg * (1 - 0.4 * (d / R)));
-        }
-        u.hp = 0;
-        this.events.push({ e: 'boom', x: u.x, z: u.z, big: true });
-      }
+      if (armed) this.detonateMine(u);
       return;
+    }
+
+    // mine-clearing drone: harmlessly triggers nearby ENEMY proximity mines (land &
+    // sea) so it can sweep a minefield ahead of an assault. Deterministic radius
+    // check each tick; reuses the standard mine-detonation path (the drone is a foe,
+    // so it still takes the blast — fragile by design, can be killed mid-sweep).
+    if (def.mineDetect) {
+      const CLEAR = 1.8;
+      for (const o of this.nearbyUnits(u.x, u.z, CLEAR + 1)) {
+        if (o.b || o.hp <= 0 || !UNITS[o.type]?.mine || !this.foe(o.owner, u.owner)) continue;
+        if ((o.x - u.x) * (o.x - u.x) + (o.z - u.z) * (o.z - u.z) <= CLEAR * CLEAR) this.detonateMine(o);
+      }
     }
 
     // aircraft carrier: a mobile flight deck — keeps a strike air-wing aloft, launching

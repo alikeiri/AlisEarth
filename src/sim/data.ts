@@ -4,11 +4,17 @@ export const TICK = 0.1;            // seconds per sim tick (10 Hz)
 export const TICKS_PER_SEC = 10;
 // bump whenever map generation or sim logic changes in a way that breaks
 // replay reproduction (same seed must produce the same game to replay it)
-export const SIM_VERSION = 12; // v12: dedicated AA (AA Vehicle/Patriot/Interceptor) can no longer force-fire ground — only air targets (changes force-fire state vs v11)
+export const SIM_VERSION = 13; // v13: 2-tile building spacing + cliff-clearance placement rule, mine-clearing land drone, tiny seeded sandbank islands in large water bodies (all change deterministic placement/map state vs v12)
 // buildings exempt from the 1-tile placement spacing rule: walls, tank barriers and
 // defensive structures may be packed tightly; economy/production buildings need a gap
 // so their (oversized) models don't overlap. Used by sim.canPlace + the client preview.
 export const SPACING_EXEMPT = new Set(['wall', 'barrier', 'turret', 'sam', 'cannon', 'tesla', 'irondome']);
+// buildings allowed to sit right next to cliffs/mountains: base-defence turrets
+// (you want them perched on the high ground / hugging chokepoints) and the
+// shipyard (it must straddle a coast, often a cliffy shore). Everything else is
+// kept a small clearance away from cliffs so its (oversized) model doesn't
+// overhang the slope. Used by sim.canPlace + the client preview.
+export const CLIFF_IMMUNE = new Set(['turret', 'sam', 'cannon', 'tesla', 'irondome', 'flametower', 'shipyard']);
 export const ORE_VALUE = 0.8;      // credits per ore unit (economy pacing)
 export const START_CREDITS = 3000;
 export const ORE_REGEN = 0.9;     // ore regrown per field cell per second...
@@ -61,6 +67,7 @@ export interface UnitDef {
   mines?: number;                                // how many mines this unit carries
   mine?: boolean;                                // proximity mine: detonates when an enemy comes close
   trigger?: number;                              // mine trigger radius (cells)
+  mineDetect?: boolean;                          // mine-clearing drone: harmlessly triggers nearby enemy mines (clears minefields)
   sonar?: number;                                // reveals cloaked enemies (subs) within this radius
   siegeRange?: number;                           // longer reach against BUILDINGS only (sub cruise missiles)
   commando?: boolean;                            // hero operative (Melody): snipes infantry, launches an
@@ -120,6 +127,10 @@ export const UNITS: Record<string, UnitDef> = {
   interceptor: { name: 'Interceptor Team', cost: 550, hp: 110, speed: 2.3, range: 8.0, dmg: 24, rof: 0.35, builtAt: 'barracks', buildTime: 11, kind: 'inf', aaOnly: true, sight: 10 },
   medic:  { name: 'Field Medic',  cost: 300,  hp: 120, speed: 2.4, range: 0, dmg: 0, rof: 1, builtAt: 'barracks', buildTime: 7, kind: 'inf', repair: true, medic: true, aura: { range: 6, dmgMul: 1.25 } }, // heals nearby infantry + a +25% damage morale aura
   engineer: { name: 'Engineer',   cost: 600,  hp: 200, speed: 2.2, range: 0,   dmg: 0,  rof: 1,   builtAt: 'barracks', altBuiltAt: 'factory', buildTime: 10, kind: 'veh', repair: true, road: true, lays: 'mine', mines: 4, noAttack: true }, // trainable from the Barracks (infantry) AND the War Factory
+  // mine-clearing drone: a cheap, slow, fragile ground rover that harmlessly
+  // triggers enemy proximity mines (land & sea) it rolls near — drive it ahead of
+  // an assault to sweep minefields. Unarmed; can't be ordered to attack.
+  minedrone: { name: 'Mine Drone', cost: 350, hp: 70, speed: 2.6, range: 0, dmg: 0, rof: 1, builtAt: 'factory', buildTime: 9, kind: 'veh', noAttack: true, mineDetect: true },
   patriot:  { name: 'Patriot SAM', cost: 1100, hp: 200, speed: 2.4, range: 11, dmg: 60, rof: 0.5, builtAt: 'factory',  buildTime: 12, kind: 'veh', intercept: { range: 11, cd: 4 }, fortify: true, sight: 14, aaOnly: true, capacity: 4, reload: 5 }, // long-range SAM: only engages aircraft + intercepts silo missiles; mobile radar picket
   mine:     { name: 'Land Mine',  cost: 0,    hp: 1,   speed: 0,   range: 0,   dmg: 150, rof: 1,  builtAt: '',         buildTime: 0,  kind: 'veh', internal: true, mine: true, trigger: 1.5, blastR: 2.4 },
   seamine:  { name: 'Sea Mine',   cost: 0,    hp: 1,   speed: 0,   range: 0,   dmg: 175, rof: 1,  builtAt: '',         buildTime: 0,  kind: 'sea', move: 'sea', internal: true, mine: true, trigger: 1.9, blastR: 3.0 }, // floating naval mine laid by the Naval Engineer
