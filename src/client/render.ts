@@ -2711,17 +2711,31 @@ export class Renderer {
             scale: 2.0, burst: 14, ring: true, himars: true,
           });
         } else if (ev.w === 2) {
-          // TANK CANNON: a sharp bright muzzle flash + a glowing shell that LOBS in a
-          // visible arc to the target (the glow-head trail traces the arc), bursting with
-          // a shockwave ring on impact. No straight tracer — that read as a flat beam.
+          // BATTLE TANK: fast, FLAT direct-fire shot — a bright muzzle flash + a straight
+          // tracer streak and a quick shell travelling in a straight line (arc 0), with a
+          // punchy impact ring. No lob — tanks are direct fire.
           const ang = Math.atan2(ev.tx - ev.x, ev.tz - ev.z);
           const mx = ev.x + Math.sin(ang) * 0.85, mz = ev.z + Math.cos(ang) * 0.85, my = y1 + 0.45;
           const dist = Math.hypot(ev.tx - ev.x, ev.tz - ev.z);
-          this.spawnParts(mx, my, mz, 5, true); // punchy muzzle flash (big particles)
+          this.spawnParts(mx, my, mz, 5, true); // punchy muzzle flash
+          if (this.tracers.length < MAX_TRACER) this.tracers.push({ x1: mx, y1: my, z1: mz, x2: ev.tx, y2, z2: ev.tz, t: 0.09 }); // straight tracer streak
           if (this.rockets.length < 64) this.rockets.push({
             x0: mx, y0: my, z0: mz, x1: ev.tx, y1: y2, z1: ev.tz,
-            t: 0, delay: 0, dur: Math.max(0.5, dist * 0.04), arc: 2.4 + dist * 0.22,
-            noSmoke: true, scale: 1.4, burst: 9, col: 0xffc24d, ring: true, // glowing orange round, arcs
+            t: 0, delay: 0, dur: Math.max(0.1, dist * 0.012), arc: 0, // FLAT + FAST
+            noSmoke: true, scale: 1.1, burst: 8, col: 0xffc24d, ring: true,
+          });
+        } else if (ev.w === 15) {
+          // HEAVY TANK: the same fast FLAT direct-fire shot, but heavier — bigger muzzle
+          // flash, a fatter shell, and a stronger impact. Still a straight line (arc 0).
+          const ang = Math.atan2(ev.tx - ev.x, ev.tz - ev.z);
+          const mx = ev.x + Math.sin(ang) * 1.0, mz = ev.z + Math.cos(ang) * 1.0, my = y1 + 0.55;
+          const dist = Math.hypot(ev.tx - ev.x, ev.tz - ev.z);
+          this.spawnParts(mx, my, mz, 8, true); // big muzzle flash
+          if (this.tracers.length < MAX_TRACER) this.tracers.push({ x1: mx, y1: my, z1: mz, x2: ev.tx, y2, z2: ev.tz, t: 0.1 });
+          if (this.rockets.length < 64) this.rockets.push({
+            x0: mx, y0: my, z0: mz, x1: ev.tx, y1: y2, z1: ev.tz,
+            t: 0, delay: 0, dur: Math.max(0.12, dist * 0.014), arc: 0, // FLAT + FAST
+            noSmoke: true, scale: 1.6, burst: 14, col: 0xffb733, ring: true,
           });
         } else if (ev.w === 6) {
           // HEAVY / NAVAL GUN: a big slow shell lobs high with a smoke trail, a large

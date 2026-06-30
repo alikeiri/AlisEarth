@@ -1433,7 +1433,8 @@ export class Sim {
       : att.type === 'mlrs' ? 14                                            // HIMARS: GLB rocket projectile, one per shot
       : att.type === 'msldrone' || att.type === 'mortar' || att.type === 'artillery' || att.type === 'artyship' ? 4
       : att.type === 'heli' || att.type === 'helidrone' ? (tgtInf ? 0 : 1)   // guns vs inf, rockets vs veh/bld
-      : att.type === 'heavy' || att.type === 'destroyer' ? 6                 // heavy/naval gun
+      : att.type === 'heavy' ? 15                                           // Heavy Tank: fast flat direct-fire shell
+      : att.type === 'destroyer' ? 6                                        // naval gun (arcing)
       : att.type === 'cannon' ? 9                                            // Heavy Cannon emplacement: visible shell
       : att.type === 'tesla' ? 10                                            // Tesla Coil: lightning bolt
       : ud?.kind === 'air' ? 3 : 2;
