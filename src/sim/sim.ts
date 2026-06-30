@@ -1430,7 +1430,8 @@ export class Sim {
       : att.type === 'sam' ? 12                                              // Missile Battery: guided AA missiles streaking up to the target
       : att.type === 'interceptor' ? 13                                      // Interceptor Team: a swarm of tiny drones streaking up to the aircraft
       : att.type === 'rocket' || att.type === 'aatank' ? 1
-      : att.type === 'mlrs' || att.type === 'msldrone' || att.type === 'mortar' || att.type === 'artillery' || att.type === 'artyship' ? 4
+      : att.type === 'mlrs' ? 14                                            // HIMARS: GLB rocket projectile, one per shot
+      : att.type === 'msldrone' || att.type === 'mortar' || att.type === 'artillery' || att.type === 'artyship' ? 4
       : att.type === 'heli' || att.type === 'helidrone' ? (tgtInf ? 0 : 1)   // guns vs inf, rockets vs veh/bld
       : att.type === 'heavy' || att.type === 'destroyer' ? 6                 // heavy/naval gun
       : att.type === 'cannon' ? 9                                            // Heavy Cannon emplacement: visible shell

@@ -98,7 +98,7 @@ export const UNITS: Record<string, UnitDef> = {
   // Iran signature: Shahed loitering munitions — cheap one-way suicide drones built
   // (and launched) in volleys of 5. Fragile; dive into the target and detonate.
   shahed: { name: 'Shahed', cost: 650, hp: 45, speed: 4.6, range: 4.0, dmg: 130, rof: 1, builtAt: 'dronefac', buildTime: 10, kind: 'air', fly: true, alt: 2.5, kamikaze: true, faction: 'iran', volley: 5 },
-  mlrs:   { name: 'MLRS',         cost: 1600, hp: 170, speed: 1.6, range: 13.0, dmg: 66, rof: 0.5, builtAt: 'factory',  buildTime: 16, kind: 'veh', faction: 'china', capacity: 6, reload: 7 }, // signature: mass rocket artillery — salvos 6 then reloads
+  mlrs:   { name: 'HIMARS',       cost: 1600, hp: 170, speed: 1.6, range: 13.0, dmg: 66, rof: 0.5, builtAt: 'factory',  buildTime: 16, kind: 'veh', faction: 'china', capacity: 6, reload: 7 }, // signature: rocket artillery — fires a 6-rocket salvo in quick succession (rof 0.5s), then a medium reload (7s)
   // ARTILLERY LINE — long range + area splash to break up massed pushes. Every
   // nation fields BOTH an infantry and a vehicle version of the mortar (anti-
   // infantry, shorter range, cheaper) and the artillery (siege, longer range).

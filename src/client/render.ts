@@ -30,7 +30,7 @@ const MODEL_DEFS: Record<string, { file: string; size: number; axis: 'l' | 'h'; 
   seamine:   { file: 'drone',     size: 0.62, axis: 'l', ry: 0, tint: 0x10242e }, // dark floating naval mine
   fueltruck: { file: 'harv',      size: 1.50, axis: 'l', ry: Math.PI, tint: 0xc0392b }, // red bomb truck (harv flip)
   flak:      { file: 'flak',      size: 1.6,  axis: 'l', ry: 0 }, // Type-625 AA gun/missile system (Sketchfab, CC-BY)
-  mlrs:      { file: 'mlrs',      size: 1.60, axis: 'l', ry: 0 },
+  mlrs:      { file: 'himars',    size: 1.95, axis: 'l', ry: 0 }, // HIMARS launcher truck
   artillery: { file: 'artillery', size: 1.75, axis: 'l', ry: Math.PI }, // Ha-To SP artillery (Sketchfab, CC-BY) — flipped to face forward
   // trucks: cab/bed geometry defeats the front heuristic — flip both (user-verified)
   harv:      { file: 'harv',      size: 1.70, axis: 'l', ry: Math.PI },
@@ -117,7 +117,7 @@ function loadGLB(file: string): Promise<any> {
 export async function preloadModels(onProgress?: (done: number, total: number) => void): Promise<void> {
   const files = new Set<string>();
   for (const t in MODEL_DEFS) files.add(MODEL_DEFS[t].file);
-  for (const f of ['oilfield', 'powerplant', 'ammobox', 'refinery', 'airfield', 'barracks', 'wall', 'radar', 'lab', 'sam', 'railgun', 'conyard']) files.add(f);
+  for (const f of ['oilfield', 'powerplant', 'ammobox', 'refinery', 'airfield', 'barracks', 'wall', 'radar', 'lab', 'sam', 'railgun', 'conyard', 'himars_rocket']) files.add(f);
   const list = [...files]; let done = 0;
   onProgress?.(0, list.length);
   await Promise.all(list.map(f => loadGLB(f).catch(() => null).then(() => { onProgress?.(++done, list.length); })));
@@ -1018,7 +1018,7 @@ function buildingGroup(type: string, teamColor: number): THREE.Group {
 
 interface FxTracer { x1: number; y1: number; z1: number; x2: number; y2: number; z2: number; t: number }
 interface FxPart { x: number; y: number; z: number; vx: number; vy: number; vz: number; life: number; max: number; s: number }
-interface FxRocket { x0: number; y0: number; z0: number; x1: number; y1: number; z1: number; t: number; delay: number; dur: number; arc: number; noSmoke?: boolean; scale?: number; mid?: number; burst?: number; col?: number; ring?: boolean }
+interface FxRocket { x0: number; y0: number; z0: number; x1: number; y1: number; z1: number; t: number; delay: number; dur: number; arc: number; noSmoke?: boolean; scale?: number; mid?: number; burst?: number; col?: number; ring?: boolean; himars?: boolean }
 interface FxBomb { x: number; z: number; y0: number; gy: number; t: number; dur: number } // a bomb falling straight down at (x,z) from y0 to ground gy
 
 // graphics quality presets. Everything renders at NATIVE resolution (pr 1.0) so
@@ -1070,6 +1070,7 @@ export class Renderer {
   private bombs: FxBomb[] = [];
   private bombMesh!: THREE.InstancedMesh;
   private rockets: FxRocket[] = [];
+  private himarsRocketMesh?: THREE.InstancedMesh; // HIMARS projectile (himars_rocket.glb), loaded async; else falls back to the cone
   private smokeMesh!: THREE.InstancedMesh;
   private smokeParts: FxPart[] = [];
   private ringMesh!: THREE.InstancedMesh;
@@ -1343,6 +1344,7 @@ export class Renderer {
     }
     this.buildMelodyPoses(); // Melody is a posed procedural unit (aim / run / rest)
     this.loadUnitModels();
+    this.loadHimarsRocket();  // HIMARS projectile model
 
     // selection rings
     const ring = new THREE.RingGeometry(0.5, 0.66, 24);
@@ -1849,6 +1851,54 @@ export class Renderer {
       this.factoryTop = size.y * s;
       this.refreshBuildingModel('factory'); // swap any factory placed before the GLB loaded
     }).catch(() => { /* missing model — keep the procedural factory */ });
+  }
+
+  // HIMARS projectile model (himars_rocket.glb): merge to one geometry, orient the
+  // nose to +Z (the rocket updater's lookAt points local +Z along the flight path),
+  // centre + normalise its length, and build a dedicated instanced mesh. HIMARS
+  // rockets render as the cone until this resolves.
+  private loadHimarsRocket() {
+    loadGLB('himars_rocket').then(gltf => {
+      const src = gltf.scene.clone(true); src.updateMatrixWorld(true);
+      const geos: THREE.BufferGeometry[] = [];
+      src.traverse(o => {
+        const m = o as any; if (!m.isMesh) return;
+        let g = (m.geometry as THREE.BufferGeometry).clone();
+        g.applyMatrix4(m.matrixWorld);
+        if (g.index) g = g.toNonIndexed();
+        for (const k of Object.keys(g.attributes)) if (k !== 'position' && k !== 'normal') g.deleteAttribute(k);
+        if (!g.getAttribute('normal')) g.computeVertexNormals();
+        geos.push(g);
+      });
+      if (!geos.length) return;
+      let merged: THREE.BufferGeometry | null = null;
+      try { merged = mergeGeometries(geos); } catch { merged = null; }
+      if (!merged) return;
+      // orient the longest axis to Z (the flight axis)
+      merged.computeBoundingBox(); let sz = new THREE.Vector3(); merged.boundingBox!.getSize(sz);
+      if (sz.x >= sz.y && sz.x >= sz.z) merged.rotateY(Math.PI / 2);        // long axis X -> Z
+      else if (sz.y >= sz.x && sz.y >= sz.z) merged.rotateX(-Math.PI / 2);  // long axis Y -> Z
+      // centre at the origin
+      merged.computeBoundingBox(); const ctr = new THREE.Vector3(); merged.boundingBox!.getCenter(ctr);
+      merged.translate(-ctr.x, -ctr.y, -ctr.z);
+      // nose (narrow end) should face +Z; flip if the pointy end is at -Z
+      merged.computeBoundingBox(); const bb = merged.boundingBox!; bb.getSize(sz);
+      const pos = merged.getAttribute('position'); const span = sz.z || 1;
+      let loW = 0, hiW = 0, loN = 0, hiN = 0;
+      for (let i = 0; i < pos.count; i++) {
+        const z = pos.getZ(i), x = pos.getX(i), y = pos.getY(i), r2 = x * x + y * y;
+        if (z < bb.min.z + span * 0.25) { loW += r2; loN++; }
+        else if (z > bb.max.z - span * 0.25) { hiW += r2; hiN++; }
+      }
+      if ((hiN ? hiW / hiN : 0) > (loN ? loW / loN : 0)) merged.rotateY(Math.PI); // nose at -Z -> face +Z
+      const s = 0.95 / Math.max(0.001, span);   // normalise length (Z) to ~0.95 units
+      merged.scale(s, s, s);
+      const mat = new THREE.MeshStandardMaterial({ color: 0xd7d7cc, metalness: 0.25, roughness: 0.55 });
+      const mesh = new THREE.InstancedMesh(merged, mat, 48);
+      mesh.frustumCulled = false; mesh.count = 0; mesh.castShadow = true;
+      this.scene.add(mesh);
+      this.himarsRocketMesh = mesh;
+    }).catch(() => { /* missing model — HIMARS rockets render as the cone */ });
   }
 
   // Load a GLB building model once: normalise it (centre x/z, base at y=0, scale to
@@ -2646,6 +2696,20 @@ export class Renderer {
             });
           }
           this.spawnParts(ev.x, ly, ev.z, 2, false);
+        } else if (ev.w === 14) {
+          // HIMARS: one rocket per shot (the unit empties a 6-round magazine in quick
+          // succession), launched with a blast + tube smoke, arcing HIGH onto the target
+          // with a smoke trail, rendered as the himars_rocket GLB, exploding on impact.
+          const dist = Math.hypot(ev.tx - ev.x, ev.tz - ev.z);
+          this.spawnParts(ev.x, y1 + 0.6, ev.z, 5, true); // launch blast
+          if (this.smokeParts.length < MAX_SMOKE) this.smokeParts.push({
+            x: ev.x, y: y1 + 0.3, z: ev.z, vx: 0, vy: 0.4, vz: 0, life: 0, max: 1.0 + Math.random() * 0.4, s: 2.4,
+          }); // launch smoke at the tube
+          if (this.rockets.length < 64) this.rockets.push({
+            x0: ev.x, y0: y1 + 0.6, z0: ev.z, x1: ev.tx, y1: y2, z1: ev.tz,
+            t: 0, delay: 0, dur: Math.max(0.6, dist * 0.05), arc: 3 + dist * 0.18,
+            scale: 1.1, burst: 14, ring: true, himars: true,
+          });
         } else if (ev.w === 2) {
           // TANK CANNON: a sharp bright muzzle flash + a fast GLOWING shell that streaks
           // (low arc) to the target; a tracer line makes the shell path readable even at
@@ -3315,7 +3379,7 @@ export class Renderer {
     this.partMesh.instanceMatrix.needsUpdate = true;
 
     // rockets: ballistic arc, oriented along flight, trailing smoke
-    let rn = 0;
+    let rn = 0, hrn = 0;
     this.rockets = this.rockets.filter(r => {
       r.t += dt;
       const p = (r.t - r.delay) / r.dur;
@@ -3341,7 +3405,10 @@ export class Renderer {
       this.dummy.lookAt(ahead.x, ahead.y, ahead.z);
       this.dummy.scale.setScalar(r.scale ?? 1);
       this.dummy.updateMatrix();
-      if (rn < 64) {
+      if (r.himars && this.himarsRocketMesh) {
+        // HIMARS rocket renders as its GLB model (own material, no tint)
+        if (hrn < 48) this.himarsRocketMesh.setMatrixAt(hrn++, this.dummy.matrix);
+      } else if (rn < 64) {
         this.rocketColor.set(r.col ?? 0xffd080); // per-projectile tint (white missile / orange shell / dark heavy round)
         this.rocketMesh.setColorAt(rn, this.rocketColor);
         this.rocketMesh.setMatrixAt(rn++, this.dummy.matrix);
@@ -3362,6 +3429,7 @@ export class Renderer {
     this.rocketMesh.count = rn;
     this.rocketMesh.instanceMatrix.needsUpdate = true;
     if (this.rocketMesh.instanceColor) this.rocketMesh.instanceColor.needsUpdate = true;
+    if (this.himarsRocketMesh) { this.himarsRocketMesh.count = hrn; this.himarsRocketMesh.instanceMatrix.needsUpdate = true; }
 
     // falling bombs: drop straight down (gravity accel) and burst on the ground
     let bn = 0;
