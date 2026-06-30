@@ -3427,10 +3427,14 @@ export class Renderer {
         this.rocketMesh.setMatrixAt(rn++, this.dummy.matrix);
       }
       if (!r.noSmoke && this.smokeParts.length < MAX_SMOKE) {
+        // HIMARS/MLRS: a fat, long-lived trail so the ARC reads clearly even though the
+        // rocket itself is small (the trail is the main arc indicator).
         this.smokeParts.push({
           x: pos.x, y: pos.y, z: pos.z,
           vx: (Math.random() - 0.5) * 0.3, vy: 0.4, vz: (Math.random() - 0.5) * 0.3,
-          life: 0, max: 0.5 + Math.random() * 0.3, s: 1,
+          life: 0,
+          max: r.himars ? 1.2 + Math.random() * 0.5 : 0.5 + Math.random() * 0.3,
+          s: r.himars ? 2.0 : 1,
         });
       }
       // trail glow. projectiles with a real GLB model (HIMARS) get only a SMALL exhaust
