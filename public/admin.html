@@ -77,6 +77,25 @@
   .dep-test { color: #ffd24a; background: #2c2310; border: 1px solid #5a4416; }
   .dep-prod { color: #7df0c0; background: #0f2d23; border: 1px solid #1c5a44; }
   .ts { font-size: 11px; color: #5f7585; }
+  .rmid { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 10px; color: #5f7585; background: #0e1620; border: 1px solid #1c2731; border-radius: 5px; padding: 1px 6px; cursor: pointer; }
+  .rmid:hover { color: #aebfce; border-color: #2f4a5c; }
+  .cat { cursor: text; }
+  .cat[contenteditable="true"] { outline: 1px solid #3a6c8f; background: #0c151c; color: #cfe9ff; }
+  /* threaded comments */
+  .cmt-last { font-size: 12px; color: #b9c8d4; margin: 4px 0 0; line-height: 1.4; }
+  .cmt-last b { color: #88d0ff; font-weight: 600; }
+  .cmt-toggle { font-size: 11px; color: #7fa6c0; background: none; border: none; padding: 2px 0; cursor: pointer; }
+  .cmt-toggle:hover { color: #cfe0ee; }
+  .cmt-panel { margin: 6px 0 2px; padding: 8px; background: #0c141b; border: 1px solid #182530; border-radius: 6px; }
+  .cmt { font-size: 12px; color: #c4d2dd; line-height: 1.45; padding: 5px 0; border-bottom: 1px solid #14202a; display: flex; gap: 8px; align-items: flex-start; }
+  .cmt:last-of-type { border-bottom: none; }
+  .cmt .who { color: #88d0ff; font-weight: 600; white-space: nowrap; }
+  .cmt .body { flex: 1; min-width: 0; white-space: pre-wrap; word-break: break-word; }
+  .cmt .cmt-del { background: none; border: none; color: #6b7d8c; cursor: pointer; font-size: 11px; padding: 0 2px; }
+  .cmt .cmt-del:hover { color: #ff9a8a; }
+  .cmt-add { display: flex; gap: 6px; margin-top: 8px; }
+  .cmt-add textarea { flex: 1; min-width: 0; resize: vertical; min-height: 32px; font: inherit; font-size: 12px; background: #0a1219; color: #e6eef5; border: 1px solid #223240; border-radius: 6px; padding: 6px 8px; }
+  .cmt-add button { font-size: 12px; padding: 5px 12px; }
   #rmView { display: none; }
 </style>
 </head>
@@ -112,9 +131,12 @@
       </div>
       <div class="legend">
         Flow: <b>Backlog</b> → <b>Ready for Build</b> (devs pick these up) → <b>In Progress</b> → <b>Ready to Test</b> (delivered, playtest it) → <b>Ready for Production</b> (cleared to ship).
-        Use ▲▼ to prioritize, the dropdown to change status, click a title to edit. The <b>Deploy</b> chip is read-only — set by the deploy workflow when code goes to Test / Production.
+        Use ▲▼ to prioritize (<b>Shift+▲▼</b> jumps to top / bottom), the dropdown to change status, click a title or its category to edit, 💬 for threaded comments. The <b>Deploy</b> chip is read-only — set by the deploy workflow when code goes to Test / Production.
       </div>
       <div class="toolbar">
+        <input id="rmAuthor" placeholder="Your name (for comments)" style="width:180px" />
+        <button id="rmRevert" class="ghost" title="Undo the last change (move / status / comment / delete)" disabled>↩ Revert last change</button>
+        <span style="flex:1"></span>
         <select id="rmStatusFilter">
           <option value="">All statuses</option>
           <option value="backlog">Backlog</option>
@@ -208,12 +230,15 @@
   const ST_LABEL = { backlog:'Backlog', ready_build:'Ready for Build', in_progress:'In Progress', not_fixed:'⚠ Not Fixed', ready_test:'Ready to Test', ready_prod:'Ready for Production', resolved:'✓ Resolved Already' };
   const DEP_LABEL = { '':'– not deployed', test:'● Test', prod:'● Production' };
 
+  // comment author — remembered locally so each operator's name sticks
+  const rmAuthor = () => ($('rmAuthor').value.trim() || 'operator');
+  function setRevert(can) { $('rmRevert').disabled = !can; }
   async function loadRoadmap() {
     const j = await post('/admin/roadmap', { action: 'list' });
     RM = j.items || []; if (j.statuses) rmStatuses = j.statuses;
-    renderRoadmap();
+    setRevert(j.canRevert); renderRoadmap();
   }
-  async function rmAct(body) { const j = await post('/admin/roadmap', body); RM = j.items || []; renderRoadmap(); }
+  async function rmAct(body) { const j = await post('/admin/roadmap', body); RM = j.items || []; setRevert(j.canRevert); renderRoadmap(); }
 
   function rmFiltered() {
     const sf = $('rmStatusFilter').value, cf = $('rmCatFilter').value, q = $('rmSearch').value.trim().toLowerCase();
@@ -238,21 +263,34 @@
     list.sort((a, b) => (a.deploy === 'prod' ? 1 : 0) - (b.deploy === 'prod' ? 1 : 0));
     $('rmShown').textContent = list.length + ' of ' + RM.length;
     const opts = it => rmStatuses.map(s => `<option value="${s}" ${s===it.status?'selected':''}>${ST_LABEL[s]}</option>`).join('');
+    const cmtHtml = it => {
+      const cs = Array.isArray(it.comments) ? it.comments : [];
+      const last = cs[cs.length - 1];
+      return `<div class="rm-cmts" data-id="${it.id}">
+        ${last ? `<div class="cmt-last"><b>${esc(last.u)}:</b> ${esc(last.t)} <span class="ts">${fmtDay(last.ts)}</span></div>` : ''}
+        ${cs.length ? `<button class="cmt-toggle" data-id="${it.id}">▸ ${cs.length} comment${cs.length > 1 ? 's' : ''}</button>` : ''}
+        <div class="cmt-panel" data-id="${it.id}" style="display:none">
+          ${cs.map(c => `<div class="cmt"><span class="who">${esc(c.u)}</span><span class="body">${esc(c.t)}</span><span class="ts">${fmtDay(c.ts)}</span><button class="cmt-del" data-id="${it.id}" data-ts="${c.ts}" title="Delete comment">✕</button></div>`).join('') || '<div class="muted" style="font-size:12px">No comments yet.</div>'}
+          <div class="cmt-add"><textarea class="cmt-input" data-id="${it.id}" rows="1" placeholder="Add a comment…"></textarea><button class="cmt-send" data-id="${it.id}">Comment</button></div>
+        </div>`;
+    };
     $('rmList').innerHTML = list.map(it => `
       <div class="rm-row s-${it.status}" data-id="${it.id}">
-        <div class="rm-ord"><button class="up">▲</button><button class="down">▼</button></div>
+        <div class="rm-ord"><button class="up" title="Up · Shift = to top">▲</button><button class="down" title="Down · Shift = to bottom">▼</button></div>
         <div class="rm-main">
           <div class="rm-title" data-id="${it.id}" title="Click to edit">${esc(it.title)}</div>
-          ${it.notes ? `<div class="rm-note">💬 ${esc(it.notes)}</div>` : ''}
+          ${it.notes ? `<div class="rm-note">⚠ ${esc(it.notes)}</div>` : ''}
+          ${cmtHtml(it)}
           <div class="rm-meta">
             <span class="pill p-${it.status}">${ST_LABEL[it.status]}</span>
             <select class="statusSel" data-id="${it.id}">${opts(it)}</select>
-            <span class="cat">${esc(it.cat)}</span>
+            <span class="cat" data-id="${it.id}" title="Click to edit category">${esc(it.cat)}</span>
+            <span class="rmid" data-id="${it.id}" title="Click to copy ID">#${esc(it.id)}</span>
             <span class="ts">upd ${fmtDay(it.updated)}</span>
           </div>
         </div>
         <div class="rm-actions">
-          <button class="note" data-id="${it.id}" title="Add / edit comment">💬</button>
+          <button class="note" data-id="${it.id}" title="Comments">💬${(it.comments && it.comments.length) ? ' ' + it.comments.length : ''}</button>
           <span class="deploy dep-${it.deploy||'none'}" title="Deployment state — set by the deploy workflow">${DEP_LABEL[it.deploy||'']}</span>
           <button class="del" data-id="${it.id}" title="Delete item">✕</button>
         </div>
@@ -271,30 +309,51 @@
         rmAct({ action:'update', id:s.dataset.id, status:s.value }).catch(e=>alert(e.message));
       }
     });
-    $('rmList').querySelectorAll('.note').forEach(b => b.onclick = () => {
-      const it = RM.find(x => x.id === b.dataset.id);
-      const c = prompt('Comment for this item (leave blank to clear):', (it && it.notes) || '');
-      if (c === null) return;
-      rmAct({ action:'update', id:b.dataset.id, notes:c.trim() }).catch(e=>alert(e.message));
+    // 💬 toggles the comments panel for this row (and the inline "▸ N comments" link)
+    const toggleCmts = id => { const p = $('rmList').querySelector(`.cmt-panel[data-id="${id}"]`); if (p) p.style.display = p.style.display === 'none' ? 'block' : 'none'; };
+    $('rmList').querySelectorAll('.note').forEach(b => b.onclick = () => toggleCmts(b.dataset.id));
+    $('rmList').querySelectorAll('.cmt-toggle').forEach(b => b.onclick = () => toggleCmts(b.dataset.id));
+    $('rmList').querySelectorAll('.cmt-send').forEach(b => b.onclick = () => {
+      const ta = $('rmList').querySelector(`.cmt-input[data-id="${b.dataset.id}"]`);
+      const text = (ta && ta.value || '').trim(); if (!text) return;
+      rmAct({ action:'comment', id:b.dataset.id, text, user: rmAuthor() }).catch(e=>alert(e.message));
+    });
+    $('rmList').querySelectorAll('.cmt-input').forEach(ta => ta.onkeydown = e => {
+      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); ta.closest('.cmt-panel').querySelector('.cmt-send').click(); }
+    });
+    $('rmList').querySelectorAll('.cmt-del').forEach(b => b.onclick = () => {
+      if (confirm('Delete this comment?')) rmAct({ action:'delcomment', id:b.dataset.id, ts: +b.dataset.ts }).catch(e=>alert(e.message));
     });
     $('rmList').querySelectorAll('.del').forEach(b => b.onclick = () => { if (confirm('Delete this item?')) rmAct({ action:'delete', id:b.dataset.id }).catch(e=>alert(e.message)); });
-    $('rmList').querySelectorAll('.up').forEach(b => b.onclick = () => moveItem(b.closest('.rm-row').dataset.id, -1));
-    $('rmList').querySelectorAll('.down').forEach(b => b.onclick = () => moveItem(b.closest('.rm-row').dataset.id, 1));
-    $('rmList').querySelectorAll('.rm-title').forEach(t => {
+    // ▲▼ move one step; Shift+click jumps to the very top / bottom
+    $('rmList').querySelectorAll('.up').forEach(b => b.onclick = e => moveItem(b.closest('.rm-row').dataset.id, -1, e.shiftKey));
+    $('rmList').querySelectorAll('.down').forEach(b => b.onclick = e => moveItem(b.closest('.rm-row').dataset.id, 1, e.shiftKey));
+    $('rmList').querySelectorAll('.rmid').forEach(s => s.onclick = () => { navigator.clipboard?.writeText(s.dataset.id); const o = s.textContent; s.textContent = '✓ copied'; setTimeout(() => { s.textContent = o; }, 900); });
+    // click a title OR its category to edit inline (saved on blur / Enter)
+    const editable = (sel, field) => $('rmList').querySelectorAll(sel).forEach(t => {
       t.onclick = () => { t.contentEditable = 'true'; t.focus(); };
       t.onblur = () => { t.contentEditable = 'false'; const v = t.textContent.trim();
         const it = RM.find(x => x.id === t.dataset.id);
-        if (it && v && v !== it.title) rmAct({ action:'update', id:t.dataset.id, title:v }).catch(e=>alert(e.message)); };
-      t.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); t.blur(); } if (e.key === 'Escape') { t.textContent = (RM.find(x=>x.id===t.dataset.id)||{}).title||''; t.blur(); } };
+        if (it && v && v !== it[field]) rmAct({ action:'update', id:t.dataset.id, [field]:v }).catch(e=>alert(e.message)); };
+      t.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); t.blur(); } if (e.key === 'Escape') { t.textContent = (RM.find(x=>x.id===t.dataset.id)||{})[field]||''; t.blur(); } };
     });
+    editable('.rm-title', 'title');
+    editable('.cat', 'cat');
   }
-  // reorder within the FULL prio order (so priority is global, not per-filter)
-  function moveItem(id, dir) {
+  // reorder within the FULL prio order (so priority is global, not per-filter).
+  // extreme = Shift+click → jump to the very top (dir<0) or bottom (dir>0).
+  function moveItem(id, dir, extreme) {
     const ord = [...RM]; // RM is already prio-sorted from the server
     const i = ord.findIndex(x => x.id === id);
-    const j = i + dir;
-    if (i < 0 || j < 0 || j >= ord.length) return;
-    [ord[i], ord[j]] = [ord[j], ord[i]];
+    if (i < 0) return;
+    if (extreme) {
+      const [it] = ord.splice(i, 1);
+      if (dir < 0) ord.unshift(it); else ord.push(it);
+    } else {
+      const j = i + dir;
+      if (j < 0 || j >= ord.length) return;
+      [ord[i], ord[j]] = [ord[j], ord[i]];
+    }
     RM = ord; renderRoadmap(); // optimistic
     rmAct({ action:'reorder', ids: ord.map(x => x.id) }).catch(e=>alert(e.message));
   }
@@ -305,6 +364,11 @@
   });
   $('rmTitle').addEventListener('keydown', e => { if (e.key === 'Enter') $('rmAdd').click(); });
   ['rmStatusFilter','rmCatFilter','rmSearch'].forEach(id => $(id).addEventListener('input', renderRoadmap));
+  // revert the last change (server keeps one snapshot; the swap is itself undoable)
+  $('rmRevert').addEventListener('click', () => rmAct({ action:'revert' }).catch(e=>alert(e.message)));
+  // remember the comment author's name across sessions
+  try { $('rmAuthor').value = localStorage.getItem('rmAuthor') || ''; } catch {}
+  $('rmAuthor').addEventListener('input', () => { try { localStorage.setItem('rmAuthor', $('rmAuthor').value); } catch {} });
 
   /* ---------------- USERS (unchanged) ---------------- */
   let DATA = [], sortK = 'lastLogin', sortDir = -1, USERS_LOADED = false;

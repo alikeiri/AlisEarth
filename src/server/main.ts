@@ -401,23 +401,29 @@ function readRoadmap(): any[] {
   for (const it of items) {
     if (it.status === 'shipped') { it.status = 'ready_prod'; it.deploy = 'prod'; dirty = true; }
     if (it.deploy === undefined) { it.deploy = ''; dirty = true; }
+    if (!Array.isArray(it.comments)) { it.comments = []; dirty = true; } // threaded operator comments
   }
   if (dirty) writeRoadmap(items);
   return items;
 }
+// single-level undo: snapshot of the board before the last mutating action (revert swaps it)
+let roadmapPrev: any[] | null = null;
 async function handleRoadmap(req: any, res: any) {
   const json = (code: number, obj: any) => { res.writeHead(code, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(obj)); };
   const b = await readJsonBody(req);
   if (!ADVISOR_KEY || !b || b.key !== ADVISOR_KEY) return json(403, { error: 'Forbidden' });
   let items = readRoadmap();
   const now = Date.now();
+  // one-level undo: snapshot the board before any mutating action so 'revert' can swap it back
+  const MUTATING = ['add', 'update', 'delete', 'reorder', 'comment', 'delcomment'];
+  const snapshot = MUTATING.includes(b.action) ? JSON.parse(JSON.stringify(items)) : null;
   switch (b.action) {
     case 'add': {
-      const title = String(b.title || '').trim().slice(0, 400);
+      const title = String(b.title || '').trim().slice(0, 600);
       if (!title) return json(400, { error: 'Empty title' });
       const cat = String(b.cat || 'Uncategorized').trim().slice(0, 60) || 'Uncategorized';
       const minPrio = items.reduce((m, it) => Math.min(m, it.prio ?? 0), 0);
-      items.unshift({ id: 'r' + now.toString(36) + Math.random().toString(36).slice(2, 6), title, cat, status: 'backlog', prio: minPrio - 1, created: now, updated: now });
+      items.unshift({ id: 'r' + now.toString(36) + Math.random().toString(36).slice(2, 6), title, cat, status: 'backlog', prio: minPrio - 1, created: now, updated: now, comments: [] });
       writeRoadmap(items);
       break;
     }
@@ -426,11 +432,28 @@ async function handleRoadmap(req: any, res: any) {
       if (!it) return json(404, { error: 'No such item' });
       if (typeof b.status === 'string' && ROADMAP_STATUSES.includes(b.status)) it.status = b.status;
       if (typeof b.deploy === 'string' && ROADMAP_DEPLOYS.includes(b.deploy)) it.deploy = b.deploy;
-      if (typeof b.title === 'string' && b.title.trim()) it.title = b.title.trim().slice(0, 400);
+      if (typeof b.title === 'string' && b.title.trim()) it.title = b.title.trim().slice(0, 600);
       if (typeof b.cat === 'string' && b.cat.trim()) it.cat = b.cat.trim().slice(0, 60);
-      if (typeof b.notes === 'string') it.notes = b.notes.slice(0, 600);
+      if (typeof b.notes === 'string') it.notes = b.notes.slice(0, 2000);
       it.updated = now;
       writeRoadmap(items);
+      break;
+    }
+    case 'comment': {
+      const it = items.find(x => x.id === b.id);
+      if (!it) return json(404, { error: 'No such item' });
+      const text = String(b.text || '').trim().slice(0, 2000);
+      if (!text) return json(400, { error: 'Empty comment' });
+      const user = (String(b.user || '').trim().slice(0, 40)) || 'operator';
+      if (!Array.isArray(it.comments)) it.comments = [];
+      it.comments.push({ u: user, t: text, ts: now });
+      it.updated = now;
+      writeRoadmap(items);
+      break;
+    }
+    case 'delcomment': {
+      const it = items.find(x => x.id === b.id);
+      if (it && Array.isArray(it.comments)) { it.comments = it.comments.filter((c: any) => c.ts !== b.ts); it.updated = now; writeRoadmap(items); }
       break;
     }
     case 'delete':
@@ -444,10 +467,16 @@ async function handleRoadmap(req: any, res: any) {
       writeRoadmap(items);
       break;
     }
+    case 'revert': {
+      // swap the board with the pre-change snapshot (revert is itself undoable → redo)
+      if (roadmapPrev) { const cur = JSON.parse(JSON.stringify(items)); items = roadmapPrev; writeRoadmap(items); roadmapPrev = cur; }
+      break;
+    }
     case 'list': default: break;
   }
+  if (snapshot) roadmapPrev = snapshot; // remember the pre-mutation board for one-level undo
   items.sort((a, b) => (a.prio - b.prio) || (a.created - b.created));
-  return json(200, { items, statuses: ROADMAP_STATUSES });
+  return json(200, { items, statuses: ROADMAP_STATUSES, canRevert: !!roadmapPrev });
 }
 
 const http = createServer(async (req, res) => {
