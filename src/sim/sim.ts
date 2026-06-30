@@ -1413,7 +1413,8 @@ export class Sim {
   // weapon FX class for the 'shot' event (render-only, no sim state):
   // 0 mg, 1 rocket, 2 cannon, 3 air gun, 4 missile salvo, 5 flak, 6 naval gun,
   // 7 torpedo, 8 sub cruise, 9 cannon emplacement, 10 tesla, 11 Melody twin-gun,
-  // 12 SAM, 13 interceptor drones, 14 MLRS rocket, 15 heavy-tank shell.
+  // 12 SAM, 13 interceptor drones, 14 MLRS rocket, 15 heavy-tank shell,
+  // 16 Rocket Team rocket (small man-portable missile).
   // tgt may be omitted (e.g. force-firing empty ground) — then we pick by attacker
   // type alone so an MLRS still launches its rocket and infantry use a small impact,
   // instead of the old generic w=2 (which made everything look like a tank).
@@ -1427,7 +1428,8 @@ export class Sim {
       : att.type === 'flak' ? 5                                              // pom-pom flak
       : att.type === 'sam' ? 12                                              // Missile Battery: guided AA missiles
       : att.type === 'interceptor' ? 13                                     // Interceptor Team: swarm of tiny drones
-      : att.type === 'rocket' || att.type === 'aatank' ? 1
+      : att.type === 'rocket' ? 16                                          // Rocket Team: small man-portable missile
+      : att.type === 'aatank' ? 1
       : att.type === 'mlrs' ? 14                                            // MLRS: GLB rocket projectile, one per shot
       : att.type === 'msldrone' || att.type === 'mortar' || att.type === 'artillery' || att.type === 'artyship' ? 4
       : att.type === 'heli' || att.type === 'helidrone' ? (tgtInf ? 0 : 1)   // guns vs inf, rockets vs veh/bld

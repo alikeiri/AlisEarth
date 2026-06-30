@@ -2754,14 +2754,23 @@ export class Renderer {
             scale: 2.4, burst: 18, col: 0x3a3f46, ring: true, // big dark shell, lobs high, smoke trail
           });
         } else if (ev.w === 1) {
-          // ROCKET / MISSILE (rocket inf, AA tank, heli rockets): a real missile flies
-          // with a smoke trail and EXPLODES on impact — visibly different from gunfire.
+          // ROCKET / MISSILE (AA tank, heli rockets): a real missile flies with a smoke
+          // trail and EXPLODES on impact — visibly different from gunfire.
           const dist = Math.hypot(ev.tx - ev.x, ev.tz - ev.z);
           this.spawnParts(ev.x, y1, ev.z, 4, false); // launch flash
           if (this.rockets.length < 64) this.rockets.push({
             x0: ev.x, y0: y1, z0: ev.z, x1: ev.tx, y1: y2, z1: ev.tz,
             t: 0, delay: 0, dur: Math.max(0.5, dist * 0.04), arc: 1.6 + dist * 0.07,
             scale: 1.6, burst: 12, col: 0xeaf0f4, ring: true, // white missile, lofts + explosive impact
+          });
+        } else if (ev.w === 16) {
+          // ROCKET TEAM: a small man-portable missile — same flight as w1 but 1/4 the size
+          const dist = Math.hypot(ev.tx - ev.x, ev.tz - ev.z);
+          this.spawnParts(ev.x, y1, ev.z, 3, false); // small launch flash
+          if (this.rockets.length < 64) this.rockets.push({
+            x0: ev.x, y0: y1, z0: ev.z, x1: ev.tx, y1: y2, z1: ev.tz,
+            t: 0, delay: 0, dur: Math.max(0.5, dist * 0.04), arc: 1.6 + dist * 0.07,
+            scale: 0.4, burst: 12, col: 0xeaf0f4, ring: true, // small white missile (1/4 of the w1 rocket)
           });
         } else if (ev.w === 5) {
           // FLAK: a quick tracer up to the target + a small dark airburst puff (anti-air
