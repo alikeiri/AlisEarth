@@ -1018,7 +1018,7 @@ function buildingGroup(type: string, teamColor: number): THREE.Group {
 
 interface FxTracer { x1: number; y1: number; z1: number; x2: number; y2: number; z2: number; t: number }
 interface FxPart { x: number; y: number; z: number; vx: number; vy: number; vz: number; life: number; max: number; s: number }
-interface FxRocket { x0: number; y0: number; z0: number; x1: number; y1: number; z1: number; t: number; delay: number; dur: number; arc: number; noSmoke?: boolean; scale?: number; mid?: number; burst?: number }
+interface FxRocket { x0: number; y0: number; z0: number; x1: number; y1: number; z1: number; t: number; delay: number; dur: number; arc: number; noSmoke?: boolean; scale?: number; mid?: number; burst?: number; col?: number; ring?: boolean }
 interface FxBomb { x: number; z: number; y0: number; gy: number; t: number; dur: number } // a bomb falling straight down at (x,z) from y0 to ground gy
 
 // graphics quality presets. Everything renders at NATIVE resolution (pr 1.0) so
@@ -1075,6 +1075,7 @@ export class Renderer {
   private ringMesh!: THREE.InstancedMesh;
   private rings: { x: number; y: number; z: number; t: number; max: number; r0: number; r1: number }[] = [];
   private ringFade = new THREE.Color();
+  private rocketColor = new THREE.Color();
   private satLaunches: { g: THREE.Group; t: number; x: number; z: number; y0: number }[] = [];
   private terrain: THREE.Mesh;
   private terraPrev!: THREE.Mesh;
@@ -1411,7 +1412,7 @@ export class Renderer {
     rGeo.rotateX(Math.PI / 2); // point along +Z, oriented per-frame via lookAt
     this.rocketMesh = new THREE.InstancedMesh(
       rGeo,
-      new THREE.MeshBasicMaterial({ color: 0xffd080 }),
+      new THREE.MeshBasicMaterial({ color: 0xffffff }), // white base; per-instance colour tints each projectile (rocket/shell/flak)
       64
     );
     this.rocketMesh.frustumCulled = false;
@@ -2644,40 +2645,59 @@ export class Renderer {
             });
           }
           this.spawnParts(ev.x, ly, ev.z, 2, false);
-        } else if (ev.w === 2 || ev.w === 6) {
-          // ballistic shell: a visible round ARCS from the muzzle to the target with a
-          // muzzle flash + lingering smoke; the rockets updater bursts it on impact.
-          // w2 = tank/cannon (fast, low arc); w6 = heavy/naval gun (slower, high lob + smoke trail)
-          const heavy = ev.w === 6;
+        } else if (ev.w === 2) {
+          // TANK CANNON: a sharp bright muzzle flash + a fast GLOWING shell that streaks
+          // (low arc) to the target; a tracer line makes the shell path readable even at
+          // speed, and the shell bursts with a small shockwave ring on impact.
           const ang = Math.atan2(ev.tx - ev.x, ev.tz - ev.z);
-          const mx = ev.x + Math.sin(ang) * (heavy ? 1.3 : 0.7);
-          const mz = ev.z + Math.cos(ang) * (heavy ? 1.3 : 0.7);
-          const my = y1 + (heavy ? 0.8 : 0.45);
+          const mx = ev.x + Math.sin(ang) * 0.85, mz = ev.z + Math.cos(ang) * 0.85, my = y1 + 0.45;
           const dist = Math.hypot(ev.tx - ev.x, ev.tz - ev.z);
-          this.spawnParts(mx, my, mz, heavy ? 6 : 3, false); // muzzle flash
-          if (this.smokeParts.length < MAX_SMOKE) {          // muzzle smoke puff
-            this.smokeParts.push({
-              x: mx, y: my, z: mz, vx: Math.sin(ang) * 0.4, vy: 0.5, vz: Math.cos(ang) * 0.4,
-              life: 0, max: 0.6 + Math.random() * 0.4, s: heavy ? 1.8 : 1.0,
-            });
-          }
+          this.spawnParts(mx, my, mz, 5, true); // punchy muzzle flash (big particles)
+          if (this.tracers.length < MAX_TRACER) this.tracers.push({ x1: mx, y1: my, z1: mz, x2: ev.tx, y2, z2: ev.tz, t: 0.07 });
           if (this.rockets.length < 64) this.rockets.push({
             x0: mx, y0: my, z0: mz, x1: ev.tx, y1: y2, z1: ev.tz,
-            t: 0, delay: 0,
-            dur: Math.max(heavy ? 0.22 : 0.12, dist * (heavy ? 0.02 : 0.013)),
-            arc: (heavy ? 1.1 : 0.35) + dist * (heavy ? 0.13 : 0.06),
-            noSmoke: !heavy, scale: heavy ? 1.0 : 0.6, burst: heavy ? 12 : 7,
+            t: 0, delay: 0, dur: Math.max(0.13, dist * 0.016), arc: 0.4 + dist * 0.07,
+            noSmoke: true, scale: 0.95, burst: 9, col: 0xffc24d, ring: true, // glowing orange round
           });
+        } else if (ev.w === 6) {
+          // HEAVY / NAVAL GUN: a big slow shell lobs high with a smoke trail, a large
+          // muzzle flash + smoke, and a heavy explosion (ring + smoke) on impact.
+          const ang = Math.atan2(ev.tx - ev.x, ev.tz - ev.z);
+          const mx = ev.x + Math.sin(ang) * 1.3, mz = ev.z + Math.cos(ang) * 1.3, my = y1 + 0.8;
+          const dist = Math.hypot(ev.tx - ev.x, ev.tz - ev.z);
+          this.spawnParts(mx, my, mz, 9, true); // big muzzle flash
+          if (this.smokeParts.length < MAX_SMOKE) this.smokeParts.push({
+            x: mx, y: my, z: mz, vx: Math.sin(ang) * 0.5, vy: 0.6, vz: Math.cos(ang) * 0.5,
+            life: 0, max: 0.9 + Math.random() * 0.4, s: 2.4,
+          });
+          if (this.rockets.length < 64) this.rockets.push({
+            x0: mx, y0: my, z0: mz, x1: ev.tx, y1: y2, z1: ev.tz,
+            t: 0, delay: 0, dur: Math.max(0.32, dist * 0.028), arc: 1.4 + dist * 0.16,
+            scale: 1.5, burst: 18, col: 0x3a3f46, ring: true, // big dark shell, smoke trail
+          });
+        } else if (ev.w === 1) {
+          // ROCKET / MISSILE (rocket inf, AA tank, heli rockets): a real missile flies
+          // with a smoke trail and EXPLODES on impact — visibly different from gunfire.
+          const dist = Math.hypot(ev.tx - ev.x, ev.tz - ev.z);
+          this.spawnParts(ev.x, y1, ev.z, 4, false); // launch flash
+          if (this.rockets.length < 64) this.rockets.push({
+            x0: ev.x, y0: y1, z0: ev.z, x1: ev.tx, y1: y2, z1: ev.tz,
+            t: 0, delay: 0, dur: Math.max(0.26, dist * 0.03), arc: 0.3 + dist * 0.05,
+            scale: 1.0, burst: 12, col: 0xeaf0f4, ring: true, // white missile, explosive impact
+          });
+        } else if (ev.w === 5) {
+          // FLAK: a quick tracer up to the target + a small dark airburst puff (anti-air
+          // shellburst), distinct from a solid impact spark.
+          if (this.tracers.length < MAX_TRACER) this.tracers.push({ x1: ev.x, y1, z1: ev.z, x2: ev.tx, y2, z2: ev.tz, t: 0.07 });
+          this.spawnParts(ev.tx, y2, ev.tz, 4, false); // airburst sparks
+          if (this.smokeParts.length < MAX_SMOKE) this.smokeParts.push({
+            x: ev.tx, y: y2, z: ev.tz, vx: 0, vy: 0.15, vz: 0, life: 0, max: 0.7, s: 1.2,
+          }); // lingering flak puff
         } else {
+          // MG / autocannon (w0) + air guns (w3): a thin tracer streak + a small impact
+          // spark. Deliberately minimal so rapid fire reads as bullets, not explosions.
           if (this.tracers.length < MAX_TRACER) this.tracers.push({ x1: ev.x, y1, z1: ev.z, x2: ev.tx, y2, z2: ev.tz, t: 0.1 });
           this.spawnParts(ev.tx, y2, ev.tz, 2, false);
-          this.spawnParts(ev.x, y1, ev.z, 2, false); // muzzle flash at the shooter
-          if (this.smokeParts.length < MAX_SMOKE && Math.random() < 0.6) { // light, intermittent muzzle smoke
-            this.smokeParts.push({
-              x: ev.x, y: y1, z: ev.z, vx: (Math.random() - 0.5) * 0.2, vy: 0.5, vz: (Math.random() - 0.5) * 0.2,
-              life: 0, max: 0.45 + Math.random() * 0.25, s: 0.8,
-            });
-          }
         }
       } else if (ev.e === 'silo') {
         // ballistic missile: one big high-arc rocket from silo to target
@@ -3301,6 +3321,13 @@ export class Renderer {
       if (p < 0) return true;
       if (p >= 1) {
         this.spawnParts(r.x1, r.y1 + 0.3, r.z1, r.burst || 7, !!r.burst); // impact (burst = larger airburst, e.g. Iron Dome catch)
+        if (r.ring) { // explosive round: shockwave ring + lingering smoke cloud at impact
+          if (this.rings.length < 32) this.rings.push({ x: r.x1, y: r.y1, z: r.z1, t: 0, max: 0.32, r0: 0.4, r1: 2.8 });
+          if (this.smokeParts.length < MAX_SMOKE) this.smokeParts.push({
+            x: r.x1, y: r.y1 + 0.3, z: r.z1, vx: (Math.random() - 0.5) * 0.4, vy: 0.8, vz: (Math.random() - 0.5) * 0.4,
+            life: 0, max: 1.0 + Math.random() * 0.5, s: 2.0,
+          });
+        }
         return false;
       }
       const at = (q: number) => ({
@@ -3313,7 +3340,11 @@ export class Renderer {
       this.dummy.lookAt(ahead.x, ahead.y, ahead.z);
       this.dummy.scale.setScalar(r.scale ?? 1);
       this.dummy.updateMatrix();
-      if (rn < 64) this.rocketMesh.setMatrixAt(rn++, this.dummy.matrix);
+      if (rn < 64) {
+        this.rocketColor.set(r.col ?? 0xffd080); // per-projectile tint (white missile / orange shell / dark heavy round)
+        this.rocketMesh.setColorAt(rn, this.rocketColor);
+        this.rocketMesh.setMatrixAt(rn++, this.dummy.matrix);
+      }
       if (!r.noSmoke && this.smokeParts.length < MAX_SMOKE) {
         this.smokeParts.push({
           x: pos.x, y: pos.y, z: pos.z,
@@ -3325,6 +3356,7 @@ export class Renderer {
     });
     this.rocketMesh.count = rn;
     this.rocketMesh.instanceMatrix.needsUpdate = true;
+    if (this.rocketMesh.instanceColor) this.rocketMesh.instanceColor.needsUpdate = true;
 
     // falling bombs: drop straight down (gravity accel) and burst on the ground
     let bn = 0;
