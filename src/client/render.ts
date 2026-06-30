@@ -1054,6 +1054,7 @@ export class Renderer {
   private buildings = new Map<number, { g: THREE.Group; type: string; aim?: number; owner?: number; topY?: number }>();
   private facing = new Map<number, { a: number; lx: number; lz: number }>();
   private selRing: THREE.InstancedMesh;
+  private selArrow!: THREE.InstancedMesh; // floating down-arrow over selected BUILDINGS (the ground ring gets covered)
   private oreMesh: THREE.InstancedMesh;
   private gemMesh!: THREE.InstancedMesh;
   private oilMesh!: THREE.InstancedMesh;
@@ -1352,6 +1353,13 @@ export class Renderer {
     this.selRing = new THREE.InstancedMesh(ring, new THREE.MeshBasicMaterial({ color: 0x6aff6a, transparent: true, opacity: 0.85, depthWrite: false }), MAX_INST);
     this.selRing.frustumCulled = false;
     this.scene.add(this.selRing);
+    // buildings: a floating arrow ABOVE the model instead of the ground ring (which the
+    // building or its neighbours hide). A cone with the tip pointing DOWN at the building.
+    const arrow = new THREE.ConeGeometry(0.45, 0.8, 4);
+    arrow.rotateX(Math.PI); // tip points -Y (down at the building)
+    this.selArrow = new THREE.InstancedMesh(arrow, new THREE.MeshBasicMaterial({ color: 0x6aff6a, transparent: true, opacity: 0.92, depthWrite: false }), MAX_INST);
+    this.selArrow.frustumCulled = false;
+    this.scene.add(this.selArrow);
 
     // ghost
     this.ghost = new THREE.Mesh(new THREE.BoxGeometry(1, 0.8, 1), new THREE.MeshBasicMaterial({ color: 0x57d977, transparent: true, opacity: 0.4, depthWrite: false }));
@@ -2937,7 +2945,7 @@ export class Renderer {
     for (const t in this.posedParts) this.poseCounts[t] = this.posedParts[t].map(() => 0);
     for (const t in this.deathParts) this.deathCounts[t] = this.deathParts[t].map(() => 0);
     const seen = new Set<number>();
-    let selN = 0, rotN = 0, bagN = 0, dishN = 0;
+    let selN = 0, rotN = 0, bagN = 0, dishN = 0, arrN = 0;
     let rallyV: any = null;
     // factory exit points: a freshly-built vehicle that appears next to one plays a
     // short "drive down the ramp" descent (render-only, see the unit y below)
@@ -3047,12 +3055,14 @@ export class Renderer {
             }
           }
         }
-        if (selection.has(v.i) && selN < MAX_INST) {
-          this.dummy.position.set(v.x, y + 0.1, v.z);
-          this.dummy.scale.setScalar((v.sz || 1) * 1.6);
+        if (selection.has(v.i) && arrN < MAX_INST) {
+          // floating arrow bobbing just above the building's top (not a ground ring)
+          const topW = y + (rec.topY ?? 3) * rec.g.scale.y;
+          this.dummy.position.set(v.x, topW + 0.9 + Math.sin(this.time * 3) * 0.15, v.z);
+          this.dummy.scale.setScalar(0.6 + (v.sz || 1) * 0.25);
           this.dummy.rotation.set(0, 0, 0);
           this.dummy.updateMatrix();
-          this.selRing.setMatrixAt(selN++, this.dummy.matrix);
+          this.selArrow.setMatrixAt(arrN++, this.dummy.matrix);
           if (v.rx !== undefined && !rallyV) rallyV = v;
         }
         continue;
@@ -3290,6 +3300,8 @@ export class Renderer {
     }
     this.selRing.count = selN;
     this.selRing.instanceMatrix.needsUpdate = true;
+    this.selArrow.count = arrN;
+    this.selArrow.instanceMatrix.needsUpdate = true;
     this.rotorMesh.count = rotN;
     this.sandbagMesh.count = bagN;
     this.sandbagMesh.instanceMatrix.needsUpdate = true;

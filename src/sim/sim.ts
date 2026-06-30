@@ -776,6 +776,20 @@ export class Sim {
       for (const u of units) { u.orders = []; u.path = null; u.terraPath = undefined; u.terraHs = undefined; u.terraBridge = undefined; u.rzr = 0; u.wpLoop = undefined; u.cmdT = this.tickN; }
       return;
     }
+    if (c.k === 'disperse') {
+      // spread the group out: each unit gets a small random offset from its CURRENT
+      // spot so the formation loosens but stays near where it was. Deterministic (rng),
+      // so lockstep stays in sync. Flyers keep their own movement.
+      for (const u of units) {
+        if (UNITS[u.type]?.fly) continue;
+        const ang = this.rng.next() * Math.PI * 2;
+        const rad = 1.2 + this.rng.next() * 2.8; // 1.2–4.0 cells from its position
+        const tx = Math.max(0.5, Math.min(W - 0.5, u.x + Math.cos(ang) * rad));
+        const tz = Math.max(0.5, Math.min(H - 0.5, u.z + Math.sin(ang) * rad));
+        u.orders = [{ k: 'move', x: tx, z: tz }]; u.path = null; u.cmdT = this.tickN;
+      }
+      return;
+    }
     if (c.k === 'wprepeat') {
       // toggle waypoint repeat: capture the current positional order chain so the
       // unit re-runs it forever once its orders empty (off = clear the saved loop)

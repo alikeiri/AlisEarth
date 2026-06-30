@@ -600,6 +600,7 @@ class GameClient {
   private lastViews: any[] = [];
   private byId = new Map<number, any>();
   private keys = new Set<string>();
+  private xDisp = false; // X held → fired the one-shot "disperse" (reset on keyup)
   private mouse = {
     x: 0, y: 0, in: false, downX: 0, downY: 0, dragging: false, lDown: false,
     rDown: false, rDownX: 0, rDownY: 0, rDragging: false,
@@ -795,7 +796,10 @@ class GameClient {
         this.terraMode = ''; this.terraRect = null; this.renderer.setTerraPreview(null);
         this.renderer.setFormationPath(null);
       }
-      if (e.code === 'KeyX') this.issueToUnits({ k: 'stop' }); // Stop (S is taken by WASD map-pan)
+      if (e.code === 'KeyX') { // tap = Stop (S is taken by WASD map-pan); hold = Disperse (spread out once)
+        if (e.repeat) { if (!this.xDisp) { this.xDisp = true; this.issueToUnits({ k: 'disperse' }); } }
+        else this.issueToUnits({ k: 'stop' });
+      }
       // U: transport ships unload cargo; garrison buildings evacuate their occupants
       if (e.code === 'KeyU') {
         const ships = this.myUnitIds().filter(id => { const v = this.byId.get(id); return v && UNITS[v.t]?.carrier && (v.cu || 0) > 0; });
@@ -934,7 +938,7 @@ class GameClient {
         }
       }
     });
-    on(window, 'keyup', (e: KeyboardEvent) => this.keys.delete(e.code));
+    on(window, 'keyup', (e: KeyboardEvent) => { this.keys.delete(e.code); if (e.code === 'KeyX') this.xDisp = false; });
 
     // chat input handles its own keys
     const chatInp = document.getElementById('chatInput') as HTMLInputElement;
