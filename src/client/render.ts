@@ -41,11 +41,12 @@ const MODEL_DEFS: Record<string, { file: string; size: number; axis: 'l' | 'h'; 
   strike:    { file: 'drone',     size: 1.25, axis: 'l', ry: 0 },
   msldrone:  { file: 'drone',     size: 1.60, axis: 'l', ry: 0 },
   minedrone: { file: 'drone',     size: 0.80, axis: 'l', ry: 0, tint: 0xd9a521 }, // small amber mine-clearing rover
+  shahed:    { file: 'shahed-136', size: 1.50, axis: 'l', ry: 0 }, // one-way kamikaze drone (Shahed-136 model)
   fighter:   { file: 'fighter',   size: 1.70, axis: 'l', ry: Math.PI }, // delta wing reads wider at the nose third
   // bomber: wingspan exceeds fuselage length, so the long-axis heuristic picks
   // the wings — quarter-turn nudge puts the prop forward
   bomber:    { file: 'bomber',    size: 2.10, axis: 'l', ry: -Math.PI / 2 },
-  dbomber:   { file: 'bomber',    size: 2.40, axis: 'l', ry: -Math.PI / 2 },
+  dbomber:   { file: 'shahed-136', size: 2.10, axis: 'l', ry: 0 }, // one-way kamikaze drone (Shahed-136 model)
   heli:      { file: 'apache',    size: 1.70, axis: 'l', ry: 0, spin: 8 }, // Apache Gunship; its own "Rotor Rotation" clip baked into an 8-frame spin
   airtransport: { file: 'blackhawk', size: 2.10, axis: 'l', ry: 0 }, // UH-60 Black Hawk transport (static GLB — no rotor anim)
   helidrone: { file: 'helidrone', size: 1.20, axis: 'l', ry: 0 },

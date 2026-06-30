@@ -2186,7 +2186,7 @@ export class Sim {
       }
       // bombers do a real bombing RUN at the point (fly over, drop the stick once,
       // turn for home to rearm) instead of hovering and ground-shooting
-      if (u.type === 'bomber' || u.type === 'dbomber') {
+      if (u.type === 'bomber') {
         if (u.ammo <= 0) { u.orders.unshift({ k: 'rtb' }); return; } // rearm first, then resume
         if (hyp(px - u.x, pz - u.z) <= 1.4) {
           this.bombDrop(u, px, pz);
@@ -2391,7 +2391,7 @@ export class Sim {
       }
       // bombers fly OVER the target, release the whole stick once (area
       // damage), then turn for home — no hovering in front of buildings
-      if (u.type === 'bomber' || u.type === 'dbomber') {
+      if (u.type === 'bomber') {
         if (u.ammo <= 0) { u.orders.unshift({ k: 'rtb' }); return; }
         if (d <= 1.4) {
           this.bombDrop(u, tgt.x, tgt.z);

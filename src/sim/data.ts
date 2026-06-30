@@ -4,7 +4,7 @@ export const TICK = 0.1;            // seconds per sim tick (10 Hz)
 export const TICKS_PER_SEC = 10;
 // bump whenever map generation or sim logic changes in a way that breaks
 // replay reproduction (same seed must produce the same game to replay it)
-export const SIM_VERSION = 13; // v13: 2-tile building spacing + cliff-clearance placement rule, mine-clearing land drone, tiny seeded sandbank islands in large water bodies (all change deterministic placement/map state vs v12)
+export const SIM_VERSION = 14; // v14: Drone Bomber (dbomber) is now a one-way kamikaze drone (no bombing-run/rearm) — changes air-combat behaviour vs v13
 // buildings exempt from the 1-tile placement spacing rule: walls, tank barriers and
 // defensive structures may be packed tightly; economy/production buildings need a gap
 // so their (oversized) models don't overlap. Used by sim.canPlace + the client preview.
@@ -183,7 +183,7 @@ export const UNITS: Record<string, UnitDef> = {
   stealthtank: { name: 'Stealth Tank', cost: 1300, hp: 300, speed: 3.0, range: 5.5, dmg: 46, rof: 1.8, builtAt: 'factory',  buildTime: 15, kind: 'veh', cloak: true, faction: 'usa' }, // signature: cloaked armor (no research needed for its faction)
   fighter:   { name: 'Fighter',      cost: 1200, hp: 210, speed: 4.6, range: 6.5, dmg: 40,  rof: 0.9, builtAt: 'airforce', buildTime: 12, kind: 'air', fly: true, alt: 3.4, pad: true },
   bomber:    { name: 'Bomber',       cost: 2000, hp: 320, speed: 2.6, range: 3.0, dmg: 120, rof: 5.0, builtAt: 'airforce', buildTime: 18, kind: 'air', fly: true, alt: 3.4, pad: true, payload: 2 },
-  dbomber:   { name: 'Drone Bomber', cost: 2600, hp: 280, speed: 3.0, range: 4.0, dmg: 90,  rof: 4.0, builtAt: 'airforce', buildTime: 20, kind: 'air', fly: true, alt: 3.4, pad: true, payload: 3, faction: 'turkey' }, // signature: Bayraktar drone bomber
+  dbomber:   { name: 'Drone Bomber', cost: 2600, hp: 280, speed: 3.0, range: 4.0, dmg: 250, rof: 4.0, builtAt: 'airforce', buildTime: 20, kind: 'air', fly: true, alt: 3.4, kamikaze: true, faction: 'turkey' }, // signature: one-way kamikaze drone (Shahed-style)
   heli:      { name: 'Helicopter',   cost: 1600, hp: 260, speed: 3.2, range: 5.5, dmg: 40,  rof: 1.4, builtAt: 'airforce', buildTime: 14, kind: 'air', fly: true, alt: 2.7, pad: true, sonar: 9 }, // MAD: detects & rockets subs
   helidrone: { name: 'Helidrone',    cost: 800,  hp: 120, speed: 3.6, range: 4.5, dmg: 20,  rof: 0.9, builtAt: 'airforce', buildTime: 9,  kind: 'air', fly: true, alt: 2.7, pad: true },
   // air transport: ferries up to 10 infantry (Melody included) over any terrain;

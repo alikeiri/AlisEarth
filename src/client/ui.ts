@@ -135,7 +135,7 @@ const DESCRIPTIONS: Record<string, string> = {
   navdrone: 'Naval Drone: cheap, expendable sea drone.',
   fighter: 'Fighter: multi-role jet — owns the skies (hunts drones, aircraft and bombers) and can strafe ground units (infantry and light vehicles). Weak vs heavy armour and buildings; leave sieging to bombers.',
   bomber: 'Bomber: heavy payload vs buildings — flies over, drops its stick, returns to rearm.',
-  dbomber: 'Drone Bomber: unmanned heavy bomber with a large payload.',
+  dbomber: 'Drone Bomber: one-way kamikaze drone — dives into a target and detonates (does not return).',
   heli: 'Helicopter: versatile gunship — rockets vs armor, guns vs infantry.',
   helidrone: 'Helidrone: cheap, light attack helicopter.',
   // faction signature units
