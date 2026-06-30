@@ -272,7 +272,8 @@
         <div class="cmt-panel" data-id="${it.id}" style="display:none">
           ${cs.map(c => `<div class="cmt"><span class="who">${esc(c.u)}</span><span class="body">${esc(c.t)}</span><span class="ts">${fmtDay(c.ts)}</span><button class="cmt-del" data-id="${it.id}" data-ts="${c.ts}" title="Delete comment">✕</button></div>`).join('') || '<div class="muted" style="font-size:12px">No comments yet.</div>'}
           <div class="cmt-add"><textarea class="cmt-input" data-id="${it.id}" rows="1" placeholder="Add a comment…"></textarea><button class="cmt-send" data-id="${it.id}">Comment</button></div>
-        </div>`;
+        </div>
+      </div>`;
     };
     $('rmList').innerHTML = list.map(it => `
       <div class="rm-row s-${it.status}" data-id="${it.id}">
