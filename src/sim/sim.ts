@@ -1410,6 +1410,34 @@ export class Sim {
     return rof + (adef?.reload || 0);
   }
 
+  // weapon FX class for the 'shot' event (render-only, no sim state):
+  // 0 mg, 1 rocket, 2 cannon, 3 air gun, 4 missile salvo, 5 flak, 6 naval gun,
+  // 7 torpedo, 8 sub cruise, 9 cannon emplacement, 10 tesla, 11 Melody twin-gun,
+  // 12 SAM, 13 interceptor drones, 14 MLRS rocket, 15 heavy-tank shell.
+  // tgt may be omitted (e.g. force-firing empty ground) — then we pick by attacker
+  // type alone so an MLRS still launches its rocket and infantry use a small impact,
+  // instead of the old generic w=2 (which made everything look like a tank).
+  private weaponFx(att: Entity, tgt?: Entity): number {
+    const ud = UNITS[att.type];
+    const tgtInf = !!tgt && !tgt.b && UNITS[tgt.type]?.kind === 'inf';
+    const tgtB = !!tgt && tgt.b;
+    return att.type === 'melody' ? 11
+      : att.type === 'rifle' || att.type === 'ifv' ? 0
+      : att.type === 'sub' ? (tgtB ? 8 : 7)                                 // sub: cruise missile vs buildings, torpedo vs ships
+      : att.type === 'flak' ? 5                                              // pom-pom flak
+      : att.type === 'sam' ? 12                                              // Missile Battery: guided AA missiles
+      : att.type === 'interceptor' ? 13                                     // Interceptor Team: swarm of tiny drones
+      : att.type === 'rocket' || att.type === 'aatank' ? 1
+      : att.type === 'mlrs' ? 14                                            // MLRS: GLB rocket projectile, one per shot
+      : att.type === 'msldrone' || att.type === 'mortar' || att.type === 'artillery' || att.type === 'artyship' ? 4
+      : att.type === 'heli' || att.type === 'helidrone' ? (tgtInf ? 0 : 1)   // guns vs inf, rockets vs veh/bld
+      : att.type === 'heavy' ? 15                                           // Heavy Tank: fast flat direct-fire shell
+      : att.type === 'destroyer' ? 6                                        // naval gun (arcing)
+      : att.type === 'cannon' ? 9                                            // Heavy Cannon emplacement: visible shell
+      : att.type === 'tesla' ? 10                                            // Tesla Coil: lightning bolt
+      : ud?.kind === 'air' ? 3 : ud?.kind === 'inf' ? 0 : 2;                 // inf → small mg-style impact (not a tank shell)
+  }
+
   private fire(att: Entity, tgt: Entity, dmg: number, rof: number, force = false): boolean {
     if (att.holdFire && !force) return false; // weapons-hold: never fires on its own
     if (att.cd > 0) return false;
@@ -1421,23 +1449,7 @@ export class Sim {
     this.dealDamage(att, tgt, dmg, force);
     const ud = UNITS[att.type];
     if (ud?.splash) this.splashHit(att, tgt.x, tgt.z, dmg, ud.splash, tgt.id, force); // artillery AoE
-    // weapon class: 0 mg, 1 rocket, 2 cannon, 3 drone zap, 4 missile salvo, 11 twin-gun (Melody)
-    const tgtInf = !tgt.b && UNITS[tgt.type]?.kind === 'inf';
-    const w = att.type === 'melody' ? 11
-      : att.type === 'rifle' || att.type === 'ifv' ? 0
-      : att.type === 'sub' ? (tgt.b ? 8 : 7)                                 // sub: cruise missile vs buildings, torpedo vs ships
-      : att.type === 'flak' ? 5                                              // pom-pom flak
-      : att.type === 'sam' ? 12                                              // Missile Battery: guided AA missiles streaking up to the target
-      : att.type === 'interceptor' ? 13                                      // Interceptor Team: a swarm of tiny drones streaking up to the aircraft
-      : att.type === 'rocket' || att.type === 'aatank' ? 1
-      : att.type === 'mlrs' ? 14                                            // HIMARS: GLB rocket projectile, one per shot
-      : att.type === 'msldrone' || att.type === 'mortar' || att.type === 'artillery' || att.type === 'artyship' ? 4
-      : att.type === 'heli' || att.type === 'helidrone' ? (tgtInf ? 0 : 1)   // guns vs inf, rockets vs veh/bld
-      : att.type === 'heavy' ? 15                                           // Heavy Tank: fast flat direct-fire shell
-      : att.type === 'destroyer' ? 6                                        // naval gun (arcing)
-      : att.type === 'cannon' ? 9                                            // Heavy Cannon emplacement: visible shell
-      : att.type === 'tesla' ? 10                                            // Tesla Coil: lightning bolt
-      : ud?.kind === 'air' ? 3 : 2;
+    const w = this.weaponFx(att, tgt);
     const ev: any = { e: 'shot', x: att.x, z: att.z, tx: tgt.x, tz: tgt.z, w };
     if (ud?.fly) ev.f = 1;
     // target is airborne → tell the renderer to aim the tracer at the flyer's
@@ -2147,8 +2159,7 @@ export class Sim {
             const tx = px + Math.cos(ang) * rad, tz = pz + Math.sin(ang) * rad;
             u.cd = this.nextCd(u, def.rof); u.aimX = tx; u.aimZ = tz;
             this.splashHit(u, tx, tz, def.dmg, def.splash, -1, true);
-            const w = UNITS[u.type]?.kind === 'air' ? 3 : 2;
-            this.events.push({ e: 'shot', x: u.x, z: u.z, tx, tz, w, f: def.fly ? 1 : undefined });
+            this.events.push({ e: 'shot', x: u.x, z: u.z, tx, tz, w: this.weaponFx(u), f: def.fly ? 1 : undefined });
           } else {
             // resolve whatever sits at the point (explicit target preferred), any owner
             let hit: Entity | null = te && te.hp > 0 ? te : null;
@@ -2158,10 +2169,10 @@ export class Sim {
               for (const o of this.ents.values()) { if (!o.b || o.hp <= 0) continue; const dd = this.distToEnt(px, pz, o); if (dd < hd) { hd = dd; hit = o; } }
             }
             if (hit) this.fire(u, hit, def.dmg, def.rof, true); // force = bypass allegiance
-            else { // empty ground: suppressive shot at the spot
+            else { // empty ground: suppressive shot at the spot — use the unit's real
+              // weapon FX (an MLRS launches its rocket, infantry gets a small impact, …)
               u.cd = this.nextCd(u, def.rof); u.aimX = px; u.aimZ = pz;
-              const w = u.type === 'sub' ? 7 : UNITS[u.type]?.kind === 'air' ? 3 : 2;
-              this.events.push({ e: 'shot', x: u.x, z: u.z, tx: px, tz: pz, w, f: def.fly ? 1 : undefined });
+              this.events.push({ e: 'shot', x: u.x, z: u.z, tx: px, tz: pz, w: this.weaponFx(u), f: def.fly ? 1 : undefined });
             }
           }
         }
