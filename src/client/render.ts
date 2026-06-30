@@ -33,7 +33,7 @@ const MODEL_DEFS: Record<string, { file: string; size: number; axis: 'l' | 'h'; 
   mlrs:      { file: 'himars',    size: 1.95, axis: 'l', ry: 0 }, // HIMARS launcher truck
   artillery: { file: 'artillery', size: 1.75, axis: 'l', ry: Math.PI }, // Ha-To SP artillery (Sketchfab, CC-BY) — flipped to face forward
   // trucks: cab/bed geometry defeats the front heuristic — flip both (user-verified)
-  harv:      { file: 'harvester', size: 1.80, axis: 'l', ry: Math.PI }, // tracked harvester (harvester.glb)
+  harv:      { file: 'harvester', size: 1.80, axis: 'l', ry: 0 }, // tracked harvester (harvester.glb) — nose faces +Z (drives forward)
   engineer:  { file: 'engineer',  size: 1.35, axis: 'l', ry: Math.PI },
   mcv:       { file: 'harv',      size: 1.90, axis: 'l', ry: Math.PI, tint: 0x4a7ab0 }, // big blue construction rig
   dozer:     { file: 'bulldozer', size: 1.7,  axis: 'l', ry: 0 }, // IDF-style armored bulldozer (Gemini + Tripo3D); own textures, no tint
