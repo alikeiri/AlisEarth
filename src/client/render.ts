@@ -1407,8 +1407,9 @@ export class Renderer {
     this.partMesh.count = 0;
     this.scene.add(this.partMesh);
 
-    // rocket projectiles (MLRS / missile drones): arcing flight with smoke trails
-    const rGeo = new THREE.ConeGeometry(0.06, 0.28, 6);
+    // rocket projectiles (MLRS / missile drones / shells): arcing flight with smoke
+    // trails — sized up so projectiles read clearly at gameplay zoom (were tiny)
+    const rGeo = new THREE.ConeGeometry(0.13, 0.62, 8);
     rGeo.rotateX(Math.PI / 2); // point along +Z, oriented per-frame via lookAt
     this.rocketMesh = new THREE.InstancedMesh(
       rGeo,
@@ -2656,8 +2657,8 @@ export class Renderer {
           if (this.tracers.length < MAX_TRACER) this.tracers.push({ x1: mx, y1: my, z1: mz, x2: ev.tx, y2, z2: ev.tz, t: 0.07 });
           if (this.rockets.length < 64) this.rockets.push({
             x0: mx, y0: my, z0: mz, x1: ev.tx, y1: y2, z1: ev.tz,
-            t: 0, delay: 0, dur: Math.max(0.13, dist * 0.016), arc: 0.4 + dist * 0.07,
-            noSmoke: true, scale: 0.95, burst: 9, col: 0xffc24d, ring: true, // glowing orange round
+            t: 0, delay: 0, dur: Math.max(0.34, dist * 0.026), arc: 1.3 + dist * 0.09,
+            noSmoke: true, scale: 1.4, burst: 9, col: 0xffc24d, ring: true, // glowing orange round
           });
         } else if (ev.w === 6) {
           // HEAVY / NAVAL GUN: a big slow shell lobs high with a smoke trail, a large
@@ -2672,8 +2673,8 @@ export class Renderer {
           });
           if (this.rockets.length < 64) this.rockets.push({
             x0: mx, y0: my, z0: mz, x1: ev.tx, y1: y2, z1: ev.tz,
-            t: 0, delay: 0, dur: Math.max(0.32, dist * 0.028), arc: 1.4 + dist * 0.16,
-            scale: 1.5, burst: 18, col: 0x3a3f46, ring: true, // big dark shell, smoke trail
+            t: 0, delay: 0, dur: Math.max(0.6, dist * 0.04), arc: 4 + dist * 0.2,
+            scale: 2.4, burst: 18, col: 0x3a3f46, ring: true, // big dark shell, lobs high, smoke trail
           });
         } else if (ev.w === 1) {
           // ROCKET / MISSILE (rocket inf, AA tank, heli rockets): a real missile flies
@@ -2682,8 +2683,8 @@ export class Renderer {
           this.spawnParts(ev.x, y1, ev.z, 4, false); // launch flash
           if (this.rockets.length < 64) this.rockets.push({
             x0: ev.x, y0: y1, z0: ev.z, x1: ev.tx, y1: y2, z1: ev.tz,
-            t: 0, delay: 0, dur: Math.max(0.26, dist * 0.03), arc: 0.3 + dist * 0.05,
-            scale: 1.0, burst: 12, col: 0xeaf0f4, ring: true, // white missile, explosive impact
+            t: 0, delay: 0, dur: Math.max(0.5, dist * 0.04), arc: 1.6 + dist * 0.07,
+            scale: 1.6, burst: 12, col: 0xeaf0f4, ring: true, // white missile, lofts + explosive impact
           });
         } else if (ev.w === 5) {
           // FLAK: a quick tracer up to the target + a small dark airburst puff (anti-air
@@ -3351,6 +3352,10 @@ export class Renderer {
           vx: (Math.random() - 0.5) * 0.3, vy: 0.4, vz: (Math.random() - 0.5) * 0.3,
           life: 0, max: 0.5 + Math.random() * 0.3, s: 1,
         });
+      }
+      // bright glowing trail head so the projectile streak + arc read clearly in flight
+      if (this.parts.length < MAX_PART) {
+        this.parts.push({ x: pos.x, y: pos.y, z: pos.z, vx: 0, vy: 0, vz: 0, life: 0, max: 0.16, s: (r.scale ?? 1) * 1.2 });
       }
       return true;
     });
