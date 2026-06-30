@@ -2708,7 +2708,7 @@ export class Renderer {
           if (this.rockets.length < 64) this.rockets.push({
             x0: ev.x, y0: y1 + 0.6, z0: ev.z, x1: ev.tx, y1: y2, z1: ev.tz,
             t: 0, delay: 0, dur: Math.max(0.7, dist * 0.055), arc: 3 + dist * 0.18,
-            scale: 2.0, burst: 14, ring: true, himars: true,
+            scale: 0.5, burst: 14, ring: true, himars: true, // 1/4 of the previous size (was 2.0)
           });
         } else if (ev.w === 2) {
           // BATTLE TANK: fast, FLAT direct-fire shot — a bright muzzle flash + a straight
