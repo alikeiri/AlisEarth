@@ -129,6 +129,9 @@ const MAX_TRACER = 256;
 // vehicles spawn). Flip by Math.PI if the ramp ends up facing the wrong way.
 const FACTORY_RY = 0;
 const MAX_PART = 700;
+const MAX_SMOKE = 700;
+// industrial buildings that emit ambient chimney/stack smoke while powered + built
+const CHIMNEY_TYPES = new Set(['power', 'refinery', 'factory']);
 const WHITE = new THREE.Color(0xffffff);
 
 // ---------- procedural texture generation ----------
@@ -1048,7 +1051,7 @@ export class Renderer {
   // per unit type: list of instanced parts; mode 0 = neutral, 1 = full team
   // color (procedural accents), 2 = subtle team tint (external models)
   private unitParts: Record<string, { mesh: THREE.InstancedMesh; mode: number }[]> = {};
-  private buildings = new Map<number, { g: THREE.Group; type: string; aim?: number; owner?: number }>();
+  private buildings = new Map<number, { g: THREE.Group; type: string; aim?: number; owner?: number; topY?: number }>();
   private facing = new Map<number, { a: number; lx: number; lz: number }>();
   private selRing: THREE.InstancedMesh;
   private oreMesh: THREE.InstancedMesh;
@@ -1069,6 +1072,9 @@ export class Renderer {
   private rockets: FxRocket[] = [];
   private smokeMesh!: THREE.InstancedMesh;
   private smokeParts: FxPart[] = [];
+  private ringMesh!: THREE.InstancedMesh;
+  private rings: { x: number; y: number; z: number; t: number; max: number; r0: number; r1: number }[] = [];
+  private ringFade = new THREE.Color();
   private satLaunches: { g: THREE.Group; t: number; x: number; z: number; y0: number }[] = [];
   private terrain: THREE.Mesh;
   private terraPrev!: THREE.Mesh;
@@ -1425,11 +1431,22 @@ export class Renderer {
     this.smokeMesh = new THREE.InstancedMesh(
       new THREE.SphereGeometry(0.08, 6, 5),
       new THREE.MeshBasicMaterial({ color: 0x9aa0a4, transparent: true, opacity: 0.42, depthWrite: false }),
-      400
+      MAX_SMOKE
     );
     this.smokeMesh.frustumCulled = false;
     this.smokeMesh.count = 0;
     this.scene.add(this.smokeMesh);
+    // ordnance shockwave: a flat ring that expands + fades on the ground at impacts
+    const ringGeo = new THREE.RingGeometry(0.7, 1.0, 28);
+    ringGeo.rotateX(-Math.PI / 2);
+    this.ringMesh = new THREE.InstancedMesh(
+      ringGeo,
+      new THREE.MeshBasicMaterial({ color: 0xffd9a0, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }),
+      32
+    );
+    this.ringMesh.frustumCulled = false;
+    this.ringMesh.count = 0;
+    this.scene.add(this.ringMesh);
 
     // heal sparkles (green, drift upward)
     this.healMesh = new THREE.InstancedMesh(
@@ -2627,9 +2644,40 @@ export class Renderer {
             });
           }
           this.spawnParts(ev.x, ly, ev.z, 2, false);
+        } else if (ev.w === 2 || ev.w === 6) {
+          // ballistic shell: a visible round ARCS from the muzzle to the target with a
+          // muzzle flash + lingering smoke; the rockets updater bursts it on impact.
+          // w2 = tank/cannon (fast, low arc); w6 = heavy/naval gun (slower, high lob + smoke trail)
+          const heavy = ev.w === 6;
+          const ang = Math.atan2(ev.tx - ev.x, ev.tz - ev.z);
+          const mx = ev.x + Math.sin(ang) * (heavy ? 1.3 : 0.7);
+          const mz = ev.z + Math.cos(ang) * (heavy ? 1.3 : 0.7);
+          const my = y1 + (heavy ? 0.8 : 0.45);
+          const dist = Math.hypot(ev.tx - ev.x, ev.tz - ev.z);
+          this.spawnParts(mx, my, mz, heavy ? 6 : 3, false); // muzzle flash
+          if (this.smokeParts.length < MAX_SMOKE) {          // muzzle smoke puff
+            this.smokeParts.push({
+              x: mx, y: my, z: mz, vx: Math.sin(ang) * 0.4, vy: 0.5, vz: Math.cos(ang) * 0.4,
+              life: 0, max: 0.6 + Math.random() * 0.4, s: heavy ? 1.8 : 1.0,
+            });
+          }
+          if (this.rockets.length < 64) this.rockets.push({
+            x0: mx, y0: my, z0: mz, x1: ev.tx, y1: y2, z1: ev.tz,
+            t: 0, delay: 0,
+            dur: Math.max(heavy ? 0.22 : 0.12, dist * (heavy ? 0.02 : 0.013)),
+            arc: (heavy ? 1.1 : 0.35) + dist * (heavy ? 0.13 : 0.06),
+            noSmoke: !heavy, scale: heavy ? 1.0 : 0.6, burst: heavy ? 12 : 7,
+          });
         } else {
           if (this.tracers.length < MAX_TRACER) this.tracers.push({ x1: ev.x, y1, z1: ev.z, x2: ev.tx, y2, z2: ev.tz, t: 0.1 });
           this.spawnParts(ev.tx, y2, ev.tz, 2, false);
+          this.spawnParts(ev.x, y1, ev.z, 2, false); // muzzle flash at the shooter
+          if (this.smokeParts.length < MAX_SMOKE && Math.random() < 0.6) { // light, intermittent muzzle smoke
+            this.smokeParts.push({
+              x: ev.x, y: y1, z: ev.z, vx: (Math.random() - 0.5) * 0.2, vy: 0.5, vz: (Math.random() - 0.5) * 0.2,
+              life: 0, max: 0.45 + Math.random() * 0.25, s: 0.8,
+            });
+          }
         }
       } else if (ev.e === 'silo') {
         // ballistic missile: one big high-arc rocket from silo to target
@@ -2644,7 +2692,7 @@ export class Renderer {
       } else if (ev.e === 'burnfx') {
         // building on fire: rising smoke
         const yb = Math.max(this.map.heightAt(ev.x, ev.z), SEA) + 0.8;
-        this.smokeParts.push({ x: ev.x, y: yb, z: ev.z, vx: 0, vy: 1.1, vz: 0, life: 0, max: 1.4, s: 2.2 });
+        if (this.smokeParts.length < MAX_SMOKE) this.smokeParts.push({ x: ev.x, y: yb, z: ev.z, vx: 0, vy: 1.1, vz: 0, life: 0, max: 1.4, s: 2.2 });
         this.spawnParts(ev.x, yb, ev.z, 1, false);
       } else if (ev.e === 'bombdrop') {
         // bomber released its stick over the target: a few bomb-shaped objects fall
@@ -2658,6 +2706,20 @@ export class Renderer {
       } else if (ev.e === 'boom') {
         const y = Math.max(this.map.heightAt(ev.x, ev.z), SEA) + 0.4;
         this.spawnParts(ev.x, y, ev.z, ev.big ? 26 : 12, ev.big);
+        // rising smoke cloud lingering after the fireball
+        const npuff = ev.big ? 5 : 2;
+        for (let i = 0; i < npuff && this.smokeParts.length < MAX_SMOKE; i++) {
+          this.smokeParts.push({
+            x: ev.x + (Math.random() - 0.5) * (ev.big ? 1.4 : 0.6), y: y + 0.3, z: ev.z + (Math.random() - 0.5) * (ev.big ? 1.4 : 0.6),
+            vx: (Math.random() - 0.5) * 0.5, vy: 0.8 + Math.random() * 0.6, vz: (Math.random() - 0.5) * 0.5,
+            life: 0, max: (ev.big ? 1.6 : 1.0) + Math.random() * 0.5, s: ev.big ? 2.8 : 1.6,
+          });
+        }
+        // ground shockwave ring
+        if (this.rings.length < 32) this.rings.push({
+          x: ev.x, y: y - 0.35, z: ev.z, t: 0,
+          max: ev.big ? 0.45 : 0.3, r0: ev.big ? 0.6 : 0.3, r1: ev.big ? 5 : 2.6,
+        });
       } else if (ev.e === 'died') {
         // infantry death: play the baked Death animation as a brief corpse. types with
         // no humanoid death clip (e.g. the engineer truck) just get a small dust poof.
@@ -2777,6 +2839,9 @@ export class Renderer {
         const wantCol = v.ne ? 0x8893a0 : (PLAYER_COLORS[v.o] ?? 0xffffff); // neutral garrison = grey
         if (!rec) {
           rec = { g: this.makeBuildingGroup(v.t, wantCol), type: v.t, owner: v.o };
+          // intrinsic model height (scale 1, at origin) — used to place chimney/fire FX at the top
+          const bb = new THREE.Box3().setFromObject(rec.g);
+          rec.topY = isFinite(bb.max.y) ? bb.max.y : 3;
           this.scene.add(rec.g);
           this.buildings.set(v.i, rec);
         } else if (v.gar && rec.owner !== v.o) {
@@ -2835,6 +2900,36 @@ export class Renderer {
         if (npi) npi.visible = noPwr && Math.sin(this.time * 6) > 0; // ~1 Hz blink
         const star = rec.g.userData.primaryStar as THREE.Sprite | undefined;
         if (star) star.visible = !!v.pm; // gold star over the primary factory of its type
+        // ambient particle FX (render-only): industrial chimney smoke + fire on damaged buildings
+        if ((v.pr ?? 1) >= 1) {
+          const topW = y + (rec.topY ?? 3) * rec.g.scale.y;
+          // chimney/stack smoke from running industry (stops when browned out)
+          if (CHIMNEY_TYPES.has(v.t) && !noPwr && this.smokeParts.length < MAX_SMOKE && Math.random() < 2.4 * dt) {
+            this.smokeParts.push({
+              x: v.x + (Math.random() - 0.5) * 0.5, y: topW, z: v.z + (Math.random() - 0.5) * 0.5,
+              vx: (Math.random() - 0.5) * 0.2, vy: 0.7 + Math.random() * 0.4, vz: (Math.random() - 0.5) * 0.2,
+              life: 0, max: 1.6 + Math.random() * 0.8, s: 1.8,
+            });
+          }
+          // a building under 45% HP is on fire: rising dark smoke + flickering flames,
+          // heavier the closer it is to destruction
+          const dmgFrac = v.m ? v.h / v.m : 1;
+          if (dmgFrac < 0.45) {
+            const sev = Math.min(1, (0.45 - dmgFrac) / 0.45);
+            const midW = y + (rec.topY ?? 3) * rec.g.scale.y * 0.55;
+            const sz = (v.sz || 2) * 0.5;
+            if (this.smokeParts.length < MAX_SMOKE && Math.random() < (1.5 + 4 * sev) * dt) {
+              this.smokeParts.push({
+                x: v.x + (Math.random() - 0.5) * sz, y: midW, z: v.z + (Math.random() - 0.5) * sz,
+                vx: (Math.random() - 0.5) * 0.3, vy: 0.9 + Math.random() * 0.6, vz: (Math.random() - 0.5) * 0.3,
+                life: 0, max: 1.4 + Math.random() * 0.8, s: 2.2,
+              });
+            }
+            if (sev > 0.35 && this.parts.length < MAX_PART && Math.random() < (2 + 4 * sev) * dt) {
+              this.spawnParts(v.x + (Math.random() - 0.5) * sz, midW - 0.3, v.z + (Math.random() - 0.5) * sz, 2, false);
+            }
+          }
+        }
         if (selection.has(v.i) && selN < MAX_INST) {
           this.dummy.position.set(v.x, y + 0.1, v.z);
           this.dummy.scale.setScalar((v.sz || 1) * 1.6);
@@ -3219,7 +3314,7 @@ export class Renderer {
       this.dummy.scale.setScalar(r.scale ?? 1);
       this.dummy.updateMatrix();
       if (rn < 64) this.rocketMesh.setMatrixAt(rn++, this.dummy.matrix);
-      if (!r.noSmoke && this.smokeParts.length < 400) {
+      if (!r.noSmoke && this.smokeParts.length < MAX_SMOKE) {
         this.smokeParts.push({
           x: pos.x, y: pos.y, z: pos.z,
           vx: (Math.random() - 0.5) * 0.3, vy: 0.4, vz: (Math.random() - 0.5) * 0.3,
@@ -3258,7 +3353,7 @@ export class Renderer {
       s.g.rotation.z = -Math.min(0.6, p * 0.8);                    // lean downrange as it climbs
       const ex = s.g.position;
       this.spawnParts(ex.x, ex.y - 0.2, ex.z, 3, true);            // engine flame
-      if (this.smokeParts.length < 400) this.smokeParts.push({
+      if (this.smokeParts.length < MAX_SMOKE) this.smokeParts.push({
         x: ex.x + (Math.random() - 0.5) * 0.6, y: ex.y - 0.5, z: ex.z + (Math.random() - 0.5) * 0.6,
         vx: (Math.random() - 0.5) * 0.6, vy: -0.3, vz: (Math.random() - 0.5) * 0.6,
         life: 0, max: 1.3 + Math.random() * 0.8, s: 2.4,
@@ -3274,13 +3369,37 @@ export class Renderer {
       p.x += p.vx * dt; p.y += p.vy * dt; p.z += p.vz * dt;
       this.dummy.position.set(p.x, p.y, p.z);
       this.dummy.rotation.set(0, 0, 0);
-      this.dummy.scale.setScalar(0.6 + (p.life / p.max) * 1.6);
+      this.dummy.scale.setScalar((0.6 + (p.life / p.max) * 1.6) * (p.s ?? 1)); // p.s differentiates wisps vs billowing clouds
       this.dummy.updateMatrix();
-      if (sn < 400) this.smokeMesh.setMatrixAt(sn++, this.dummy.matrix);
+      if (sn < MAX_SMOKE) this.smokeMesh.setMatrixAt(sn++, this.dummy.matrix);
       return true;
     });
     this.smokeMesh.count = sn;
     this.smokeMesh.instanceMatrix.needsUpdate = true;
+
+    // shockwave rings: expand outward on the ground while fading, then expire.
+    // additive blend → multiplying the instance colour toward black dims it out
+    // (per-instance opacity isn't available on a shared MeshBasicMaterial)
+    let kn = 0;
+    this.rings = this.rings.filter(rg => {
+      rg.t += dt;
+      const q = rg.t / rg.max;
+      if (q >= 1) return false;
+      if (kn >= 32) return true;
+      const r = rg.r0 + (rg.r1 - rg.r0) * q;
+      this.dummy.position.set(rg.x, rg.y + 0.06, rg.z);
+      this.dummy.rotation.set(0, 0, 0);
+      this.dummy.scale.set(r, 1, r);
+      this.dummy.updateMatrix();
+      this.ringMesh.setMatrixAt(kn, this.dummy.matrix);
+      this.ringFade.setScalar(1 - q); // fade brightness as it spreads
+      this.ringMesh.setColorAt(kn, this.ringFade);
+      kn++;
+      return true;
+    });
+    this.ringMesh.count = kn;
+    this.ringMesh.instanceMatrix.needsUpdate = true;
+    if (this.ringMesh.instanceColor) this.ringMesh.instanceColor.needsUpdate = true;
 
     // heal sparkles (no gravity — they rise and fade)
     let hn = 0;
