@@ -4,7 +4,7 @@ export const TICK = 0.1;            // seconds per sim tick (10 Hz)
 export const TICKS_PER_SEC = 10;
 // bump whenever map generation or sim logic changes in a way that breaks
 // replay reproduction (same seed must produce the same game to replay it)
-export const SIM_VERSION = 10; // v10: Naval Engineer lays sea mines + engineers replenish mine stock over time (new sim behavior → breaks v9 replay/lockstep)
+export const SIM_VERSION = 11; // v11: MLRS no longer China-exclusive — any nation (incl. non-China AIs) can now build it, so prior train commands reproduce differently (breaks v10 replay/lockstep)
 // buildings exempt from the 1-tile placement spacing rule: walls, tank barriers and
 // defensive structures may be packed tightly; economy/production buildings need a gap
 // so their (oversized) models don't overlap. Used by sim.canPlace + the client preview.
@@ -98,7 +98,7 @@ export const UNITS: Record<string, UnitDef> = {
   // Iran signature: Shahed loitering munitions — cheap one-way suicide drones built
   // (and launched) in volleys of 5. Fragile; dive into the target and detonate.
   shahed: { name: 'Shahed', cost: 650, hp: 45, speed: 4.6, range: 4.0, dmg: 130, rof: 1, builtAt: 'dronefac', buildTime: 10, kind: 'air', fly: true, alt: 2.5, kamikaze: true, faction: 'iran', volley: 5 },
-  mlrs:   { name: 'HIMARS',       cost: 1600, hp: 170, speed: 1.6, range: 13.0, dmg: 66, rof: 0.5, builtAt: 'factory',  buildTime: 16, kind: 'veh', faction: 'china', capacity: 6, reload: 7 }, // signature: rocket artillery — fires a 6-rocket salvo in quick succession (rof 0.5s), then a medium reload (7s)
+  mlrs:   { name: 'MLRS',         cost: 1600, hp: 170, speed: 1.6, range: 13.0, dmg: 66, rof: 0.5, builtAt: 'factory',  buildTime: 16, kind: 'veh', capacity: 6, reload: 7 }, // rocket artillery (all nations): fires a 6-rocket salvo in quick succession (rof 0.5s), then a medium reload (7s)
   // ARTILLERY LINE — long range + area splash to break up massed pushes. Every
   // nation fields BOTH an infantry and a vehicle version of the mortar (anti-
   // infantry, shorter range, cheaper) and the artillery (siege, longer range).
