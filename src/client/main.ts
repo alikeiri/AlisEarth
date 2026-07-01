@@ -642,7 +642,7 @@ class GameClient {
   private lastViews: any[] = [];
   private byId = new Map<number, any>();
   private keys = new Set<string>();
-  private xDisp = false; // X held → fired the one-shot "disperse" (reset on keyup)
+  private xDisp = false; // true while X is HELD → the rAF loop re-issues "disperse" each interval (reset on keyup)
   private mouse = {
     x: 0, y: 0, in: false, downX: 0, downY: 0, dragging: false, lDown: false,
     rDown: false, rDownX: 0, rDownY: 0, rDragging: false,
@@ -838,8 +838,11 @@ class GameClient {
         this.terraMode = ''; this.terraRect = null; this.renderer.setTerraPreview(null);
         this.renderer.setFormationPath(null);
       }
-      if (e.code === 'KeyX') { // tap = Stop (S is taken by WASD map-pan); hold = Disperse (spread out once)
-        if (e.repeat) { if (!this.xDisp) { this.xDisp = true; this.issueToUnits({ k: 'disperse' }); } }
+      if (e.code === 'KeyX') { // tap = Stop (S is taken by WASD map-pan); hold = Disperse (keeps spreading while held)
+        // First (non-repeat) press = tap -> Stop. Once OS key-repeat kicks in, X is being
+        // HELD -> flip into disperse mode; the rAF loop re-issues 'disperse' on an interval
+        // so units keep wandering until keyup (the loop owns the dispatch, not this handler).
+        if (e.repeat) this.xDisp = true;
         else this.issueToUnits({ k: 'stop' });
       }
       // U: transport ships unload cargo; garrison buildings evacuate their occupants
@@ -2298,6 +2301,10 @@ class GameClient {
     if (dx || dz) this.renderer.moveCam(dx, dz);
     if (this.keys.has('KeyQ')) this.renderer.rotate(1.6 * dt);
     if (this.keys.has('KeyE')) this.renderer.rotate(-1.6 * dt);
+    // Disperse-while-held: as long as X is down, re-issue 'disperse' ~5x/sec so the selection
+    // keeps loosening (each re-issue picks fresh scatter targets in the sim). Deterministic —
+    // it only re-sends the existing command through the command stream; keyup clears KeyX + xDisp.
+    if (this.xDisp && this.keys.has('KeyX') && !this.over && this.frame % 12 === 0) this.issueToUnits({ k: 'disperse' });
 
     // a selected building's stored patrol route shows as a standing yellow line
     const drawingNow = (this.patrolMode && this.patrolDraw && this.mouse.lDown) ||

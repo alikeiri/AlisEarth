@@ -19,7 +19,8 @@ export const WATER_FRAG = `
   precision highp float;
   varying vec3 vWorld;
   uniform float uTime, uOpacity;
-  uniform vec3 uDeep, uShallow, uSky, uSunDir, uSunCol, uFoam;
+  uniform vec3 uDeep, uShallow, uSky, uSunDir, uSunCol, uFoam, uHorizon;
+  uniform vec2 uMapMax;
   void main() {
     vec2 p = vWorld.xz;
     // slow domain warp so the wave field churns instead of sliding rigidly
@@ -49,7 +50,13 @@ export const WATER_FRAG = `
     float crest = smoothstep(0.62, 0.95, h * 0.6 + 0.5);
     float foam = clamp(crest * (0.8 + smoothstep(0.10, 0.45, length(g))), 0.0, 1.0);
     col = mix(col, uFoam, foam * 0.6);
-    gl_FragColor = vec4(col, mix(uOpacity, 1.0, fres));
+    // fade the water that overhangs past the map edge into the sky-dome horizon colour,
+    // so the ocean doesn't run crisp to the horizon when the camera tilts down (the
+    // fade is by distance OUTSIDE the map bounds, so it's independent of map size)
+    vec2 outv = max(max(-vWorld.xz, vWorld.xz - uMapMax), vec2(0.0));
+    float edge = smoothstep(6.0, 36.0, length(outv));
+    col = mix(col, uHorizon, edge);
+    gl_FragColor = vec4(col, mix(mix(uOpacity, 1.0, fres), 1.0, edge));
   }
 `;
 

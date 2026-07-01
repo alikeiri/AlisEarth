@@ -4,11 +4,13 @@ export const TICK = 0.1;            // seconds per sim tick (10 Hz)
 export const TICKS_PER_SEC = 10;
 // bump whenever map generation or sim logic changes in a way that breaks
 // replay reproduction (same seed must produce the same game to replay it)
-export const SIM_VERSION = 14; // v14: Drone Bomber (dbomber) is now a one-way kamikaze drone (no bombing-run/rearm) — changes air-combat behaviour vs v13
-// buildings exempt from the 1-tile placement spacing rule: walls, tank barriers and
-// defensive structures may be packed tightly; economy/production buildings need a gap
-// so their (oversized) models don't overlap. Used by sim.canPlace + the client preview.
-export const SPACING_EXEMPT = new Set(['wall', 'barrier', 'turret', 'sam', 'cannon', 'tesla', 'irondome']);
+export const SIM_VERSION = 15; // v15: base defences (turret/sam/cannon/tesla/irondome) removed from SPACING_EXEMPT — now need the standard placement gap (no stacking); changes valid placements + AI defence layout vs v14
+// buildings exempt from the placement spacing rule: ONLY walls and tank barriers,
+// which are meant to be packed tightly into continuous lines. Everything else —
+// including base defences — needs a gap so their (oversized) models don't overlap.
+// (Defences stay CLIFF_IMMUNE below; they're just no longer spacing-exempt, so you
+// can't stack turrets/SAMs on top of each other.) Used by sim.canPlace + client preview.
+export const SPACING_EXEMPT = new Set(['wall', 'barrier']);
 // buildings allowed to sit right next to cliffs/mountains: base-defence turrets
 // (you want them perched on the high ground / hugging chokepoints) and the
 // shipyard (it must straddle a coast, often a cliffy shore). Everything else is

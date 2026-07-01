@@ -1264,6 +1264,8 @@ export class Renderer {
         uSunCol: { value: new THREE.Color(0xfff1d8) },
         uFoam: { value: new THREE.Color(0xdfeef5) },
         uOpacity: { value: 0.9 },
+        uMapMax: { value: new THREE.Vector2(W, H) },   // map bounds; water past this fades to the horizon
+        uHorizon: { value: new THREE.Color(0xc9d9e6) }, // sky-dome horizon colour (dome 'bot') to melt the overhang into
       },
       vertexShader: WATER_VERT,
       fragmentShader: WATER_FRAG,
@@ -1392,8 +1394,9 @@ export class Renderer {
     // building or its neighbours hide). A cone with the tip pointing DOWN at the building.
     const arrow = new THREE.ConeGeometry(0.45, 0.8, 4);
     arrow.rotateX(Math.PI); // tip points -Y (down at the building)
-    this.selArrow = new THREE.InstancedMesh(arrow, new THREE.MeshBasicMaterial({ color: 0x6aff6a, transparent: true, opacity: 0.92, depthWrite: false }), MAX_INST);
+    this.selArrow = new THREE.InstancedMesh(arrow, new THREE.MeshBasicMaterial({ color: 0x6aff6a, transparent: true, opacity: 0.92, depthWrite: false, depthTest: false }), MAX_INST);
     this.selArrow.frustumCulled = false;
+    this.selArrow.renderOrder = 999; // draw over buildings so neighbours can't occlude the arrow at low camera angles
     this.scene.add(this.selArrow);
 
     // ghost
