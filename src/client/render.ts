@@ -1163,6 +1163,8 @@ export class Renderer {
   private cruiseY = 12; // constant flight altitude (set from the map's tallest terrain in buildTerrain)
   private rampAnim = new Map<number, number>();     // unit id → seconds left of the "drive down the ramp" descent
   private flyAlt = new Map<number, number>();        // flyer id → altitude factor (0 = landed on pad, 1 = cruise) for smooth take-off/landing
+  private launcherMesh!: THREE.InstancedMesh;        // pickup trucks carrying Shaheds pre-launch (render-only launcher)
+  private launcherTrucks = new Map<number, { x: number; z: number; y: number; a: number; o: number; phase: number; t: number; sx: number; sz: number; tx: number; tz: number; seen: number }>(); // drone id → its pickup truck (phase 0 = parked under the drone, 1 = driving home + shrinking away)
   private prevVeh = new Set<number>();              // ground-vehicle ids seen last frame (to detect freshly-built ones)
   private fogTex: THREE.DataTexture | null = null;
   private fogMesh: THREE.Mesh | null = null;
@@ -1573,6 +1575,20 @@ export class Renderer {
     );
     this.radarDishMesh.frustumCulled = false; this.radarDishMesh.castShadow = true; this.radarDishMesh.count = 0;
     this.scene.add(this.radarDishMesh);
+
+    // pickup truck that carries a Shahed pre-launch (procedural: flatbed + cab + wheels,
+    // nose toward +Z to match the unit heading convention). Render-only launcher.
+    {
+      const tp: THREE.BufferGeometry[] = [];
+      const bed = new THREE.BoxGeometry(0.55, 0.22, 1.15); bed.translate(0, 0.30, -0.06); tp.push(bed);
+      const cab = new THREE.BoxGeometry(0.5, 0.32, 0.42); cab.translate(0, 0.52, 0.36); tp.push(cab);
+      for (const [wx, wz] of [[-0.29, 0.42], [0.29, 0.42], [-0.29, -0.42], [0.29, -0.42]]) {
+        const w = new THREE.CylinderGeometry(0.14, 0.14, 0.12, 8); w.rotateZ(Math.PI / 2); w.translate(wx, 0.14, wz); tp.push(w);
+      }
+      this.launcherMesh = new THREE.InstancedMesh(mergeGeometries(tp)!, new THREE.MeshStandardMaterial({ color: 0x9a9068, roughness: 0.8, metalness: 0.12 }), 256);
+      this.launcherMesh.frustumCulled = false; this.launcherMesh.castShadow = true; this.launcherMesh.count = 0;
+      this.scene.add(this.launcherMesh);
+    }
 
     this.resize();
   }
@@ -3064,6 +3080,7 @@ export class Renderer {
 
   updateViews(views: any[], selection: Set<number>, dt: number, lowPowerOwners?: Set<number>) {
     const counts: Record<string, number> = {};
+    const lgSeen = new Set<number>(); // truck-launched drones still grounded THIS frame (their pickup stays parked); any launcher truck not in here has launched → drives home
     for (const t in this.unitParts) counts[t] = 0;
     for (const t in this.posedParts) this.poseCounts[t] = this.posedParts[t].map(() => 0);
     for (const t in this.deathParts) this.deathCounts[t] = this.deathParts[t].map(() => 0);
@@ -3258,29 +3275,42 @@ export class Renderer {
       let gy = this.map.heightAt(v.x, v.z);
       let y: number;
       if (md?.fly) {
-        // level cruise altitude, but a grounded (parked/rearming) flyer eases down onto
-        // the pad and back up on take-off. v.fy = absolute height for overlay/selection ring.
-        const cruise = this.flyY(v.x, v.z, md.alt || 2.3);
-        const padY = Math.max(gy, SEA) + 0.55;            // sit just on the airfield surface
-        const tgt = v.gr ? 0 : 1;
-        let f = this.flyAlt.get(v.i); if (f === undefined) f = tgt;
-        f += (tgt - f) * Math.min(1, dt * 1.8); this.flyAlt.set(v.i, f);
-        y = padY + (cruise - padY) * f + Math.sin(this.time * 2.5 + v.i * 1.7) * 0.12 * f; // bob only while airborne
-        // kamikaze terminal dive: as a one-way drone closes on the target it's attacking,
-        // drop from cruise down toward the target so it visibly dives IN and explodes on
-        // contact (the impact boom is emitted at the target by the sim) instead of poofing
-        // at cruise altitude. Render-only — the sim path is unchanged.
-        if (md.kamikaze && v.wp && v.wp[0] && v.wp[0].a === 1) {
-          const tw = v.wp[0];
-          const dist = Math.hypot(tw.x - v.x, tw.z - v.z);
-          const DIVE = 5;                                                 // begin the dive within 5 tiles
-          if (dist < DIVE) {
-            const k = 1 - dist / DIVE;                                    // 0 far → 1 at the target
-            const impactY = Math.max(this.map.heightAt(tw.x, tw.z), SEA) + 0.4;
-            y += (impactY - y) * (k * k);                                 // ease down, steepening as it nears
+        if (v.lg) {
+          // riding its pickup truck at the factory: sit flat on the bed, no altitude. Pin
+          // flyAlt to 0 so the instant it launches it eases UP (takes off) from the ground.
+          // The truck under it is registered here + drawn/animated in the launcher pass.
+          lgSeen.add(v.i);
+          y = gy + 0.52;                    // sit on the truck bed (truck drawn at 1.25x below)
+          this.flyAlt.set(v.i, 0);
+          let tr = this.launcherTrucks.get(v.i);
+          if (!tr) { tr = { x: v.x, z: v.z, y: gy, a: f.a, o: v.o, phase: 0, t: 0, sx: v.x, sz: v.z, tx: v.x, tz: v.z, seen: this.time }; this.launcherTrucks.set(v.i, tr); }
+          tr.x = v.x; tr.z = v.z; tr.y = gy; tr.a = f.a; tr.o = v.o; tr.phase = 0; tr.seen = this.time;
+          v.fy = y;
+        } else {
+          // level cruise altitude, but a grounded (parked/rearming) flyer eases down onto
+          // the pad and back up on take-off. v.fy = absolute height for overlay/selection ring.
+          const cruise = this.flyY(v.x, v.z, md.alt || 2.3);
+          const padY = Math.max(gy, SEA) + 0.55;            // sit just on the airfield surface
+          const tgt = v.gr ? 0 : 1;
+          let fa = this.flyAlt.get(v.i); if (fa === undefined) fa = tgt;
+          fa += (tgt - fa) * Math.min(1, dt * 1.8); this.flyAlt.set(v.i, fa);
+          y = padY + (cruise - padY) * fa + Math.sin(this.time * 2.5 + v.i * 1.7) * 0.12 * fa; // bob only while airborne
+          // kamikaze terminal dive: as a one-way drone closes on the target it's attacking,
+          // drop from cruise down toward the target so it visibly dives IN and explodes on
+          // contact (the impact boom is emitted at the target by the sim) instead of poofing
+          // at cruise altitude. Render-only — the sim path is unchanged.
+          if (md.kamikaze && v.wp && v.wp[0] && v.wp[0].a === 1) {
+            const tw = v.wp[0];
+            const dist = Math.hypot(tw.x - v.x, tw.z - v.z);
+            const DIVE = 5;                                                 // begin the dive within 5 tiles
+            if (dist < DIVE) {
+              const k = 1 - dist / DIVE;                                    // 0 far → 1 at the target
+              const impactY = Math.max(this.map.heightAt(tw.x, tw.z), SEA) + 0.4;
+              y += (impactY - y) * (k * k);                                 // ease down, steepening as it nears
+            }
           }
+          v.fy = y;
         }
-        v.fy = y;
       }
       else if (md?.move === 'sea') {
         y = SEA + (v.t === 'sub' ? -0.08 : 0.02) + Math.sin(this.time * 1.6 + v.i) * 0.03;
@@ -3423,6 +3453,36 @@ export class Renderer {
         for (const part of ps) this.markInst(part.mesh, dcs[k] || 0);
       });
     }
+    // truck-launched drone pickups: parked trucks sit under their grounded (v.lg) drones
+    // (registered in the flyer block); once a drone launches, its truck drives to the
+    // nearest friendly building and shrinks away. Render-only.
+    let lgN = 0;
+    for (const [id, tr] of this.launcherTrucks) {
+      if (tr.phase === 0 && !lgSeen.has(id)) {
+        // the drone took off (or died) this frame → send the empty truck home
+        tr.phase = 1; tr.t = 0; tr.sx = tr.x; tr.sz = tr.z; tr.tx = tr.x; tr.tz = tr.z - 6;
+        let best = Infinity;
+        for (const v of views) { if (v.b && v.o === tr.o) { const d = (v.x - tr.x) ** 2 + (v.z - tr.z) ** 2; if (d < best) { best = d; tr.tx = v.x; tr.tz = v.z; } } }
+        tr.a = Math.atan2(tr.tx - tr.sx, tr.tz - tr.sz);
+      }
+      if (tr.phase === 1) {
+        tr.t += dt / 2.5;                                        // ~2.5s trip home
+        if (tr.t >= 1) { this.launcherTrucks.delete(id); continue; }
+        tr.x = tr.sx + (tr.tx - tr.sx) * tr.t;
+        tr.z = tr.sz + (tr.tz - tr.sz) * tr.t;
+        tr.y = Math.max(this.map.heightAt(tr.x, tr.z), SEA);
+      }
+      const base = 1.25; // a touch bigger than the drone so the truck frames it
+      const scale = base * (tr.phase === 1 ? Math.max(0, 1 - Math.max(0, (tr.t - 0.55) / 0.45)) : 1); // shrink away over the last stretch home
+      if (scale <= 0.02 || lgN >= 256) continue;
+      this.dummy.position.set(tr.x, tr.y + 0.02, tr.z);
+      this.dummy.rotation.set(0, tr.a, 0);
+      this.dummy.scale.setScalar(scale);
+      this.dummy.updateMatrix();
+      this.launcherMesh.setMatrixAt(lgN++, this.dummy.matrix);
+    }
+    this.markInst(this.launcherMesh, lgN);
+
     this.markInst(this.selRing, selN);
     this.markInst(this.selArrow, arrN);
     this.markInst(this.rotorMesh, rotN);

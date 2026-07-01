@@ -27,6 +27,7 @@ export interface Entity {
   wx: number; wz: number; stuckT: number; mvi: number; pathFail: number; // stuck/unreachable detection
   ammo: number; // bombers: shots left this sortie (-1 = unlimited)
   grounded?: boolean; // flyer parked/landed on an airfield (render sits it on the pad)
+  launched?: boolean; // truck-launched drone (Shahed): false while riding its pickup truck, true once it's taken off toward a target
   crashT?: number;    // bomber aloft with no free airfield slot: seconds until it crash-lands
   mag?: number; // missile units: rounds left in the current magazine (refills to def.capacity after reload)
   stance: number; // 0 aggressive (default), 1 hold position
@@ -1828,6 +1829,28 @@ export class Sim {
       if (def.payload && u.orders.length === 0) u.orders.push({ k: 'park' });
     }
 
+    // truck-launched drone (Shahed): sits GROUNDED on its pickup truck at the factory
+    // until it's given a target. Once it has an attack/force order it "launches" — from
+    // then on it behaves as a normal airborne kamikaze (takes off, flies in, dives). The
+    // pickup truck + take-off/return is drawn client-side (view flag v.lg); no truck entity.
+    if (def.truckLaunch && !u.launched) {
+      const cur = u.orders[0];
+      if (cur && (cur.k === 'attack' || cur.k === 'force')) {
+        u.launched = true;             // commanded a target — take off, proceed as a flyer
+      } else {
+        u.grounded = true;             // still riding the truck; wait for a target
+        // auto-acquire: also launch at an enemy that wanders into a wide watch radius, so
+        // AI-owned drones and base defence still work (a target "given" by proximity).
+        u.reactCd -= TICK;
+        if (u.reactCd <= 0) {
+          u.reactCd = 0.5;
+          const tgt = this.findEnemy(u, def.range * 2.5);
+          if (tgt) { u.orders = [{ k: 'attack', tgt: tgt.id }]; u.launched = true; }
+        }
+        if (!u.launched) return;
+      }
+    }
+
     // naval self-rescue: a ship that ends up on a non-water cell (shoved into the
     // coast, or spawned at a tight shore) can't path out under sea rules — ease it
     // straight back to the nearest open water before doing anything else
@@ -3077,6 +3100,7 @@ export class Sim {
       } else {
         if (e.stance) v.st = e.stance;
         if (UNITS[e.type]?.fly && e.grounded) v.gr = 1; // bomber landed/parked on an airfield
+        if (UNITS[e.type]?.truckLaunch && !e.launched) v.lg = 1; // truck-launched drone still riding its pickup (render: on the truck, not aloft)
         if (e.fortified) v.fo = 1;
         if (e.fortT > 0) v.ft = e.fortGoal ? 1 : 2; // 1 = digging in, 2 = packing up
         if (UNITS[e.type]?.cloak || (UNITS[e.type]?.stealthTech && this.players[e.owner]?.tech?.stealth)) v.ck = 1;

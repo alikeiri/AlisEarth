@@ -4,7 +4,7 @@ export const TICK = 0.1;            // seconds per sim tick (10 Hz)
 export const TICKS_PER_SEC = 10;
 // bump whenever map generation or sim logic changes in a way that breaks
 // replay reproduction (same seed must produce the same game to replay it)
-export const SIM_VERSION = 16; // v16: Power Plants added to SPACING_EXEMPT — they pack tightly with no gap (changes valid placements vs v15)
+export const SIM_VERSION = 17; // v17: Shahed builds a volley of 3 (was 5) and is truck-launched — spawns grounded on a pickup truck until given a target (changes unit count + air behaviour vs v16)
 // buildings exempt from the placement spacing rule: walls and tank barriers (packed
 // tightly into continuous lines) plus Power Plants (players want to pack them into a
 // compact power farm with no gaps). Everything else — including base defences — needs
@@ -49,6 +49,7 @@ export interface UnitDef {
   cloak?: boolean;                               // stealth: low detection range to the enemy
   internal?: boolean;                            // not buildable from a sidebar
   kamikaze?: boolean;                            // one-way: explodes on contact (dmg = blast)
+  truckLaunch?: boolean;                          // drone rides a pickup truck at the factory until given a target, then takes off (render-only launcher)
   bombTruck?: boolean;                           // suicide truck: ground contact fireball + sets buildings ablaze
   missile?: boolean;                             // built at the silo, stored there, launched at a map position
   blastR?: number;                               // missile blast radius
@@ -107,7 +108,7 @@ export const UNITS: Record<string, UnitDef> = {
   msldrone: { name: 'Missile Drone', cost: 1500, hp: 120, speed: 2.4, range: 7.0, dmg: 45, rof: 0.5, builtAt: 'dronefac', buildTime: 15, kind: 'air', fly: true, capacity: 5, reload: 3 },
   // Iran signature: Shahed loitering munitions — cheap one-way suicide drones built
   // (and launched) in volleys of 5. Fragile; dive into the target and detonate.
-  shahed: { name: 'Shahed', cost: 650, hp: 45, speed: 4.6, range: 4.0, dmg: 130, rof: 1, builtAt: 'dronefac', buildTime: 10, kind: 'air', fly: true, alt: 2.5, kamikaze: true, faction: 'iran', volley: 5 },
+  shahed: { name: 'Shahed', cost: 650, hp: 45, speed: 4.6, range: 4.0, dmg: 130, rof: 1, builtAt: 'dronefac', buildTime: 10, kind: 'air', fly: true, alt: 2.5, kamikaze: true, truckLaunch: true, faction: 'iran', volley: 3 },
   mlrs:   { name: 'MLRS',         cost: 1600, hp: 170, speed: 1.6, range: 13.0, dmg: 66, rof: 0.5, builtAt: 'factory',  buildTime: 16, kind: 'veh', capacity: 6, reload: 7 }, // rocket artillery (all nations): fires a 6-rocket salvo in quick succession (rof 0.5s), then a medium reload (7s)
   // ARTILLERY LINE — long range + area splash to break up massed pushes. Every
   // nation fields BOTH an infantry and a vehicle version of the mortar (anti-
