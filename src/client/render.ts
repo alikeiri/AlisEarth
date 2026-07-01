@@ -1163,7 +1163,8 @@ export class Renderer {
   private cruiseY = 12; // constant flight altitude (set from the map's tallest terrain in buildTerrain)
   private rampAnim = new Map<number, number>();     // unit id → seconds left of the "drive down the ramp" descent
   private flyAlt = new Map<number, number>();        // flyer id → altitude factor (0 = landed on pad, 1 = cruise) for smooth take-off/landing
-  private launcherMesh!: THREE.InstancedMesh;        // pickup trucks carrying Shaheds pre-launch (render-only launcher)
+  private launcherMesh: THREE.InstancedMesh | null = null; // pickup trucks carrying Shaheds pre-launch — reuses the ENGINEER model, built lazily once that GLB loads
+  private launcherTop = 0.9;                          // engineer-model height, for seating the drone on the truck bed
   private launcherTrucks = new Map<number, { x: number; z: number; y: number; a: number; o: number; phase: number; t: number; sx: number; sz: number; tx: number; tz: number; seen: number }>(); // drone id → its pickup truck (phase 0 = parked under the drone, 1 = driving home + shrinking away)
   private prevVeh = new Set<number>();              // ground-vehicle ids seen last frame (to detect freshly-built ones)
   private fogTex: THREE.DataTexture | null = null;
@@ -1575,20 +1576,8 @@ export class Renderer {
     );
     this.radarDishMesh.frustumCulled = false; this.radarDishMesh.castShadow = true; this.radarDishMesh.count = 0;
     this.scene.add(this.radarDishMesh);
-
-    // pickup truck that carries a Shahed pre-launch (procedural: flatbed + cab + wheels,
-    // nose toward +Z to match the unit heading convention). Render-only launcher.
-    {
-      const tp: THREE.BufferGeometry[] = [];
-      const bed = new THREE.BoxGeometry(0.55, 0.22, 1.15); bed.translate(0, 0.30, -0.06); tp.push(bed);
-      const cab = new THREE.BoxGeometry(0.5, 0.32, 0.42); cab.translate(0, 0.52, 0.36); tp.push(cab);
-      for (const [wx, wz] of [[-0.29, 0.42], [0.29, 0.42], [-0.29, -0.42], [0.29, -0.42]]) {
-        const w = new THREE.CylinderGeometry(0.14, 0.14, 0.12, 8); w.rotateZ(Math.PI / 2); w.translate(wx, 0.14, wz); tp.push(w);
-      }
-      this.launcherMesh = new THREE.InstancedMesh(mergeGeometries(tp)!, new THREE.MeshStandardMaterial({ color: 0xbcae78, roughness: 0.75, metalness: 0.12, emissive: 0x2a2416, emissiveIntensity: 0.5 }), 256);
-      this.launcherMesh.frustumCulled = false; this.launcherMesh.castShadow = true; this.launcherMesh.count = 0;
-      this.scene.add(this.launcherMesh);
-    }
+    // (the Shahed pickup-truck launcher reuses the ENGINEER model — built lazily in
+    //  ensureLauncherMesh() once that GLB has loaded into unitParts)
 
     this.resize();
   }
@@ -3078,6 +3067,25 @@ export class Renderer {
     if (ic) { ic.clearUpdateRanges(); ic.addUpdateRange(0, count * 3); ic.needsUpdate = true; }
   }
 
+  // build the Shahed pickup-truck launcher from the ENGINEER model once that GLB has
+  // loaded (reuses its geometry, so the truck IS the engineer vehicle). false until ready.
+  private ensureLauncherMesh(): boolean {
+    const ep = this.unitParts['engineer'];
+    const geo = ep && ep[0] && ep[0].mesh.geometry;
+    if (!geo) return false;
+    if (this.launcherMesh && this.launcherMesh.geometry === geo) return true; // already built from the current engineer geometry
+    // (re)build — the engineer GLB may have swapped its geometry in after we first built
+    // from the procedural placeholder; rebuild so the truck IS the loaded engineer model.
+    if (this.launcherMesh) this.scene.remove(this.launcherMesh);
+    geo.computeBoundingBox();
+    this.launcherTop = (geo.boundingBox && isFinite(geo.boundingBox.max.y)) ? geo.boundingBox.max.y : 0.9;
+    const mat = new THREE.MeshStandardMaterial({ color: 0x9a9068, roughness: 0.8, metalness: 0.15 });
+    this.launcherMesh = new THREE.InstancedMesh(geo, mat, 256);
+    this.launcherMesh.frustumCulled = false; this.launcherMesh.castShadow = true; this.launcherMesh.count = 0;
+    this.scene.add(this.launcherMesh);
+    return true;
+  }
+
   updateViews(views: any[], selection: Set<number>, dt: number, lowPowerOwners?: Set<number>) {
     const counts: Record<string, number> = {};
     const lgSeen = new Set<number>(); // truck-launched drones still grounded THIS frame (their pickup stays parked); any launcher truck not in here has launched → drives home
@@ -3280,7 +3288,7 @@ export class Renderer {
           // flyAlt to 0 so the instant it launches it eases UP (takes off) from the ground.
           // The truck under it is registered here + drawn/animated in the launcher pass.
           lgSeen.add(v.i);
-          y = gy + 0.64;                    // sit on the truck bed (truck drawn at 1.5x below)
+          y = gy + this.launcherTop + 0.05; // sit on top of the engineer-model truck
           this.flyAlt.set(v.i, 0);
           let tr = this.launcherTrucks.get(v.i);
           if (!tr) { tr = { x: v.x, z: v.z, y: gy, a: f.a, o: v.o, phase: 0, t: 0, sx: v.x, sz: v.z, tx: v.x, tz: v.z, seen: this.time }; this.launcherTrucks.set(v.i, tr); }
@@ -3453,9 +3461,10 @@ export class Renderer {
         for (const part of ps) this.markInst(part.mesh, dcs[k] || 0);
       });
     }
-    // truck-launched drone pickups: parked trucks sit under their grounded (v.lg) drones
-    // (registered in the flyer block); once a drone launches, its truck drives to the
-    // nearest friendly building and shrinks away. Render-only.
+    // truck-launched drone pickups (reuse the ENGINEER model): parked trucks sit under
+    // their grounded (v.lg) drones; once a drone launches, its truck drives to the nearest
+    // friendly building and shrinks away. Built lazily once the engineer GLB has loaded.
+    const launcherReady = this.ensureLauncherMesh();
     let lgN = 0;
     for (const [id, tr] of this.launcherTrucks) {
       if (tr.phase === 0 && !lgSeen.has(id)) {
@@ -3472,16 +3481,16 @@ export class Renderer {
         tr.z = tr.sz + (tr.tz - tr.sz) * tr.t;
         tr.y = Math.max(this.map.heightAt(tr.x, tr.z), SEA);
       }
-      const base = 1.5; // clearly bigger than the drone so the pickup reads under it
-      const scale = base * (tr.phase === 1 ? Math.max(0, 1 - Math.max(0, (tr.t - 0.55) / 0.45)) : 1); // shrink away over the last stretch home
-      if (scale <= 0.02 || lgN >= 256) continue;
+      if (!launcherReady || lgN >= 256) continue;
+      const scale = tr.phase === 1 ? Math.max(0, 1 - Math.max(0, (tr.t - 0.55) / 0.45)) : 1; // engineer-sized; shrink away over the last stretch home
+      if (scale <= 0.02) continue;
       this.dummy.position.set(tr.x, tr.y + 0.02, tr.z);
       this.dummy.rotation.set(0, tr.a, 0);
       this.dummy.scale.setScalar(scale);
       this.dummy.updateMatrix();
-      this.launcherMesh.setMatrixAt(lgN++, this.dummy.matrix);
+      this.launcherMesh!.setMatrixAt(lgN++, this.dummy.matrix);
     }
-    this.markInst(this.launcherMesh, lgN);
+    if (launcherReady) this.markInst(this.launcherMesh!, lgN);
 
     this.markInst(this.selRing, selN);
     this.markInst(this.selArrow, arrN);

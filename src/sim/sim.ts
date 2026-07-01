@@ -1836,10 +1836,18 @@ export class Sim {
     if (def.truckLaunch && !u.launched) {
       const cur = u.orders[0];
       if (cur && (cur.k === 'attack' || cur.k === 'force')) {
-        u.launched = true;             // only an actual TARGET launches it — otherwise it stays parked on its truck (so a rally/move never makes it float off before you attack)
+        u.launched = true;             // an actual TARGET launches it → take off, proceed as a flyer
       } else {
-        u.grounded = true;             // still riding the truck; wait for a target
-        // auto-acquire: also launch at an enemy that wanders into a wide watch radius, so
+        u.grounded = true;             // still riding the truck
+        if (cur && cur.k === 'move') {
+          // MOVE = drive the loaded launcher (truck + drone) to the spot on the ground,
+          // still parked/grounded — it only takes off when you give it a target.
+          const dx = cur.x! - u.x, dz = cur.z! - u.z, d = Math.hypot(dx, dz);
+          if (d < 0.5) { u.orders.shift(); }
+          else { const sp = 2.5 * TICK * this.players[u.owner].fac.speedMul; u.x += dx / d * sp; u.z += dz / d * sp; u.hx = dx / d; u.hz = dz / d; }
+          return;
+        }
+        // idle: auto-acquire an enemy that wanders into a wide watch radius → launch, so
         // AI-owned drones and base defence still work (a target "given" by proximity).
         u.reactCd -= TICK;
         if (u.reactCd <= 0) {
