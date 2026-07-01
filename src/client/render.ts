@@ -41,12 +41,12 @@ const MODEL_DEFS: Record<string, { file: string; size: number; axis: 'l' | 'h'; 
   strike:    { file: 'drone',     size: 1.25, axis: 'l', ry: 0 },
   msldrone:  { file: 'drone',     size: 1.60, axis: 'l', ry: 0 },
   minedrone: { file: 'drone',     size: 0.80, axis: 'l', ry: 0, tint: 0xd9a521 }, // small amber mine-clearing rover
-  shahed:    { file: 'shahed-136', size: 1.50, axis: 'l', ry: 0 }, // one-way kamikaze drone (Shahed-136 model)
+  shahed:    { file: 'shahed-136', size: 0.65, axis: 'l', ry: Math.PI }, // one-way kamikaze drone (Shahed-136); ~1/3 of a fighter, nose faces travel
   fighter:   { file: 'fighter',   size: 1.70, axis: 'l', ry: Math.PI }, // delta wing reads wider at the nose third
   // bomber: wingspan exceeds fuselage length, so the long-axis heuristic picks
   // the wings — quarter-turn nudge puts the prop forward
   bomber:    { file: 'bomber',    size: 2.10, axis: 'l', ry: -Math.PI / 2 },
-  dbomber:   { file: 'shahed-136', size: 2.10, axis: 'l', ry: 0 }, // one-way kamikaze drone (Shahed-136 model)
+  dbomber:   { file: 'shahed-136', size: 2.10, axis: 'l', ry: Math.PI }, // one-way kamikaze drone (Shahed-136 model); nose faces travel
   heli:      { file: 'apache',    size: 1.70, axis: 'l', ry: 0, spin: 8 }, // Apache Gunship; its own "Rotor Rotation" clip baked into an 8-frame spin
   airtransport: { file: 'blackhawk', size: 2.10, axis: 'l', ry: 0 }, // UH-60 Black Hawk transport (static GLB — no rotor anim)
   helidrone: { file: 'helidrone', size: 1.20, axis: 'l', ry: 0 },
@@ -3255,6 +3255,20 @@ export class Renderer {
         let f = this.flyAlt.get(v.i); if (f === undefined) f = tgt;
         f += (tgt - f) * Math.min(1, dt * 1.8); this.flyAlt.set(v.i, f);
         y = padY + (cruise - padY) * f + Math.sin(this.time * 2.5 + v.i * 1.7) * 0.12 * f; // bob only while airborne
+        // kamikaze terminal dive: as a one-way drone closes on the target it's attacking,
+        // drop from cruise down toward the target so it visibly dives IN and explodes on
+        // contact (the impact boom is emitted at the target by the sim) instead of poofing
+        // at cruise altitude. Render-only — the sim path is unchanged.
+        if (md.kamikaze && v.wp && v.wp[0] && v.wp[0].a === 1) {
+          const tw = v.wp[0];
+          const dist = Math.hypot(tw.x - v.x, tw.z - v.z);
+          const DIVE = 5;                                                 // begin the dive within 5 tiles
+          if (dist < DIVE) {
+            const k = 1 - dist / DIVE;                                    // 0 far → 1 at the target
+            const impactY = Math.max(this.map.heightAt(tw.x, tw.z), SEA) + 0.4;
+            y += (impactY - y) * (k * k);                                 // ease down, steepening as it nears
+          }
+        }
         v.fy = y;
       }
       else if (md?.move === 'sea') {
