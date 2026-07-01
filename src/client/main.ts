@@ -112,6 +112,7 @@ function simViews(sim: Sim, a: number): any[] {
       { const cap = UNITS[e.type]?.cargo; if (cap) v.cg = Math.max(0, Math.min(1, e.cargo / cap)); } // harvester/oil-miner fill %
       if (e.ammo >= 0 && (UNITS[e.type]?.payload || 0) > 0) v.am = e.ammo;          // bomber bombs left this sortie
       if (UNITS[e.type]?.fly && (e as any).grounded) v.gr = 1;                      // bomber landed/parked on an airfield (render sits it on the pad)
+      if (UNITS[e.type]?.truckLaunch && !(e as any).launched) v.lg = 1;             // truck-launched drone still riding its pickup (render draws the truck + sits it on the bed)
       if (e.mineStock !== undefined && (UNITS[e.type]?.mines || 0) > 0) v.mn = e.mineStock; // engineer mines left
       if (e.wpLoop && e.wpLoop.length) v.lp = 1;                          // waypoint repeat on
       if (e.orders && e.orders.length) {                                  // remaining waypoints (for the path overlay)
@@ -350,6 +351,7 @@ class ReplayGame implements GameLike {
       } else {
         if (e.fortified) v.fo = 1;
         if (UNITS[e.type]?.fly && (e as any).grounded) v.gr = 1; // bomber landed/parked
+        if (UNITS[e.type]?.truckLaunch && !(e as any).launched) v.lg = 1; // truck-launched drone on its pickup
         if (e.cd > 0 && UNITS[e.type]?.dmg > 0) {
           v.fr = 1;
           if (e.aimX !== undefined) { v.ax = e.aimX; v.az = e.aimZ; }
