@@ -4570,6 +4570,7 @@ if (!glOk) {
   renderAiIntel();
   syncIntelFromServer();
   showBuildInfo();
+  showVersionBadge();
   // swap every static emoji in the page (menu buttons, command bar, audio toggles,
   // faction flags) for bundled Twemoji SVGs so icons render on browsers/OSes whose
   // system emoji fonts are missing or monochrome (dynamic UI is converted at source)
@@ -4612,6 +4613,23 @@ function startWithModels(start: () => void) {
 
 // version stamp on the menu: revision auto-increments with every commit; the
 // hash links the running build to its exact source on GitHub
+// always-on-screen build badge (menu AND in-match) so a stale cached bundle is obvious:
+// the number here must match the version announced after each change.
+function showVersionBadge() {
+  let el = document.getElementById('verBadge');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'verBadge';
+    el.style.cssText = 'position:fixed;top:34px;left:8px;z-index:9999;pointer-events:none;'
+      + 'background:rgba(8,12,16,0.72);border:1px solid #2c3e50;border-radius:4px;padding:2px 8px;'
+      + 'font:700 12px "Segoe UI",monospace;color:#7df0c0;text-shadow:0 1px 2px #000';
+    document.body.appendChild(el);
+  }
+  const rev = (typeof __APP_REV__ !== 'undefined' && __APP_REV__) || '0';
+  const hash = (typeof __APP_HASH__ !== 'undefined' && __APP_HASH__) || 'dev';
+  el.textContent = `BUILD v${rev} · ${hash}`;
+}
+
 function showBuildInfo() {
   const el = document.getElementById('buildInfo');
   if (!el) return;
