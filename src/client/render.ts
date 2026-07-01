@@ -126,7 +126,7 @@ export async function preloadModels(onProgress?: (done: number, total: number) =
   await Promise.all(list.map(f => loadGLB(f).catch(() => null).then(() => { onProgress?.(++done, list.length); })));
 }
 
-const MAX_INST = 360;
+const MAX_INST = 1024; // per-type instance cap (raised from 360 so big swarms — e.g. mass Shaheds — don't hit an invisible ceiling; per-frame GPU upload is bounded to the live count via updateRanges, so the larger buffer is ~free)
 const MAX_TRACER = 256;
 // War Factory model orientation: rotate so the exit ramp faces +Z (where new
 // vehicles spawn). Flip by Math.PI if the ramp ends up facing the wrong way.
@@ -3051,6 +3051,17 @@ export class Renderer {
   }
 
   // views: array of {i,o,t,b,x,z,h,m,pr,...}; selection: Set of ids
+  // set an instanced mesh's live count and flag ONLY the used range for GPU upload, so
+  // per-frame bandwidth scales with actual instances (not the full MAX_INST buffer) —
+  // this keeps a large MAX_INST cheap and stops empty types uploading whole buffers.
+  private markInst(mesh: THREE.InstancedMesh, count: number) {
+    mesh.count = count;
+    const im = mesh.instanceMatrix as any;
+    im.clearUpdateRanges(); im.addUpdateRange(0, count * 16); im.needsUpdate = true;
+    const ic = mesh.instanceColor as any;
+    if (ic) { ic.clearUpdateRanges(); ic.addUpdateRange(0, count * 3); ic.needsUpdate = true; }
+  }
+
   updateViews(views: any[], selection: Set<number>, dt: number, lowPowerOwners?: Set<number>) {
     const counts: Record<string, number> = {};
     for (const t in this.unitParts) counts[t] = 0;
@@ -3398,42 +3409,25 @@ export class Renderer {
 
     for (const t in this.unitParts) {
       if (this.posedParts[t]) continue; // counted per pose below
-      for (const part of this.unitParts[t]) {
-        part.mesh.count = counts[t] || 0;
-        part.mesh.instanceMatrix.needsUpdate = true;
-        if (part.mesh.instanceColor) part.mesh.instanceColor.needsUpdate = true;
-      }
+      for (const part of this.unitParts[t]) this.markInst(part.mesh, counts[t] || 0);
     }
     for (const t in this.posedParts) {
       const pcs = this.poseCounts[t];
       this.posedParts[t].forEach((ps, k) => {
-        for (const part of ps) {
-          part.mesh.count = pcs[k] || 0;
-          part.mesh.instanceMatrix.needsUpdate = true;
-          if (part.mesh.instanceColor) part.mesh.instanceColor.needsUpdate = true;
-        }
+        for (const part of ps) this.markInst(part.mesh, pcs[k] || 0);
       });
     }
     for (const t in this.deathParts) {
       const dcs = this.deathCounts[t] || [];
       this.deathParts[t].forEach((ps, k) => {
-        for (const part of ps) {
-          part.mesh.count = dcs[k] || 0;
-          part.mesh.instanceMatrix.needsUpdate = true;
-          if (part.mesh.instanceColor) part.mesh.instanceColor.needsUpdate = true;
-        }
+        for (const part of ps) this.markInst(part.mesh, dcs[k] || 0);
       });
     }
-    this.selRing.count = selN;
-    this.selRing.instanceMatrix.needsUpdate = true;
-    this.selArrow.count = arrN;
-    this.selArrow.instanceMatrix.needsUpdate = true;
-    this.rotorMesh.count = rotN;
-    this.sandbagMesh.count = bagN;
-    this.sandbagMesh.instanceMatrix.needsUpdate = true;
-    this.rotorMesh.instanceMatrix.needsUpdate = true;
-    this.radarDishMesh.count = dishN;
-    this.radarDishMesh.instanceMatrix.needsUpdate = true;
+    this.markInst(this.selRing, selN);
+    this.markInst(this.selArrow, arrN);
+    this.markInst(this.rotorMesh, rotN);
+    this.markInst(this.sandbagMesh, bagN);
+    this.markInst(this.radarDishMesh, dishN);
 
     // rally marker for the selected production building
     if (rallyV) {
