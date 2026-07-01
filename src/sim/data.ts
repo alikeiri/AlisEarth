@@ -4,7 +4,7 @@ export const TICK = 0.1;            // seconds per sim tick (10 Hz)
 export const TICKS_PER_SEC = 10;
 // bump whenever map generation or sim logic changes in a way that breaks
 // replay reproduction (same seed must produce the same game to replay it)
-export const SIM_VERSION = 17; // v17: Shahed builds a volley of 3 (was 5) and is truck-launched — spawns grounded on a pickup truck until given a target (changes unit count + air behaviour vs v16)
+export const SIM_VERSION = 18; // v18: truck-launched Shahed launches on ANY command (move/patrol too, not just attack/force) so it's commandable (changes air behaviour vs v17)
 // buildings exempt from the placement spacing rule: walls and tank barriers (packed
 // tightly into continuous lines) plus Power Plants (players want to pack them into a
 // compact power farm with no gaps). Everything else — including base defences — needs

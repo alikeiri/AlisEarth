@@ -1585,7 +1585,7 @@ export class Renderer {
       for (const [wx, wz] of [[-0.29, 0.42], [0.29, 0.42], [-0.29, -0.42], [0.29, -0.42]]) {
         const w = new THREE.CylinderGeometry(0.14, 0.14, 0.12, 8); w.rotateZ(Math.PI / 2); w.translate(wx, 0.14, wz); tp.push(w);
       }
-      this.launcherMesh = new THREE.InstancedMesh(mergeGeometries(tp)!, new THREE.MeshStandardMaterial({ color: 0x9a9068, roughness: 0.8, metalness: 0.12 }), 256);
+      this.launcherMesh = new THREE.InstancedMesh(mergeGeometries(tp)!, new THREE.MeshStandardMaterial({ color: 0xbcae78, roughness: 0.75, metalness: 0.12, emissive: 0x2a2416, emissiveIntensity: 0.5 }), 256);
       this.launcherMesh.frustumCulled = false; this.launcherMesh.castShadow = true; this.launcherMesh.count = 0;
       this.scene.add(this.launcherMesh);
     }
@@ -3280,7 +3280,7 @@ export class Renderer {
           // flyAlt to 0 so the instant it launches it eases UP (takes off) from the ground.
           // The truck under it is registered here + drawn/animated in the launcher pass.
           lgSeen.add(v.i);
-          y = gy + 0.52;                    // sit on the truck bed (truck drawn at 1.25x below)
+          y = gy + 0.64;                    // sit on the truck bed (truck drawn at 1.5x below)
           this.flyAlt.set(v.i, 0);
           let tr = this.launcherTrucks.get(v.i);
           if (!tr) { tr = { x: v.x, z: v.z, y: gy, a: f.a, o: v.o, phase: 0, t: 0, sx: v.x, sz: v.z, tx: v.x, tz: v.z, seen: this.time }; this.launcherTrucks.set(v.i, tr); }
@@ -3472,7 +3472,7 @@ export class Renderer {
         tr.z = tr.sz + (tr.tz - tr.sz) * tr.t;
         tr.y = Math.max(this.map.heightAt(tr.x, tr.z), SEA);
       }
-      const base = 1.25; // a touch bigger than the drone so the truck frames it
+      const base = 1.5; // clearly bigger than the drone so the pickup reads under it
       const scale = base * (tr.phase === 1 ? Math.max(0, 1 - Math.max(0, (tr.t - 0.55) / 0.45)) : 1); // shrink away over the last stretch home
       if (scale <= 0.02 || lgN >= 256) continue;
       this.dummy.position.set(tr.x, tr.y + 0.02, tr.z);
