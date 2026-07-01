@@ -1835,8 +1835,8 @@ export class Sim {
     // pickup truck + take-off/return is drawn client-side (view flag v.lg); no truck entity.
     if (def.truckLaunch && !u.launched) {
       const cur = u.orders[0];
-      if (cur && (cur.k === 'attack' || cur.k === 'force' || cur.k === 'move' || cur.k === 'patrol')) {
-        u.launched = true;             // any command (target OR move) launches it — take off, proceed as a flyer
+      if (cur && (cur.k === 'attack' || cur.k === 'force')) {
+        u.launched = true;             // only an actual TARGET launches it — otherwise it stays parked on its truck (so a rally/move never makes it float off before you attack)
       } else {
         u.grounded = true;             // still riding the truck; wait for a target
         // auto-acquire: also launch at an enemy that wanders into a wide watch radius, so
