@@ -695,7 +695,7 @@ class GameClient {
   private cmdFx: { fx: number; fz: number; tx: number; tz: number; t: number; atk: boolean }[] = [];
   private wpTrail: { x: number; z: number; atk: boolean }[] = []; // shift-queued waypoint chain (visual)
   private lastClick = { t: 0, x: 0, y: 0 };
-  private lastGhost: { cx: number; cz: number; ok: boolean } | null = null;
+  private lastGhost: { cx: number; cz: number; ok: boolean; afford?: boolean } | null = null;
   private raf = 0;
   private lastT = 0;
   private frame = 0;
@@ -1456,14 +1456,47 @@ class GameClient {
   }
 
   // compute the building-ghost cell + validity at a screen point
-  private ghostAt(sx: number, sy: number): { cx: number; cz: number; ok: boolean } | null {
+  private ghostAt(sx: number, sy: number): { cx: number; cz: number; ok: boolean; afford: boolean } | null {
     if (!this.ui.placing) return null;
     const g = this.renderer.groundPoint(sx / window.innerWidth, sy / window.innerHeight);
     if (!g) return null;
     const s = BUILDINGS[this.ui.placing].size;
     const cx = Math.max(0, Math.min(W - s, Math.round(g.x - s / 2)));
     const cz = Math.max(0, Math.min(H - s, Math.round(g.z - s / 2)));
-    return { cx, cz, ok: canPlaceClient(this.game.map, this.lastViews, this.game.me, this.ui.placing, cx, cz) };
+    const afford = this.canAffordPlacing();
+    // a building you can't afford isn't placeable (the sim rejects it too) → red ghost + reason
+    const ok = afford && canPlaceClient(this.game.map, this.lastViews, this.game.me, this.ui.placing, cx, cz);
+    return { cx, cz, ok, afford };
+  }
+
+  // can the player currently afford the building being placed? matches the build menu's
+  // cost (def.cost * faction.costMul) and the sim's place-time credit check.
+  private canAffordPlacing(): boolean {
+    const type = this.ui.placing; if (!type) return true;
+    const pl = this.game.players?.()[this.game.me];
+    const cost = Math.round(BUILDINGS[type].cost * ((FACTIONS as any)[pl?.f]?.costMul ?? 1));
+    return (pl?.c ?? 1e9) >= cost;
+  }
+
+  // floating "⚠ Insufficient funds" label near the cursor while placing (msg=null hides it)
+  private placeMsgEl: HTMLDivElement | null = null;
+  private placeMsgShown = false;
+  private placeReason(msg: string | null) {
+    if (!msg) {
+      if (this.placeMsgShown && this.placeMsgEl) { this.placeMsgEl.style.display = 'none'; this.placeMsgShown = false; }
+      return;
+    }
+    if (!this.placeMsgEl) {
+      const el = document.createElement('div');
+      el.style.cssText = 'position:fixed;z-index:41;pointer-events:none;background:rgba(120,20,20,0.92);'
+        + 'border:1px solid #ff6b5a;border-radius:5px;padding:4px 10px;font:600 13px "Segoe UI",sans-serif;'
+        + 'color:#ffdad5;box-shadow:0 2px 8px rgba(0,0,0,.55);white-space:nowrap';
+      document.body.appendChild(el); this.placeMsgEl = el;
+    }
+    this.placeMsgEl.textContent = '⚠ ' + msg;
+    this.placeMsgEl.style.left = (this.mouse.x + 16) + 'px';
+    this.placeMsgEl.style.top = (this.mouse.y - 10) + 'px';
+    this.placeMsgEl.style.display = 'block'; this.placeMsgShown = true;
   }
 
   // touch: tap selects own units, or issues a command when something's selected
@@ -2477,15 +2510,21 @@ class GameClient {
     }
 
     // building ghost (single) or wall/barrier drag-line preview
+    let placeReasonMsg: string | null = null; // floating reason near the cursor (e.g. insufficient funds)
     if (this.ui.placing && this.lineStart) {
       const gh = this.ghostAt(this.mouse.x, this.mouse.y);
       const end = gh ? { cx: gh.cx, cz: gh.cz } : this.lineStart;
       this.lineCells = this.computeLine(this.ui.placing, this.lineStart, end);
       this.renderer.setGhost(false, this.ui.placing, 0, 0, false); // hide the single ghost
       this.lastGhost = null;
+      if (gh && !gh.afford) placeReasonMsg = 'Insufficient funds';
     } else if (this.ui.placing) {
       const gh = this.ghostAt(this.mouse.x, this.mouse.y);
-      if (gh) { this.lastGhost = gh; this.renderer.setGhost(true, this.ui.placing, gh.cx, gh.cz, gh.ok); }
+      if (gh) {
+        this.lastGhost = gh;
+        this.renderer.setGhost(true, this.ui.placing, gh.cx, gh.cz, gh.ok);
+        if (!gh.afford) placeReasonMsg = 'Insufficient funds';
+      }
     } else if (this.oilHover && this.oilCell) {
       // engineer hovering a claimable oil well → preview the Oil Rig footprint there
       this.lineCells = [];
@@ -2498,6 +2537,7 @@ class GameClient {
       this.lastGhost = null;
       this.renderer.setGhost(false);
     }
+    this.placeReason(placeReasonMsg);
 
     const _r0 = this.perfOn ? performance.now() : 0;
     prof.begin('render.3d'); this.renderer.render(dt); prof.end('render.3d');
