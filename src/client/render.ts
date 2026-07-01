@@ -134,7 +134,8 @@ const FACTORY_RY = 0;
 const MAX_PART = 700;
 const MAX_SMOKE = 700;
 // industrial buildings that emit ambient chimney/stack smoke while powered + built
-const CHIMNEY_TYPES = new Set(['power', 'refinery', 'factory']);
+// (power plants excluded per request — no smoke plume above them)
+const CHIMNEY_TYPES = new Set(['refinery', 'factory']);
 const WHITE = new THREE.Color(0xffffff);
 
 // ---------- procedural texture generation ----------
