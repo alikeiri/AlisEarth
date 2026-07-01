@@ -1094,6 +1094,9 @@ export class Renderer {
   private oilMesh!: THREE.InstancedMesh;
   private roadMesh!: THREE.InstancedMesh;
   private ghost: THREE.Mesh;
+  private ghostModel: THREE.Group | null = null;   // translucent clone of the ACTUAL building model (GLB buildings) so the placement preview shows the real footprint/size
+  private ghostModelType = '';                      // which type ghostModel currently holds (rebuild only on change)
+  private ghostMat!: THREE.MeshBasicMaterial;       // shared translucent tint for the model ghost (green ok / red blocked)
   private tracerGeo: THREE.BufferGeometry;
   private tracerPos: Float32Array;
   private tracers: FxTracer[] = [];
@@ -1403,6 +1406,9 @@ export class Renderer {
     this.ghost = new THREE.Mesh(new THREE.BoxGeometry(1, 0.8, 1), new THREE.MeshBasicMaterial({ color: 0x57d977, transparent: true, opacity: 0.4, depthWrite: false }));
     this.ghost.visible = false;
     this.scene.add(this.ghost);
+    // shared translucent tint for the model-ghost (a live clone of the real building
+    // model, so the placement preview shows the building's actual footprint/size)
+    this.ghostMat = new THREE.MeshBasicMaterial({ color: 0x57d977, transparent: true, opacity: 0.45, depthWrite: false });
 
     // rally point marker: flag pole + team pennant + line from the building
     this.rallyFlag = new THREE.Group();
@@ -2630,15 +2636,35 @@ export class Renderer {
 
   // ---- per-frame state ----
   setGhost(active: boolean, type?: string, cx?: number, cz?: number, ok?: boolean) {
-    this.ghost.visible = active;
-    if (!active || !type) return;
+    if (!active || !type) { this.ghost.visible = false; if (this.ghostModel) this.ghostModel.visible = false; return; }
     const s = BUILDINGS[type].size;
-    this.ghost.scale.set(s, 1, s);
-    // lift the shipyard ghost to the water surface so it's visible over the sea
+    const col = ok ? 0x57d977 : 0xff5043;
     const baseY = this.map.heightAt(cx! + s / 2, cz! + s / 2);
+    // lift the shipyard ghost to the water surface so it's visible over the sea
     const gy = type === 'shipyard' ? Math.max(baseY, SEA - 0.05) : baseY;
-    this.ghost.position.set(cx! + s / 2, gy + 0.4, cz! + s / 2);
-    (this.ghost.material as THREE.MeshBasicMaterial).color.setHex(ok ? 0x57d977 : 0xff5043);
+    const proto = this.bldgProtos[type];
+    if (proto) {
+      // model ghost — a translucent clone of the REAL building model so the preview
+      // shows the building's actual footprint/size (the models overhang their logical
+      // cell footprint, so a plain size-cube under-sold how much space they take).
+      if (this.ghostModelType !== type) {
+        if (this.ghostModel) this.scene.remove(this.ghostModel);
+        const g = proto.clone(true);
+        g.traverse(o => { const m = o as THREE.Mesh; if (m.isMesh) m.material = this.ghostMat; }); // shared tint (rebuilt only on type change)
+        this.ghostModel = g; this.ghostModelType = type; this.scene.add(g);
+      }
+      this.ghostMat.color.setHex(col);
+      this.ghostModel!.visible = true;
+      this.ghostModel!.position.set(cx! + s / 2, gy, cz! + s / 2); // grounded + centred exactly like the placed building
+      this.ghost.visible = false;
+    } else {
+      // procedural building (no GLB model): fall back to the sized footprint box
+      if (this.ghostModel) this.ghostModel.visible = false;
+      this.ghost.visible = true;
+      this.ghost.scale.set(s, 1, s);
+      this.ghost.position.set(cx! + s / 2, gy + 0.4, cz! + s / 2);
+      (this.ghost.material as THREE.MeshBasicMaterial).color.setHex(col);
+    }
   }
 
   setFormationPath(pts: { x: number; z: number }[] | null, color = 0x5ab8ff) {
