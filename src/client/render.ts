@@ -3079,7 +3079,7 @@ export class Renderer {
     if (this.launcherMesh) this.scene.remove(this.launcherMesh);
     geo.computeBoundingBox();
     this.launcherTop = (geo.boundingBox && isFinite(geo.boundingBox.max.y)) ? geo.boundingBox.max.y : 0.9;
-    const mat = new THREE.MeshStandardMaterial({ color: 0x9a9068, roughness: 0.8, metalness: 0.15 });
+    const mat = new THREE.MeshStandardMaterial({ color: 0x151515, roughness: 0.7, metalness: 0.2 }); // black pickup
     this.launcherMesh = new THREE.InstancedMesh(geo, mat, 256);
     this.launcherMesh.frustumCulled = false; this.launcherMesh.castShadow = true; this.launcherMesh.count = 0;
     this.scene.add(this.launcherMesh);
