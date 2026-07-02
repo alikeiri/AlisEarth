@@ -731,12 +731,20 @@ export function genMap(seed: number, nPlayers: number): GameMap {
       for (const c of oreCenters) if ((c.x - cx) * (c.x - cx) + (c.z - cz) * (c.z - cz) < 8 * 8) return false;
       return true;
     };
-    // raise a cell's four corner nodes to a shoal height + reblock so it stops being water
+    // raise a rounded, tapering sandbank (a small dome) so it reads as a SMOOTH shoal
+    // rather than a single blocky cell — larger, with a soft shore that fades back to water.
     const raiseShoal = (cx: number, cz: number) => {
-      if (!m.inB(cx, cz)) return;
-      const i = cz * (W + 1) + cx;
-      for (const n of [i, i + 1, i + W + 1, i + W + 2]) m.hN[n] = Math.max(m.hN[n], SEA + 0.3);
-      recomputeBlocked(cx - 1, cz - 1, cx + 2, cz + 2);
+      const R = 2 + (rng.next() < 0.5 ? 0 : 1);            // radius 2-3 cells (a bit larger)
+      for (let dz = -R; dz <= R; dz++) for (let dx = -R; dx <= R; dx++) {
+        const x = cx + dx, z = cz + dz;
+        if (!m.inB(x, z)) continue;
+        const d = Math.hypot(dx, dz) / (R + 0.6);
+        if (d >= 1) continue;
+        const h = SEA + 0.4 * (1 - d * d);                 // dome: peak at the centre, tapers to sea at the rim
+        const i = z * (W + 1) + x;
+        for (const n of [i, i + 1, i + W + 1, i + W + 2]) if (m.hN[n] < h) m.hN[n] = h;
+      }
+      recomputeBlocked(cx - R - 1, cz - R - 1, cx + R + 2, cz + R + 2);
     };
     for (let s = 0; s < W * H; s++) {
       if (m.water[s] !== 1 || seenW[s]) continue;
@@ -767,7 +775,6 @@ export function genMap(seed: number, nPlayers: number): GameMap {
         if (cx < 3 || cz < 3 || cx > W - 4 || cz > H - 4) continue;
         if (!farFromSpawnAndOre(cx, cz)) continue;
         raiseShoal(cx, cz);
-        if (rng.next() < 0.5) raiseShoal(cx + (rng.next() < 0.5 ? 1 : -1), cz); // sometimes a 2-cell bar
         made++;
       }
     }

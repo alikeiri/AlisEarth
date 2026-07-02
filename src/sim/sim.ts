@@ -28,6 +28,7 @@ export interface Entity {
   ammo: number; // bombers: shots left this sortie (-1 = unlimited)
   grounded?: boolean; // flyer parked/landed on an airfield (render sits it on the pad)
   launched?: boolean; // truck-launched drone (Shahed): false while riding its pickup truck, true once it's taken off toward a target
+  dispX?: number; dispZ?: number; // "disperse" anchor: where the unit was when X was first held (bounds its jitter so it can't drift away)
   crashT?: number;    // bomber aloft with no free airfield slot: seconds until it crash-lands
   mag?: number; // missile units: rounds left in the current magazine (refills to def.capacity after reload)
   stance: number; // 0 aggressive (default), 1 hold position
@@ -791,15 +792,18 @@ export class Sim {
       return;
     }
     if (c.k === 'disperse') {
-      // spread the group out: each unit gets a small random offset from its CURRENT
-      // spot so the formation loosens but stays near where it was. Deterministic (rng),
-      // so lockstep stays in sync. Flyers keep their own movement.
+      // spread the group out around a FIXED anchor — each unit's position when disperse
+      // first started (c.fresh), captured once. Repeated re-issues (X held) keep them
+      // jittering within a bounded radius of that anchor instead of drifting away.
+      // Deterministic (rng) so lockstep stays in sync. Flyers keep their own movement.
+      const MAXRAD = 3.5;
       for (const u of units) {
         if (UNITS[u.type]?.fly) continue;
+        if (c.fresh || u.dispX === undefined) { u.dispX = u.x; u.dispZ = u.z; } // (re)anchor on a fresh hold
         const ang = this.rng.next() * Math.PI * 2;
-        const rad = 1.2 + this.rng.next() * 2.8; // 1.2–4.0 cells from its position
-        const tx = Math.max(0.5, Math.min(W - 0.5, u.x + Math.cos(ang) * rad));
-        const tz = Math.max(0.5, Math.min(H - 0.5, u.z + Math.sin(ang) * rad));
+        const rad = this.rng.next() * MAXRAD;                    // within MAXRAD of the anchor, never further
+        const tx = Math.max(0.5, Math.min(W - 0.5, u.dispX + Math.cos(ang) * rad));
+        const tz = Math.max(0.5, Math.min(H - 0.5, u.dispZ + Math.sin(ang) * rad));
         u.orders = [{ k: 'move', x: tx, z: tz }]; u.path = null; u.cmdT = this.tickN;
       }
       return;

@@ -645,6 +645,7 @@ class GameClient {
   private byId = new Map<number, any>();
   private keys = new Set<string>();
   private xDisp = false; // true while X is HELD → the rAF loop re-issues "disperse" each interval (reset on keyup)
+  private xDispAnchored = false; // set once the first disperse of a hold has sent fresh=1 (anchors the jitter); reset on keyup
   private mouse = {
     x: 0, y: 0, in: false, downX: 0, downY: 0, dragging: false, lDown: false,
     rDown: false, rDownX: 0, rDownY: 0, rDragging: false,
@@ -985,7 +986,7 @@ class GameClient {
         }
       }
     });
-    on(window, 'keyup', (e: KeyboardEvent) => { this.keys.delete(e.code); if (e.code === 'KeyX') this.xDisp = false; });
+    on(window, 'keyup', (e: KeyboardEvent) => { this.keys.delete(e.code); if (e.code === 'KeyX') { this.xDisp = false; this.xDispAnchored = false; } });
 
     // chat input handles its own keys
     const chatInp = document.getElementById('chatInput') as HTMLInputElement;
@@ -2339,7 +2340,10 @@ class GameClient {
     // Disperse-while-held: as long as X is down, re-issue 'disperse' ~5x/sec so the selection
     // keeps loosening (each re-issue picks fresh scatter targets in the sim). Deterministic —
     // it only re-sends the existing command through the command stream; keyup clears KeyX + xDisp.
-    if (this.xDisp && this.keys.has('KeyX') && !this.over && this.frame % 12 === 0) this.issueToUnits({ k: 'disperse' });
+    if (this.xDisp && this.keys.has('KeyX') && !this.over && this.frame % 12 === 0) {
+      this.issueToUnits({ k: 'disperse', fresh: this.xDispAnchored ? 0 : 1 }); // first re-issue of the hold anchors the jitter
+      this.xDispAnchored = true;
+    }
 
     // a selected building's stored patrol route shows as a standing yellow line
     const drawingNow = (this.patrolMode && this.patrolDraw && this.mouse.lDown) ||

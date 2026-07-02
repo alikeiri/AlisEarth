@@ -4,7 +4,7 @@ export const TICK = 0.1;            // seconds per sim tick (10 Hz)
 export const TICKS_PER_SEC = 10;
 // bump whenever map generation or sim logic changes in a way that breaks
 // replay reproduction (same seed must produce the same game to replay it)
-export const SIM_VERSION = 20; // v20: truck-launched Shahed — a MOVE order now drives the parked launcher (truck+drone) on the ground; only an attack target makes it take off
+export const SIM_VERSION = 21; // v21: Disperse anchors to each unit's position when X was first held (bounded jitter, no drift); sandbank shoals are rounded domes (smoother + larger)
 // buildings exempt from the placement spacing rule: walls and tank barriers (packed
 // tightly into continuous lines) plus Power Plants (players want to pack them into a
 // compact power farm with no gaps). Everything else — including base defences — needs
