@@ -19,8 +19,8 @@ export const WATER_FRAG = `
   precision highp float;
   varying vec3 vWorld;
   uniform float uTime, uOpacity;
-  uniform vec3 uDeep, uShallow, uSky, uSunDir, uSunCol, uFoam;
-  vec3 uFoam2 = vec3(0,1.0,0.9);
+  uniform vec3 uDeep, uShallow, uSky, uSunDir, uSunCol, uFoam, uHorizon;
+  uniform vec2 uMapMax;
   void main() {
     vec2 p = vWorld.xz;
     // slow domain warp so the wave field churns instead of sliding rigidly
@@ -32,28 +32,34 @@ export const WATER_FRAG = `
     WAVE( 1.0,  1.0, 1.0, 0.95, 0.05)
     WAVE( -1.0,  0.0, 0.5, 0.25, 0.2)
     WAVE( 0.5,  0.5, 0.5, 0.10, 0.1)
-    WAVE(0.92, -0.38, 9.90, 2.00, 0.04)
-    WAVE( 0.70, -0.71, 12.30, 0.80, 0.020)
-    WAVE(-0.20,  0.98, 15.40, 0.40, 0.010)
-    WAVE(-0.92, -0.38, 2.90, 2.10, 0.10)
-    WAVE( 0.70, -0.71, 5.30, 2.80, 0.05)
-    WAVE(-0.20,  0.98, 8.40, 3.40, 0.028)
-    vec3 N = normalize(vec3(-g.x * 0.8, 1.0, -g.y * 0.6));
+    //WAVE( 0.85,  0.52, 0.45, 1.10, 0.55)
+    //WAVE(-0.45,  0.89, 0.90, 0.85, 0.32)
+    //WAVE( 0.30, -0.95, 1.70, 1.50, 0.18)
+    //WAVE(-0.92, -0.38, 2.90, 2.10, 0.10)
+    //WAVE( 0.70, -0.71, 5.30, 2.80, 0.05)
+    //WAVE(-0.20,  0.98, 8.40, 3.40, 0.028)
+    vec3 N = normalize(vec3(-g.x * 0.6, 1.0, -g.y * 0.6));
     vec3 V = normalize(cameraPosition - vWorld);
     vec3 L = normalize(uSunDir);
-    float ndv = clamp(dot(N, V), 0.0, 1.0);
+    float ndv = clamp(dot(N, V), 0.0, 0.5);
     float fres = pow(1.0 - ndv, 3.0);
     vec3 water = mix(uDeep, uShallow, ndv);                 // deeper looking straight down
     water += uShallow * 0.12 * smoothstep(0.2, 0.9, h * 0.5 + 0.5); // subsurface shimmer
-    vec3 col = mix(water, uSky*0.4, fres * 0.45);               // EAF *0.7 sky reflection at grazing angles
+    vec3 col = mix(water, uSky, fres * 0.65);               // sky reflection at grazing angles
     // sun glints — a broad sheen plus a tight sparkle
-    float nh = max(dot(N, normalize(L + V)), 0.0);
-    col += uSunCol * (pow(nh, 90.0) * 0.4 + pow(nh, 500.0) * 0.8)*0.95;//EAF
+    float nh = max(dot(N, normalize(L + V)), 0.5);
+    col += uSunCol * (pow(nh, 90.0) * 0.7 + pow(nh, 500.0) * 1.2);
     // whitecap foam on the steep wave crests
-    float crest = smoothstep(0.62, 0.95, h * 0.7 + 0.6);
+    float crest = smoothstep(0.62, 0.95, h * 0.6 + 0.5);
     float foam = clamp(crest * (0.8 + smoothstep(0.10, 0.45, length(g))), 0.0, 1.0);
-    col = mix(col, uFoam2, foam * 0.03); //EAF
-    gl_FragColor = vec4(col, mix(uOpacity, 1.0, fres));
+    col = mix(col, uFoam, foam * 0.5);
+    // fade the water that overhangs past the map edge into the sky-dome horizon colour,
+    // so the ocean doesn't run crisp to the horizon when the camera tilts down (the
+    // fade is by distance OUTSIDE the map bounds, so it's independent of map size)
+    vec2 outv = max(max(-vWorld.xz, vWorld.xz - uMapMax), vec2(0.0));
+    float edge = smoothstep(6.0, 36.0, length(outv));
+    col = mix(col, uHorizon, edge);
+    gl_FragColor = vec4(col, mix(mix(uOpacity, 1.0, fres), 1.0, edge));
   }
 `;
 
