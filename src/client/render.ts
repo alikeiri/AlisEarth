@@ -115,15 +115,40 @@ function loadGLB(file: string): Promise<any> {
       g => { GLTF_CACHE.set(file, g); resolve(g); }, undefined, reject);
   });
 }
-// Load every unit + building model into the cache. Resolves once all settle
-// (a missing file just resolves null — never blocks the menu).
+// Terrain + detail-map textures, preloaded behind the loading screen ALONGSIDE the GLBs
+// so nothing streams in (and pops / times out) mid-match. loadTerrainTextures() reads
+// straight from these caches, so the photos are applied at Renderer construction.
+const TEXTURE_CACHE = new Map<string, THREE.Texture>();   // terrain tiles: grass/rock/sand/dirt
+const IMAGE_CACHE = new Map<string, HTMLImageElement>();  // detail-map images: concrete/metal
+const TERRAIN_TEX = ['grass', 'rock', 'sand', 'dirt'];
+const DETAIL_IMG = ['concrete', 'metal'];
+function preloadTexture(name: string): Promise<void> {
+  if (TEXTURE_CACHE.has(name)) return Promise.resolve();
+  return new Promise(res => new THREE.TextureLoader().load('./textures/' + name + '.jpg',
+    t => { TEXTURE_CACHE.set(name, t); res(); }, undefined, () => res()));
+}
+function preloadImage(name: string): Promise<void> {
+  if (IMAGE_CACHE.has(name)) return Promise.resolve();
+  return new Promise(res => new THREE.ImageLoader().load('./textures/' + name + '.jpg',
+    im => { IMAGE_CACHE.set(name, im); res(); }, undefined, () => res()));
+}
+
+// Load every unit + building model AND terrain/detail texture into the caches. Resolves
+// once all settle (a missing file just resolves — never blocks the menu). Everything the
+// match needs is ready before it starts, so nothing pops in or times out during play.
 export async function preloadModels(onProgress?: (done: number, total: number) => void): Promise<void> {
   const files = new Set<string>();
   for (const t in MODEL_DEFS) files.add(MODEL_DEFS[t].file);
   for (const f of ['oilfield', 'powerplant', 'ammobox', 'refinery', 'airfield', 'barracks', 'wall', 'radar', 'lab', 'sam', 'railgun', 'conyard', 'ra-7-rocket']) files.add(f);
-  const list = [...files]; let done = 0;
-  onProgress?.(0, list.length);
-  await Promise.all(list.map(f => loadGLB(f).catch(() => null).then(() => { onProgress?.(++done, list.length); })));
+  const glb = [...files];
+  const total = glb.length + TERRAIN_TEX.length + DETAIL_IMG.length; let done = 0;
+  const tick = () => onProgress?.(++done, total);
+  onProgress?.(0, total);
+  await Promise.all([
+    ...glb.map(f => loadGLB(f).catch(() => null).then(tick)),
+    ...TERRAIN_TEX.map(n => preloadTexture(n).then(tick)),
+    ...DETAIL_IMG.map(n => preloadImage(n).then(tick)),
+  ]);
 }
 
 const MAX_INST = 1024; // per-type instance cap (raised from 360 so big swarms — e.g. mass Shaheds — don't hit an invisible ceiling; per-frame GPU upload is bounded to the live count via updateRanges, so the larger buffer is ~free)
@@ -1819,32 +1844,32 @@ export class Renderer {
   // Swap in CC0 photo textures (Poly Haven) when available; the procedural
   // canvas textures remain as instant placeholders and offline fallback.
   private loadTerrainTextures(maxAniso: number) {
-    const loader = new THREE.TextureLoader();
-    for (const name of ['grass', 'rock', 'sand', 'dirt']) {
-      loader.load('./textures/' + name + '.jpg', t => {
-        this.tuneTile(t, maxAniso);
-        this.extTex[name] = t;
-        if (this.terrainShader) {
-          const key = 't' + name[0].toUpperCase() + name.slice(1);
-          if (this.terrainShader.uniforms[key]) this.terrainShader.uniforms[key].value = t;
-        }
-      }, undefined, () => { /* file missing — keep procedural texture */ });
+    // apply from the preload cache (synchronous — no mid-match streaming/pop-in); if a
+    // texture wasn't preloaded (cache miss), fall back to loading it async as before.
+    const apply = (name: string, t: THREE.Texture) => {
+      this.tuneTile(t, maxAniso);
+      this.extTex[name] = t;
+      if (this.terrainShader) {
+        const key = 't' + name[0].toUpperCase() + name.slice(1);
+        if (this.terrainShader.uniforms[key]) this.terrainShader.uniforms[key].value = t;
+      }
+    };
+    for (const name of TERRAIN_TEX) {
+      const cached = TEXTURE_CACHE.get(name);
+      if (cached) apply(name, cached);
+      else new THREE.TextureLoader().load('./textures/' + name + '.jpg', t => apply(name, t), undefined, () => { /* keep procedural */ });
     }
-    // building + unit detail maps: swap the photo INTO the shared singleton
-    // textures so every existing and future material picks it up automatically
-    const img = new THREE.ImageLoader();
-    img.load('./textures/concrete.jpg', im => {
-      const t = detailTex();
-      t.image = im;
-      t.repeat.set(1.5, 1.5);
-      t.needsUpdate = true;
-    }, undefined, () => {});
-    img.load('./textures/metal.jpg', im => {
-      const t = armorTex();
-      t.image = im;
-      t.repeat.set(1.5, 1.5);
-      t.needsUpdate = true;
-    }, undefined, () => {});
+    // building + unit detail maps: swap the photo INTO the shared singleton textures so
+    // every existing and future material picks it up automatically
+    const setDetail = (im: HTMLImageElement, texFn: () => THREE.CanvasTexture) => {
+      const t = texFn(); t.image = im as any; t.repeat.set(1.5, 1.5); t.needsUpdate = true;
+    };
+    const ci = IMAGE_CACHE.get('concrete');
+    if (ci) setDetail(ci, detailTex);
+    else new THREE.ImageLoader().load('./textures/concrete.jpg', im => setDetail(im, detailTex), undefined, () => {});
+    const mi = IMAGE_CACHE.get('metal');
+    if (mi) setDetail(mi, armorTex);
+    else new THREE.ImageLoader().load('./textures/metal.jpg', im => setDetail(im, armorTex), undefined, () => {});
   }
 
   // Load external GLB unit models and swap them into the instanced pipeline.
