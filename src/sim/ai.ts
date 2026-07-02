@@ -706,6 +706,20 @@ export function aiTick(sim: Sim, p: number): Cmd[] {
       const dPosts = frontPosts(sim, base, ddir, mem.defenders.length, 3, 6);
       mem.defenders.forEach((id, i) => { const u = sim.ents.get(id); if (u) deployFortify(cmds, p, u, dPosts[i]); });
     }
+
+    // spread PRODUCTION: give each finished production building its OWN rally point, fanned
+    // across the front — instead of every new unit piling on one factory door. Fresh units
+    // then stage in loose, spaced posts (kinder to pathing near shores/tight spots, harder
+    // to mass-hit, and they help hold the line until the next attack wave pulls them).
+    const prodB = [...(myB['factory'] || []), ...(myB['barracks'] || []), ...(myB['dronefac'] || [])].filter(b => b.progress >= b.total);
+    if (prodB.length) {
+      const rPosts = frontPosts(sim, base, ddir, prodB.length, 8, 5);
+      prodB.forEach((b, i) => {
+        const rp = rPosts[i] || rPosts[0];
+        if (Math.round(b.rallyX) !== Math.round(rp.x) || Math.round(b.rallyZ) !== Math.round(rp.z))
+          cmds.push({ k: 'rally', p, bid: b.id, x: rp.x, z: rp.z });
+      });
+    }
   }
 
   // upgrade something when rich
